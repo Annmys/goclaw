@@ -137,3 +137,119 @@ from PIL import Image
 		}
 	}
 }
+
+func TestScanFile_SQLFromClauseInsidePythonStringDoesNotCreateFakeImport(t *testing.T) {
+	dir := t.TempDir()
+	pyFile := filepath.Join(dir, "query.py")
+
+	content := `#!/usr/bin/env python3
+import sqlite3
+
+SQL = """
+select workbook_path, sheet_name
+from order_mapping
+where order_no = ?
+"""
+
+SQL2 = """
+select outer_box_spec
+from flow_content_index
+where order_no = ?
+"""
+`
+	if err := os.WriteFile(pyFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	pyImports := make(map[string]bool)
+	nodeImports := make(map[string]bool)
+	binaries := make(map[string]bool)
+
+	scanFile(pyFile, pyImports, nodeImports, binaries)
+
+	if !pyImports["sqlite3"] {
+		t.Error("expected sqlite3 to be detected as Python import")
+	}
+	if pyImports["order_mapping"] {
+		t.Error("FALSE POSITIVE: order_mapping detected as Python import from SQL clause")
+	}
+	if pyImports["flow_content_index"] {
+		t.Error("FALSE POSITIVE: flow_content_index detected as Python import from SQL clause")
+	}
+}
+
+func TestScanSkillDeps_ManifestDepsOverrideScan(t *testing.T) {
+	dir := t.TempDir()
+	scriptsDir := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	skill := `---
+name: test-skill
+deps:
+  - pip:psycopg2
+  - npm:typescript
+  - system:ffmpeg
+---
+# body
+`
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "main.py"), []byte("import requests\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := ScanSkillDeps(dir)
+	if !m.FromManifest {
+		t.Fatal("expected manifest override to be active")
+	}
+	if !slices.Contains(m.RequiresPython, "psycopg2") {
+		t.Fatalf("expected psycopg2 from manifest, got %#v", m.RequiresPython)
+	}
+	if slices.Contains(m.RequiresPython, "requests") {
+		t.Fatalf("scan result should be overridden by manifest deps, got %#v", m.RequiresPython)
+	}
+	if !slices.Contains(m.RequiresNode, "typescript") {
+		t.Fatalf("expected typescript from manifest, got %#v", m.RequiresNode)
+	}
+	if !slices.Contains(m.Requires, "ffmpeg") {
+		t.Fatalf("expected ffmpeg from manifest, got %#v", m.Requires)
+	}
+}
+
+func TestScanSkillDeps_ExcludeDepsFiltersScan(t *testing.T) {
+	dir := t.TempDir()
+	scriptsDir := filepath.Join(dir, "scripts")
+	if err := os.MkdirAll(scriptsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	skill := `---
+name: test-skill
+exclude_deps:
+  - pip:requests
+  - npm:lodash
+  - ffmpeg
+---
+# body
+`
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(skill), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "main.py"), []byte("import requests\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptsDir, "main.js"), []byte("require('lodash')\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := ScanSkillDeps(dir)
+	if slices.Contains(m.RequiresPython, "requests") {
+		t.Fatalf("expected requests to be excluded, got %#v", m.RequiresPython)
+	}
+	if slices.Contains(m.RequiresNode, "lodash") {
+		t.Fatalf("expected lodash to be excluded, got %#v", m.RequiresNode)
+	}
+}

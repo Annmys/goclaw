@@ -8,11 +8,12 @@ import (
 	"log/slog"
 	"net"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
 
-const installTimeout = 5 * time.Minute
+const InstallTimeout = 5 * time.Minute
 
 // pkgHelperSocket is the Unix socket path for the root-privileged pkg-helper.
 const pkgHelperSocket = "/tmp/pkg.sock"
@@ -46,7 +47,7 @@ func AggregateMissingDeps(skillDirs map[string]string) (*SkillManifest, []string
 // InstallSingleDep installs one dependency (format: "pip:pkg", "npm:pkg", or plain binary name).
 // Returns (ok, errorMessage). Logs progress via slog so the Log page can show install status.
 func InstallSingleDep(ctx context.Context, dep string) (bool, string) {
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
+	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
 	slog.Info("skills: installing dep", "dep", dep)
@@ -59,6 +60,9 @@ func InstallSingleDep(ctx context.Context, dep string) (bool, string) {
 		if err != nil {
 			msg := fmt.Sprintf("%s: %v", strings.TrimSpace(string(out)), err)
 			slog.Error("skills: dep install failed", "dep", dep, "error", msg)
+			if hint := pipBuildFailHint(pkg, string(out)); hint != "" {
+				slog.Warn("skills: dep install hint", "dep", dep, "hint", hint)
+			}
 			return false, msg
 		}
 	case strings.HasPrefix(dep, "npm:"):
@@ -87,7 +91,7 @@ func InstallSingleDep(ctx context.Context, dep string) (bool, string) {
 // InstallDeps installs missing packages by category.
 // Uses PIP_TARGET and NPM_CONFIG_PREFIX from env (set by docker-entrypoint.sh).
 func InstallDeps(ctx context.Context, manifest *SkillManifest, missing []string) (*InstallResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
+	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
 	result := &InstallResult{}
@@ -127,6 +131,9 @@ func InstallDeps(ctx context.Context, manifest *SkillManifest, missing []string)
 			cmd := exec.CommandContext(ctx, "pip3", "install", "--no-cache-dir", "--break-system-packages", pkg)
 			if out, err := cmd.CombinedOutput(); err != nil {
 				result.Errors = append(result.Errors, fmt.Sprintf("pip %s: %s (%v)", pkg, strings.TrimSpace(string(out)), err))
+				if hint := pipBuildFailHint(pkg, string(out)); hint != "" {
+					slog.Warn("skills: dep install hint", "pkg", pkg, "hint", hint)
+				}
 			} else {
 				successful = append(successful, pkg)
 			}
@@ -156,7 +163,7 @@ func InstallDeps(ctx context.Context, manifest *SkillManifest, missing []string)
 // UninstallPackage removes one package (format: "pip:pkg", "npm:pkg", or plain apk name).
 // Returns (ok, errorMessage).
 func UninstallPackage(ctx context.Context, dep string) (bool, string) {
-	ctx, cancel := context.WithTimeout(ctx, installTimeout)
+	ctx, cancel := context.WithTimeout(ctx, InstallTimeout)
 	defer cancel()
 
 	slog.Info("skills: uninstalling package", "dep", dep)
@@ -231,6 +238,8 @@ func apkViaHelper(ctx context.Context, action, pkg string) (bool, string) {
 
 // cleanCaches removes pip and npm caches to save disk space.
 func cleanCaches(ctx context.Context) {
-	exec.CommandContext(ctx, "pip3", "cache", "purge").Run()          //nolint:errcheck
-	exec.CommandContext(ctx, "sh", "-c", "rm -rf /tmp/npm-*").Run()  //nolint:errcheck
+	exec.CommandContext(ctx, "pip3", "cache", "purge").Run() //nolint:errcheck
+	if runtime.GOOS != "windows" {
+		exec.CommandContext(ctx, "sh", "-c", "rm -rf /tmp/npm-*").Run() //nolint:errcheck
+	}
 }

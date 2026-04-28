@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/nextlevelbuilder/goclaw/internal/crypto"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -198,6 +199,35 @@ func TestStorageDeleteInvalidatesSizeCache(t *testing.T) {
 	}
 	if _, ok := handler.sizeCache.Load(sizeBase); ok {
 		t.Fatal("expected size cache entry to be invalidated after delete")
+	}
+}
+
+func TestStorageDeleteRouteRequiresAdmin(t *testing.T) {
+	setupTestToken(t, "gateway-secret")
+	setupTestCache(t, map[string]*store.APIKeyData{
+		crypto.HashAPIKey("viewer-token"): {
+			ID:     uuid.New(),
+			Scopes: []string{"operator.read"},
+		},
+	})
+
+	baseDir := t.TempDir()
+	writeStorageTestFile(t, filepath.Join(baseDir, "tmp.txt"), "abc")
+
+	handler := NewStorageHandler(baseDir)
+	mux := http.NewServeMux()
+	handler.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/storage/files/tmp.txt", nil)
+	req.Header.Set("Authorization", "Bearer viewer-token")
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusForbidden)
+	}
+	if _, err := os.Stat(filepath.Join(baseDir, "tmp.txt")); err != nil {
+		t.Fatalf("file should not be deleted by non-admin route access: %v", err)
 	}
 }
 

@@ -1,0 +1,7 @@
+interface:
+  display_name: "产品包装重量查询"
+  short_description: "查询产品包装重量、外箱尺寸、装箱数量和来源信息"
+  default_prompt: "Use $产品包装重量查询 to query package weight details by product code, model, material code, or material name."
+
+policy:
+  allow_implicit_invocation: true

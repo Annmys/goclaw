@@ -17,6 +17,37 @@ import { useChatSend } from "./hooks/use-chat-send";
 import { isOwnSession, parseSessionKey } from "@/lib/session-key";
 import { useVirtualKeyboard } from "@/hooks/use-virtual-keyboard";
 import { TaskPanel } from "@/components/chat/task-panel";
+import { LOCAL_STORAGE_KEYS } from "@/lib/constants";
+
+type StoredChatSelection = {
+  agentId: string;
+  sessionKey: string;
+  updatedAt: number;
+};
+
+type StoredChatSelectionMap = Record<string, StoredChatSelection>;
+
+function buildChatSelectionScope(tenantId: string, tenantSlug: string, userId: string) {
+  const tenantScope = tenantId || tenantSlug || "default";
+  return `${tenantScope}:${userId || "anonymous"}`;
+}
+
+function readStoredSelections(): StoredChatSelectionMap {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(LOCAL_STORAGE_KEYS.LAST_CHAT_SELECTION);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed as StoredChatSelectionMap : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeStoredSelections(map: StoredChatSelectionMap) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CHAT_SELECTION, JSON.stringify(map));
+}
 
 export function ChatPage() {
   const { t } = useTranslation("chat");
@@ -24,9 +55,13 @@ export function ChatPage() {
   const navigate = useNavigate();
   const connected = useAuthStore((s) => s.connected);
   const userId = useAuthStore((s) => s.userId);
+  const tenantId = useAuthStore((s) => s.tenantId);
+  const tenantSlug = useAuthStore((s) => s.tenantSlug);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
   const [files, setFiles] = useState<AttachedFile[]>([]);
+  const suppressRestoreRef = useRef(false);
+  const restoreAttemptedRef = useRef(false);
 
   // sessionKey derived from URL — single source of truth, no separate state
   const sessionKey = urlSessionKey ?? "";
@@ -45,6 +80,55 @@ export function ChatPage() {
     }
     return agentIdFallback;
   }, [urlSessionKey, agentIdFallback]);
+
+  const selectionScope = useMemo(
+    () => buildChatSelectionScope(tenantId, tenantSlug, userId),
+    [tenantId, tenantSlug, userId],
+  );
+
+  useEffect(() => {
+    restoreAttemptedRef.current = false;
+  }, [selectionScope]);
+
+  useEffect(() => {
+    if (!connected) return;
+    if (urlSessionKey) return;
+    if (restoreAttemptedRef.current) return;
+    restoreAttemptedRef.current = true;
+
+    const stored = readStoredSelections()[selectionScope];
+    if (!stored) return;
+
+    if (suppressRestoreRef.current) {
+      suppressRestoreRef.current = false;
+      if (stored.agentId && stored.agentId !== agentIdFallback) {
+        setAgentIdFallback(stored.agentId);
+      }
+      return;
+    }
+
+    if (stored.agentId && stored.agentId !== agentIdFallback) {
+      setAgentIdFallback(stored.agentId);
+    }
+    if (stored.sessionKey) {
+      navigate(`/chat/${encodeURIComponent(stored.sessionKey)}`, { replace: true });
+    }
+  }, [connected, urlSessionKey, selectionScope, navigate, agentIdFallback]);
+
+  useEffect(() => {
+    if (!connected) return;
+    if (!agentId) return;
+
+    const all = readStoredSelections();
+    const previous = all[selectionScope];
+    const nextSessionKey = sessionKey || previous?.sessionKey || "";
+    all[selectionScope] = {
+      agentId,
+      sessionKey: nextSessionKey,
+      updatedAt: Date.now(),
+    };
+    writeStoredSelections(all);
+  }, [connected, selectionScope, agentId, sessionKey]);
 
   const {
     sessions,
@@ -120,12 +204,22 @@ export function ChatPage() {
 
   const handleAgentChange = useCallback(
     (newAgentId: string) => {
+      suppressRestoreRef.current = true;
       setAgentIdFallback(newAgentId);
+
+      const all = readStoredSelections();
+      all[selectionScope] = {
+        agentId: newAgentId,
+        sessionKey: "",
+        updatedAt: Date.now(),
+      };
+      writeStoredSelections(all);
+
       if (sessionKey) {
         navigate("/chat");
       }
     },
-    [navigate],
+    [navigate, selectionScope, sessionKey],
   );
 
   const handleSend = useCallback(

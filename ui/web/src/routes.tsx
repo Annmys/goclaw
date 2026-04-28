@@ -185,7 +185,7 @@ export function AppRoutes() {
           <Route path={ROUTES.BUILTIN_TOOLS} element={<RequireAdmin><BuiltinToolsPage /></RequireAdmin>} />
           <Route path={ROUTES.MCP} element={<RequireAdmin><MCPPage /></RequireAdmin>} />
           <Route path={ROUTES.TTS} element={<RequireCrossTenant><TtsPage /></RequireCrossTenant>} />
-          <Route path={ROUTES.STORAGE} element={<RequireAdmin><StoragePage /></RequireAdmin>} />
+          <Route path={ROUTES.STORAGE} element={<StoragePage />} />
           <Route path={ROUTES.PACKAGES} element={<RequireAdmin><PackagesPage /></RequireAdmin>} />
           <Route path={ROUTES.TENANTS} element={<RequireCrossTenant><TenantsAdminPage /></RequireCrossTenant>} />
           <Route path={ROUTES.TENANT_DETAIL} element={<RequireCrossTenant><TenantDetailPage /></RequireCrossTenant>} />

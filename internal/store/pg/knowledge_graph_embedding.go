@@ -15,7 +15,7 @@ func (s *PGKnowledgeGraphStore) BackfillKGEmbeddings(ctx context.Context) (int, 
 		return 0, nil
 	}
 
-	const batchSize = 50
+	batchSize := embeddingBackfillBatchSize(s.embProvider)
 	const maxConsecutiveErrors = 3
 	total := 0
 	consecutiveErrors := 0

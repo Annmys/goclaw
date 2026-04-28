@@ -355,6 +355,12 @@ func registerProvidersFromDB(registry *providers.Registry, provStore store.Provi
 				base = "https://coding-intl.dashscope.aliyuncs.com/v1"
 			}
 			registry.RegisterForTenant(p.TenantID, providers.NewOpenAIProvider(p.Name, p.APIKey, base, "qwen3.5-plus"))
+		case store.ProviderKimiCoding:
+			base := p.APIBase
+			if base == "" {
+				base = "https://api.kimi.com/coding/v1"
+			}
+			registry.RegisterForTenant(p.TenantID, providers.NewKimiCodingProvider(p.Name, p.APIKey, base, "kimi-for-coding"))
 		case store.ProviderZai:
 			base := p.APIBase
 			if base == "" {

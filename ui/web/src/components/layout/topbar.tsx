@@ -33,10 +33,10 @@ export function Topbar({ settingsOpen, onSettingsOpenChange }: TopbarProps) {
   const setMobileSidebarOpen = useUiStore((s) => s.setMobileSidebarOpen);
   const isMobile = useIsMobile();
   const isDark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
-  const { status: embStatus } = useEmbeddingStatus();
   const setSettingsOpen = onSettingsOpenChange;
   const role = useAuthStore((s) => s.role);
   const isAdmin = role === "admin" || role === "owner";
+  const { status: embStatus } = useEmbeddingStatus(isAdmin);
 
   const handleSidebarToggle = isMobile
     ? () => setMobileSidebarOpen(true)

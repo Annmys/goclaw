@@ -18,6 +18,7 @@ interface AuthState {
   tenantSlug: string;
   isOwner: boolean;
   availableTenants: TenantMembership[];
+  tenantsLoaded: boolean;
   tenantSelected: boolean; // true after user picks a tenant (or auto-selected)
 
   setCredentials: (token: string, userId: string) => void;
@@ -26,6 +27,7 @@ interface AuthState {
   setRole: (role: UserRole) => void;
   setTenant: (id: string, name: string, slug: string, isOwner: boolean) => void;
   setAvailableTenants: (tenants: TenantMembership[]) => void;
+  setTenantsLoaded: (loaded: boolean) => void;
   setTenantSelected: (selected: boolean) => void;
   logout: () => void;
 }
@@ -44,6 +46,7 @@ export const useAuthStore = create<AuthState>()(
       tenantSlug: "",
       isOwner: false,
       availableTenants: [],
+      tenantsLoaded: false,
       tenantSelected: !!localStorage.getItem(LOCAL_STORAGE_KEYS.TENANT_ID),
 
       setCredentials: (token, userId) => {
@@ -70,6 +73,10 @@ export const useAuthStore = create<AuthState>()(
         set({ availableTenants: tenants });
       },
 
+      setTenantsLoaded: (loaded) => {
+        set({ tenantsLoaded: loaded });
+      },
+
       setTenantSelected: (selected) => {
         set({ tenantSelected: selected });
       },
@@ -82,6 +89,7 @@ export const useAuthStore = create<AuthState>()(
         set({
           token: "", userId: "", senderID: "", connected: false, role: "", serverInfo: null,
           tenantId: "", tenantName: "", tenantSlug: "", isOwner: false, availableTenants: [],
+          tenantsLoaded: false,
           tenantSelected: false,
         });
       },

@@ -206,6 +206,12 @@ func (h *ProvidersHandler) registerInMemory(p *store.LLMProviderData) {
 			base = "https://coding-intl.dashscope.aliyuncs.com/v1"
 		}
 		h.providerReg.RegisterForTenant(p.TenantID, providers.NewOpenAIProvider(p.Name, p.APIKey, base, "qwen3.5-plus"))
+	case store.ProviderKimiCoding:
+		base := apiBase
+		if base == "" {
+			base = "https://api.kimi.com/coding/v1"
+		}
+		h.providerReg.RegisterForTenant(p.TenantID, providers.NewKimiCodingProvider(p.Name, p.APIKey, base, "kimi-for-coding"))
 	case store.ProviderNovita:
 		base := apiBase
 		if base == "" {

@@ -7,6 +7,8 @@ import type { ComboboxOption } from "@/components/ui/combobox";
 /** Unified search result from contacts + tenant_users. */
 export interface UserPickerItem {
   id: string;
+  /** Tenant_user primary key (UUID). Only present when source === "tenant_user". */
+  uuid?: string;
   display_name?: string;
   username?: string;
   source: "contact" | "tenant_user";
@@ -25,8 +27,17 @@ export interface UserPickerItem {
 /**
  * @param source - Filter by source: "contact" | "tenant_user" | undefined (both).
  *   Use "tenant_user" for merge dialog / add tenant user (contacts excluded).
+ * @param valueMode - "user_id" (default) or "uuid". When "uuid", the combobox
+ *   commits the tenant_user primary key instead of the user_id string. Only
+ *   callers forwarding the value as a tenant_user foreign key (contact merge)
+ *   should opt in.
  */
-export function useUserPicker(search: string, peerKind?: string, source?: "contact" | "tenant_user") {
+export function useUserPicker(
+  search: string,
+  peerKind?: string,
+  source?: "contact" | "tenant_user",
+  valueMode?: "user_id" | "uuid",
+) {
   const http = useHttp();
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
@@ -61,9 +72,10 @@ export function useUserPicker(search: string, peerKind?: string, source?: "conta
       if (r.source === "contact" && r.channel_type) parts.push(`[${r.channel_type}]`);
       if (r.source === "tenant_user") parts.push("[tenant]");
       if (r.merged_tenant_user_id) parts.push(`→ ${r.merged_tenant_user_id}`);
-      return { value: r.id, label: parts.join(" ") };
+      const value = valueMode === "uuid" && r.source === "tenant_user" && r.uuid ? r.uuid : r.id;
+      return { value, label: parts.join(" ") };
     }),
-    [results],
+    [results, valueMode],
   );
 
   return { results, options, loading: isLoading };

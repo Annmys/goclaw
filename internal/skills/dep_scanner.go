@@ -15,6 +15,9 @@ type SkillManifest struct {
 	RequiresPython []string `json:"requires_python,omitempty"` // raw Python import names (e.g. "openpyxl", "cv2")
 	RequiresNode   []string `json:"requires_node,omitempty"`   // npm package names (e.g. "docx", "pptxgenjs")
 	ScriptsDir     string   `json:"-"`                         // absolute path to scripts/ dir, used for PYTHONPATH
+	Explicit       []string `json:"-"`                         // manifest-declared deps
+	ExcludeDeps    []string `json:"-"`                         // manifest-declared exclusions
+	FromManifest   bool     `json:"-"`                         // whether deps came from SKILL.md frontmatter
 }
 
 // IsEmpty returns true if the manifest has no dependencies.
@@ -24,7 +27,9 @@ func (m *SkillManifest) IsEmpty() bool {
 
 // ScanSkillDeps auto-detects dependencies by statically analyzing the scripts/ directory.
 func ScanSkillDeps(skillDir string) *SkillManifest {
-	return scanScriptsDir(filepath.Join(skillDir, "scripts"))
+	scan := scanScriptsDir(filepath.Join(skillDir, "scripts"))
+	deps, excludeDeps := parseSkillManifestFile(skillMdPath(skillDir))
+	return applyManifestOverride(scan, deps, excludeDeps)
 }
 
 // scanScriptsDir statically analyzes script files to detect dependencies.
@@ -117,7 +122,7 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 
 var (
 	pyImportRe     = regexp.MustCompile(`^import\s+(\w+)`)
-	pyFromRe       = regexp.MustCompile(`^from\s+(\w+)`)
+	pyFromRe       = regexp.MustCompile(`^from\s+([A-Za-z_]\w*)\s+import\b`)
 	nodeRequireRe  = regexp.MustCompile(`require\(['"]([\w@][^'"]*)['"]\)`)
 	nodeESImportRe = regexp.MustCompile(`from\s+['"]([^'"./][^'"]*?)['"]`)
 	shebangRe      = regexp.MustCompile(`^#!\s*/usr/bin/env\s+(\S+)`)

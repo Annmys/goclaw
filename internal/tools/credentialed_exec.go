@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -334,11 +335,36 @@ func (t *ExecTool) executeCredentialedSandbox(ctx context.Context, absPath strin
 // buildCredentialedEnv creates a minimal environment with injected credentials.
 // Inherits PATH and HOME from parent process, adds credential env vars.
 func buildCredentialedEnv(envMap map[string]string) []string {
-	env := []string{
-		"PATH=" + getenvDefault("PATH", "/usr/local/bin:/usr/bin:/bin"),
-		"HOME=" + getenvDefault("HOME", "/tmp"),
-		"LANG=" + getenvDefault("LANG", "en_US.UTF-8"),
-		"USER=" + getenvDefault("USER", "goclaw"),
+	var env []string
+	if runtime.GOOS == "windows" {
+		pathDefault := "C:\\Windows\\system32;C:\\Windows;C:\\Windows\\System32\\Wbem"
+		homeDefault := os.Getenv("USERPROFILE")
+		if homeDefault == "" {
+			homeDefault = "C:\\Users\\Default"
+		}
+		env = []string{
+			"PATH=" + getenvDefault("PATH", pathDefault),
+			"HOME=" + getenvDefault("HOME", homeDefault),
+			"LANG=" + getenvDefault("LANG", "en_US.UTF-8"),
+			"USERNAME=" + getenvDefault("USERNAME", "goclaw"),
+		}
+		for _, k := range []string{
+			"SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "COMSPEC", "PATHEXT",
+			"TEMP", "TMP", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+			"PROGRAMFILES", "PROGRAMFILES(X86)", "PROGRAMDATA",
+			"HOMEDRIVE", "HOMEPATH", "COMPUTERNAME",
+		} {
+			if v := os.Getenv(k); v != "" {
+				env = append(env, k+"="+v)
+			}
+		}
+	} else {
+		env = []string{
+			"PATH=" + getenvDefault("PATH", "/usr/local/bin:/usr/bin:/bin"),
+			"HOME=" + getenvDefault("HOME", "/tmp"),
+			"LANG=" + getenvDefault("LANG", "en_US.UTF-8"),
+			"USER=" + getenvDefault("USER", "goclaw"),
+		}
 	}
 	for k, v := range envMap {
 		env = append(env, k+"="+v)

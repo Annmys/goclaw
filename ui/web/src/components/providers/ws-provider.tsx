@@ -45,6 +45,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             .then((res) => {
               const tenants = res?.tenants ?? [];
               store.setAvailableTenants(tenants);
+              store.setTenantsLoaded(true);
 
               // Auto-select tenant if applicable
               const savedScope = localStorage.getItem(LOCAL_STORAGE_KEYS.TENANT_ID);
@@ -73,12 +74,14 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             })
             .catch(() => {
               // Non-critical: silently ignore if not supported
+              store.setTenantsLoaded(true);
             });
         }
         if (state === "disconnected") {
           store.setRole("");
           store.setTenant("", "", "", false);
           store.setAvailableTenants([]);
+          store.setTenantsLoaded(false);
           store.setTenantSelected(false);
         }
       },

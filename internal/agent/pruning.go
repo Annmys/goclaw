@@ -12,7 +12,8 @@ import (
 // Context pruning defaults matching TS DEFAULT_CONTEXT_PRUNING_SETTINGS.
 const (
 	defaultKeepLastAssistants   = 3
-	defaultSoftTrimRatio        = 0.25
+	defaultSoftTrimRatio        = 0.3
+	defaultPruningMode          = "cache-ttl"
 	defaultHardClearRatio       = 0.5
 	defaultMinPrunableToolChars = 50000
 	defaultSoftTrimMaxChars     = 6000
@@ -135,8 +136,14 @@ func resolvePruningSettings(cfg *config.ContextPruningConfig) *effectivePruningS
 // for non-ASCII content like Vietnamese/Chinese). When nil, falls back to the
 // legacy rune_count/charsPerTokenEstimate heuristic so existing tests pass.
 func pruneContextMessages(msgs []providers.Message, contextWindowTokens int, cfg *config.ContextPruningConfig, tc tokencount.TokenCounter, model string) []providers.Message {
-	// Pruning runs by default for all providers. Only skip when explicitly disabled.
-	if cfg != nil && cfg.Mode == "off" {
+	mode := defaultPruningMode
+	if cfg != nil && cfg.Mode != "" {
+		mode = cfg.Mode
+	}
+	if mode == "off" {
+		return msgs
+	}
+	if mode != "cache-ttl" {
 		return msgs
 	}
 	if contextWindowTokens <= 0 || len(msgs) == 0 {

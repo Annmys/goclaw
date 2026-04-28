@@ -268,6 +268,14 @@ func (s *PGCronStore) executeOneJob(job store.CronJob, handler func(job *store.C
 		status = "error"
 		errStr := err.Error()
 		lastError = &errStr
+	} else if lastResult != nil {
+		if lastResult.Status == "error" {
+			status = "error"
+		}
+		if lastResult.Error != "" {
+			errStr := lastResult.Error
+			lastError = &errStr
+		}
 	}
 
 	// Extract token usage from handler result

@@ -267,6 +267,14 @@ func (s *SQLiteCronStore) executeOneJob(job store.CronJob, handler func(job *sto
 		status = "error"
 		errStr := err.Error()
 		lastError = &errStr
+	} else if lastResult != nil {
+		if lastResult.Status == "error" {
+			status = "error"
+		}
+		if lastResult.Error != "" {
+			errStr := lastResult.Error
+			lastError = &errStr
+		}
 	}
 
 	var inputTokens, outputTokens int

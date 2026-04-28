@@ -51,8 +51,8 @@ export function KGEntitiesTab({ agentId, userId }: KGEntitiesTabProps) {
     const q = appliedQuery.toLowerCase();
     const matchedIds = new Set<string>();
     const matched = graphData.entities.filter((e) => {
-      const hit = e.name.toLowerCase().includes(q)
-        || e.entity_type.toLowerCase().includes(q)
+      const hit = (e.name ?? "").toLowerCase().includes(q)
+        || (e.entity_type ?? "").toLowerCase().includes(q)
         || (e.description ?? "").toLowerCase().includes(q);
       if (hit) matchedIds.add(e.id);
       return hit;

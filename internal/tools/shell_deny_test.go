@@ -185,7 +185,7 @@ func TestPathExemptions(t *testing.T) {
 		restrict:  false,
 	}
 	tool.DenyPaths(dataDir, ".goclaw/")
-	tool.AllowPathExemptions(".goclaw/skills-store/", filepath.Join(dataDir, "skills-store")+"/")
+	tool.AllowPathExemptions(".goclaw/skills/", ".goclaw/skills-store/", filepath.Join(dataDir, "skills")+"/", filepath.Join(dataDir, "skills-store")+"/")
 
 	cases := []struct {
 		name  string
@@ -199,8 +199,18 @@ func TestPathExemptions(t *testing.T) {
 			true,
 		},
 		{
+			"relative_global_skills",
+			"python3 .goclaw/skills/shipping-doc-processing/scripts/generate_shipping_doc.py input.xlsx output.xlsx",
+			true,
+		},
+		{
 			"absolute_skills_store",
 			`python3 /app/data/skills-store/ck-ui-ux-pro-max/1/scripts/search.py "professional" --design-system`,
+			true,
+		},
+		{
+			"absolute_global_skills",
+			`python3 /app/data/skills/shipping-doc-processing/scripts/generate_shipping_doc.py "input.xlsx" "output.xlsx"`,
 			true,
 		},
 		{
@@ -250,6 +260,11 @@ func TestPathExemptions(t *testing.T) {
 		{
 			"traversal_relative",
 			"cat .goclaw/skills-store/../secrets.json",
+			false,
+		},
+		{
+			"traversal_global_skills",
+			"cat /app/data/skills/../config.json",
 			false,
 		},
 		{
@@ -311,6 +326,11 @@ func TestPathExemptions(t *testing.T) {
 			"partial_exempt_match",
 			"cat /app/data/skills-storebad/evil.py",
 			false, // /app/data/skills-storebad/ does NOT start with /app/data/skills-store/
+		},
+		{
+			"partial_global_skills_match",
+			"cat /app/data/skillsbad/evil.py",
+			false, // /app/data/skillsbad/ does NOT start with /app/data/skills/
 		},
 
 		// --- Symlink-named path (defense-in-depth; sandbox handles actual resolution) ---

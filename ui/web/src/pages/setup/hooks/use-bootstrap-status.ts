@@ -12,15 +12,29 @@ export function useBootstrapStatus() {
   const userId = useAuthStore((s) => s.userId);
   const tenantId = useAuthStore((s) => s.tenantId);
   const tenantSlug = useAuthStore((s) => s.tenantSlug);
-  const { providers, loading: providersLoading } = useProviders();
-  const { statuses: oauthStatuses, isLoading: oauthStatusesLoading } = useChatGPTOAuthProviderStatuses(providers);
+  const role = useAuthStore((s) => s.role);
+  const isOwner = useAuthStore((s) => s.isOwner);
+  const canManageSetup = isOwner || role === "admin";
+  const { providers, loading: providersLoading } = useProviders(canManageSetup);
+  const { statuses: oauthStatuses, isLoading: oauthStatusesLoading } =
+    useChatGPTOAuthProviderStatuses(providers, canManageSetup);
   const { agents, loading: agentsLoading } = useAgents();
 
   // Wait for WS to connect before considering agents loaded
-  const loading = providersLoading || agentsLoading || oauthStatusesLoading || !connected;
+  const loading =
+    agentsLoading ||
+    (canManageSetup && (providersLoading || oauthStatusesLoading)) ||
+    !connected;
 
   const { needsSetup, currentStep } = useMemo(() => {
     if (loading) return { needsSetup: false, currentStep: "complete" as SetupStep };
+
+    // Setup is an admin concern. Paired tenant members often cannot read
+    // provider configuration, so using their filtered view here incorrectly
+    // redirects them back to the gateway setup page after login.
+    if (!canManageSetup) {
+      return { needsSetup: false, currentStep: "complete" as SetupStep };
+    }
 
     const readyOAuthProviders = new Set(
       oauthStatuses
@@ -42,7 +56,7 @@ export function useBootstrapStatus() {
     if (!hasProvider) return { needsSetup: true, currentStep: 1 as SetupStep };
     if (!hasAgent) return { needsSetup: true, currentStep: 2 as SetupStep };
     return { needsSetup: false, currentStep: "complete" as SetupStep };
-  }, [agents, loading, oauthStatuses, providers, tenantId, tenantSlug, userId]);
+  }, [agents, canManageSetup, loading, oauthStatuses, providers, tenantId, tenantSlug, userId]);
 
   return { needsSetup, currentStep, loading, providers, agents };
 }

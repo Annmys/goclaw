@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/google/uuid"
@@ -23,6 +24,8 @@ import (
 // cronHeartbeatWakeFn holds the heartbeat wake function, set after ticker creation.
 // Safe because cron jobs only fire after Start(), well after this is set.
 var cronHeartbeatWakeFn func(agentID string)
+
+var cronFailurePattern = regexp.MustCompile(`(?is)\b(failure|failed|error|timed out|timeout|doesn't exist|does not exist|permission denied|traceback|exception)\b`)
 
 func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg *config.Config, channelMgr *channels.Manager, sessionMgr store.SessionStore, agentStore store.AgentStore) func(job *store.CronJob) (*store.CronJobResult, error) {
 	return func(job *store.CronJob) (*store.CronJobResult, error) {
@@ -142,6 +145,10 @@ func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg 
 
 		cronResult := &store.CronJobResult{
 			Content: result.Content,
+		}
+		if cronFailurePattern.MatchString(result.Content) {
+			cronResult.Status = "error"
+			cronResult.Error = strings.TrimSpace(result.Content)
 		}
 		if result.Usage != nil {
 			cronResult.InputTokens = result.Usage.PromptTokens

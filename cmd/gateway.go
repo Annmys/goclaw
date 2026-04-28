@@ -33,6 +33,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway/methods"
+	"github.com/nextlevelbuilder/goclaw/internal/hooks"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/media"
@@ -142,6 +143,13 @@ func runGateway() {
 	}
 
 	pgStores, traceCollector, snapshotWorker := setupStoresAndTracing(cfg, dataDir, msgBus)
+	if pgStores.Agents != nil {
+		if n, err := pgStores.Agents.ResetStuckSummoning(context.Background()); err != nil {
+			slog.Warn("agents.reset_stuck_summoning_failed", "err", err)
+		} else if n > 0 {
+			slog.Info("agents.reset_stuck_summoning", "count", n)
+		}
+	}
 	if traceCollector != nil {
 		defer traceCollector.Stop()
 		// OTel OTLP export: compiled via build tags. Build with 'go build -tags otel' to enable.
@@ -374,6 +382,14 @@ func runGateway() {
 	// Register all RPC methods
 	server.SetLogTee(logTee)
 	pairingMethods, heartbeatMethods, chatMethods := registerAllMethods(server, agentRouter, pgStores.Sessions, pgStores.Cron, pgStores.Pairing, cfg, cfgPath, workspace, dataDir, msgBus, execApprovalMgr, pgStores.Agents, pgStores.Skills, pgStores.ConfigSecrets, pgStores.Teams, contextFileInterceptor, logTee, pgStores.Heartbeats, pgStores.ConfigPermissions, pgStores.SystemConfigs, pgStores.Tenants, pgStores.SkillTenantCfgs)
+	if hs, ok := pgStores.Hooks.(hooks.HookStore); ok && hs != nil {
+		hookMethods := methods.NewHookMethods(hs, edition.Current())
+		if sharedHookHandlers != nil {
+			hookMethods.SetTestRunner(methods.NewDispatcherTestRunner(sharedHookHandlers))
+		}
+		hookMethods.Register(server.Router())
+		slog.Info("registered hooks RPC methods")
+	}
 
 	// Wire post-turn processor for team task dispatch (WS chat.send + HTTP API paths).
 	if postTurn != nil {

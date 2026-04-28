@@ -49,8 +49,12 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 
 		// Echo reasoning_content only for APIs/models that accept it on assistant history.
 		// Together Qwen and many OpenAI-compat gateways reject unknown message fields → HTTP 400.
-		if m.Thinking != "" && m.Role == "assistant" && openAIWireAssistantReasoningContent(model) {
-			msg["reasoning_content"] = m.Thinking
+		wireReasoning := openAIWireAssistantReasoningContent(model) ||
+			strings.Contains(strings.ToLower(p.apiBase), "kimi.com")
+		if m.Role == "assistant" && wireReasoning {
+			if m.Thinking != "" || len(m.ToolCalls) > 0 {
+				msg["reasoning_content"] = m.Thinking
+			}
 		}
 
 		// Include content; omit empty content for assistant messages with tool_calls
@@ -162,17 +166,30 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 		// This is a model-level constraint, not provider-specific — applies to both OpenAI and Azure.
 		// Note: gpt-5.X flagship models (gpt-5.1, gpt-5.4) DO support temperature;
 		// only the mini/nano reasoning variants reject it.
-		skipTemp := strings.HasPrefix(capabilityModel, "gpt-5-mini") || strings.HasPrefix(capabilityModel, "gpt-5-nano") || strings.HasPrefix(capabilityModel, "o1") || strings.HasPrefix(capabilityModel, "o3") || strings.HasPrefix(capabilityModel, "o4")
+		skipTemp := strings.HasPrefix(capabilityModel, "gpt-5-mini") ||
+			strings.HasPrefix(capabilityModel, "gpt-5-nano") ||
+			strings.HasPrefix(capabilityModel, "o1") ||
+			strings.HasPrefix(capabilityModel, "o3") ||
+			strings.HasPrefix(capabilityModel, "o4") ||
+			strings.Contains(strings.ToLower(p.apiBase), "api.kimi.com/coding")
 		if !skipTemp {
 			body["temperature"] = v
 		}
 	}
 
 	// reasoning_effort is OpenAI-specific; do not send to third-party OpenAI-compatible APIs.
+	isKimi := strings.Contains(strings.ToLower(p.apiBase), "kimi.com") ||
+		strings.Contains(strings.ToLower(model), "kimi")
 	if level, ok := req.Options[OptThinkingLevel].(string); ok && level != "" && level != "off" {
-		if openAIModelSupportsReasoningEffort(model) {
+		if openAIModelSupportsReasoningEffort(model) || isKimi {
 			body[OptReasoningEffort] = level
 		}
+	}
+	if isKimi {
+		// Do not auto-enable reasoning for Kimi Coding based solely on tool-call
+		// replay. Agents can explicitly request reasoning via thinking_level /
+		// reasoning_effort, but forcing it on makes Kimi validate historical
+		// assistant tool-call messages more strictly and breaks normal tool loops.
 	}
 
 	// DashScope-specific passthrough keys — never send to other OpenAI-compat hosts.

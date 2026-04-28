@@ -54,7 +54,16 @@ type Config struct {
 	Telemetry TelemetryConfig `json:"telemetry"`
 	Tailscale TailscaleConfig `json:"tailscale"`
 	Bindings  []AgentBinding  `json:"bindings,omitempty"`
+	Hooks     HooksConfig     `json:"hooks,omitempty"`
 	mu        sync.RWMutex
+}
+
+// HooksConfig tunes the script-hook runtime caps. Zero values use handler defaults.
+type HooksConfig struct {
+	ScriptConcurrency          int      `json:"script_concurrency,omitempty"`
+	ScriptPerTenantConcurrency int      `json:"script_per_tenant_concurrency,omitempty"`
+	ScriptCacheSize            int      `json:"script_cache_size,omitempty"`
+	BuiltinDisable             []string `json:"builtin_disable,omitempty"`
 }
 
 // TailscaleConfig configures the optional Tailscale tsnet listener.

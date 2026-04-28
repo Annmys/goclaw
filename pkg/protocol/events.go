@@ -132,3 +132,14 @@ const (
 	ChatEventMessage   = "message"
 	ChatEventThinking  = "thinking"
 )
+
+// Hook RPC method names.
+const (
+	MethodHooksList    = "hooks.list"
+	MethodHooksCreate  = "hooks.create"
+	MethodHooksUpdate  = "hooks.update"
+	MethodHooksDelete  = "hooks.delete"
+	MethodHooksToggle  = "hooks.toggle"
+	MethodHooksTest    = "hooks.test"
+	MethodHooksHistory = "hooks.history"
+)

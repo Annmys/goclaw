@@ -11,6 +11,10 @@ export const KG_TYPE_COLORS: Record<string, string> = {
 };
 export const KG_DEFAULT_COLOR = "#9ca3af";
 
+function safeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
 /** Compute degree (edge count) for each entity id. */
 export function computeDegreeMap(entities: KGEntity[], relations: KGRelation[]): Map<string, number> {
   const deg = new Map<string, number>();
@@ -25,29 +29,42 @@ export function computeDegreeMap(entities: KGEntity[], relations: KGRelation[]):
 /** Build KG graph from compact DTOs. */
 export function buildKGGraphFromDTO(nodes: KGGraphNode[], edges: KGGraphEdge[]): Graph {
   const graph = new Graph({ multi: false, type: "directed" });
-  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeIds = new Set<string>();
+  for (const n of nodes) {
+    const id = safeString(n.id);
+    if (id) nodeIds.add(id);
+  }
 
   // Pre-compute degree from edges (compact DTO doesn't include it)
   const deg = new Map<string, number>();
   for (const e of edges) {
-    if (nodeIds.has(e.src)) deg.set(e.src, (deg.get(e.src) ?? 0) + 1);
-    if (nodeIds.has(e.tgt)) deg.set(e.tgt, (deg.get(e.tgt) ?? 0) + 1);
+    const src = safeString(e.src);
+    const tgt = safeString(e.tgt);
+    if (nodeIds.has(src)) deg.set(src, (deg.get(src) ?? 0) + 1);
+    if (nodeIds.has(tgt)) deg.set(tgt, (deg.get(tgt) ?? 0) + 1);
   }
 
   for (const n of nodes) {
-    graph.addNode(n.id, {
-      label: truncateMiddle(n.n, 28),
+    const id = safeString(n.id);
+    if (!id || graph.hasNode(id)) continue;
+    const entityType = safeString(n.t, "concept");
+    graph.addNode(id, {
+      label: truncateMiddle(safeString(n.n, id.slice(0, 8)), 28),
       x: 0, y: 0,
-      size: getNodeSize(deg.get(n.id) ?? 0, nodes.length),
-      color: KG_TYPE_COLORS[n.t] ?? KG_DEFAULT_COLOR,
-      entityType: n.t,
+      size: getNodeSize(deg.get(id) ?? 0, nodes.length),
+      color: KG_TYPE_COLORS[entityType] ?? KG_DEFAULT_COLOR,
+      entityType,
     });
   }
 
   for (const e of edges) {
-    if (nodeIds.has(e.src) && nodeIds.has(e.tgt) && !graph.hasEdge(e.src, e.tgt)) {
-      graph.addEdgeWithKey(e.id, e.src, e.tgt, {
-        label: e.type.replace(/_/g, " "), type: "curvedArrow",
+    const src = safeString(e.src);
+    const tgt = safeString(e.tgt);
+    if (!src || !tgt || !nodeIds.has(src) || !nodeIds.has(tgt) || graph.hasEdge(src, tgt)) continue;
+    const edgeId = safeString(e.id, `${src}->${tgt}`);
+    if (!graph.hasEdge(edgeId)) {
+      graph.addEdgeWithKey(edgeId, src, tgt, {
+        label: safeString(e.type, "related").replace(/_/g, " "), type: "curvedArrow",
       });
     }
   }
@@ -58,30 +75,35 @@ export function buildKGGraphFromDTO(nodes: KGGraphNode[], edges: KGGraphEdge[]):
 /** Build a Graphology graph from KG entities and relations. */
 export function buildKGGraph(entities: KGEntity[], allRelations: KGRelation[]): Graph {
   const graph = new Graph({ multi: false, type: "directed" });
-  const entityIds = new Set(entities.map((e) => e.id));
+  const entityIds = new Set(entities.map((e) => safeString(e.id)).filter(Boolean));
   const degreeMap = computeDegreeMap(entities, allRelations);
 
   // Add nodes (x/y assigned by container via circular layout before FA2)
   for (const e of entities) {
-    if (!graph.hasNode(e.id)) {
-      const degree = degreeMap.get(e.id) ?? 0;
-      graph.addNode(e.id, {
-        label: truncateMiddle(e.name, 28),
+    const id = safeString(e.id);
+    if (id && !graph.hasNode(id)) {
+      const degree = degreeMap.get(id) ?? 0;
+      const entityType = safeString(e.entity_type, "concept");
+      graph.addNode(id, {
+        label: truncateMiddle(safeString(e.name, id.slice(0, 8)), 28),
         x: 0,
         y: 0,
         size: getNodeSize(degree, entities.length),
-        color: KG_TYPE_COLORS[e.entity_type] ?? KG_DEFAULT_COLOR,
-        entityType: e.entity_type,
+        color: KG_TYPE_COLORS[entityType] ?? KG_DEFAULT_COLOR,
+        entityType,
       });
     }
   }
 
   // Add edges (straight arrows for KG)
   for (const r of allRelations) {
-    if (entityIds.has(r.source_entity_id) && entityIds.has(r.target_entity_id)) {
-      if (!graph.hasEdge(r.source_entity_id, r.target_entity_id)) {
-        graph.addEdgeWithKey(r.id, r.source_entity_id, r.target_entity_id, {
-          label: r.relation_type.replace(/_/g, " "),
+    const source = safeString(r.source_entity_id);
+    const target = safeString(r.target_entity_id);
+    if (source && target && entityIds.has(source) && entityIds.has(target) && !graph.hasEdge(source, target)) {
+      const edgeId = safeString(r.id, `${source}->${target}`);
+      if (!graph.hasEdge(edgeId)) {
+        graph.addEdgeWithKey(edgeId, source, target, {
+          label: safeString(r.relation_type, "related").replace(/_/g, " "),
           type: "curvedArrow",
         });
       }

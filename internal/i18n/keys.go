@@ -66,6 +66,8 @@ const (
 	MsgAlreadySummoning     = "error.already_summoning"         // "agent is already being summoned"
 	MsgSummoningUnavailable = "error.summoning_unavailable"     // "summoning not available"
 	MsgNoDescription        = "error.no_description"            // "agent has no description to resummon from"
+	MsgCannotCancel         = "error.cannot_cancel"             // "cannot cancel summon in current state"
+	MsgSummonCancelled      = "info.summon_cancelled"           // "summon cancelled by user"
 	MsgInvalidPath          = "error.invalid_path"              // "invalid path"
 
 	// --- Scheduler ---
@@ -101,6 +103,9 @@ const (
 	// --- Skills ---
 	MsgSkillsUpdateNotSupported = "error.skills_update_not_supported" // "skills.update not supported for file-based skills"
 	MsgCannotResolveSkillID     = "error.cannot_resolve_skill_id"     // "cannot resolve skill ID for file-based skill"
+
+	// --- Hooks ---
+	MsgHookBuiltinReadOnly = "error.hook_builtin_readonly" // "builtin hooks are read-only except for the enabled toggle"
 
 	// --- Logs ---
 	MsgInvalidLogAction = "error.invalid_log_action" // "action must be 'start' or 'stop'"

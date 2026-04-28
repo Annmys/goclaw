@@ -48,7 +48,7 @@ func NewStorageHandler(baseDir string) *StorageHandler {
 func (h *StorageHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/storage/files", h.auth(h.handleList))
 	mux.HandleFunc("GET /v1/storage/files/{path...}", h.auth(h.handleRead))
-	mux.HandleFunc("DELETE /v1/storage/files/{path...}", h.auth(h.handleDelete))
+	mux.HandleFunc("DELETE /v1/storage/files/{path...}", requireAuth(permissions.RoleAdmin, h.handleDelete))
 	mux.HandleFunc("GET /v1/storage/size", h.auth(h.handleSize))
 	mux.HandleFunc("POST /v1/storage/files", requireAuth(permissions.RoleAdmin, h.handleUpload))
 	mux.HandleFunc("PUT /v1/storage/move", requireAuth(permissions.RoleAdmin, h.handleMove))

@@ -14,9 +14,11 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
-	"github.com/nextlevelbuilder/goclaw/internal/orchestration"
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	"github.com/nextlevelbuilder/goclaw/internal/eventbus"
+	"github.com/nextlevelbuilder/goclaw/internal/hooks"
+	hookbuiltin "github.com/nextlevelbuilder/goclaw/internal/hooks/builtin"
+	"github.com/nextlevelbuilder/goclaw/internal/orchestration"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	kg "github.com/nextlevelbuilder/goclaw/internal/knowledgegraph"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
@@ -143,6 +145,33 @@ func wireExtras(
 
 	// vaultIntc is set later by wireVault but captured by closure in OnTextUploaded.
 	var vaultIntc *tools.VaultInterceptor
+
+	var hookDispatcher hooks.Dispatcher = hooks.NewNoopDispatcher()
+	if hs, ok := stores.Hooks.(hooks.HookStore); ok && hs != nil {
+		hooks.SetBuiltinAllowlistLookup(func(uuid.UUID) []string { return nil })
+		if err := hookbuiltin.Load(); err != nil {
+			slog.Warn("hooks.builtin_load_failed", "err", err)
+		} else {
+			hooks.SetBuiltinAllowlistLookup(hookbuiltin.AllowlistFor)
+			if err := hookbuiltin.Seed(context.Background(), hs, appCfg.Hooks); err != nil {
+				slog.Warn("hooks.builtin_seed_failed", "err", err)
+			}
+		}
+		if n, err := hooks.DisableLegacyCommandHooks(context.Background(), hs, edition.Current()); err != nil {
+			slog.Warn("hooks.command_migration_failed", "err", err)
+		} else if n > 0 {
+			slog.Info("hooks.command_migration_ran", "disabled_count", n, "edition", edition.Current().Name)
+		}
+		handlers := buildHookHandlers(stores, providerReg, appCfg.Hooks)
+		hookDispatcher = hooks.NewStdDispatcher(hooks.StdDispatcherOpts{
+			Store:    hs,
+			Audit:    hooks.NewAuditWriter(hs, ""),
+			Handlers: handlers,
+		})
+		hooks.SubscribeDelegateEvents(domainBus, hookDispatcher)
+		sharedHookHandlers = handlers
+		slog.Info("agent hooks dispatcher wired")
+	}
 
 	resolver := agent.NewManagedResolver(agent.ResolverDeps{
 		AgentStore:             stores.Agents,

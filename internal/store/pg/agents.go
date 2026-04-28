@@ -184,6 +184,27 @@ func (s *PGAgentStore) GetByID(ctx context.Context, id uuid.UUID) (*store.AgentD
 	return d, nil
 }
 
+func (s *PGAgentStore) ResetStuckSummoning(ctx context.Context) (int, error) {
+	query := `UPDATE agents
+		SET status = $1, updated_at = NOW()
+		WHERE status = $2 AND deleted_at IS NULL`
+	args := []any{store.AgentStatusSummonFailed, store.AgentStatusSummoning}
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return 0, nil
+		}
+		query += ` AND tenant_id = $3`
+		args = append(args, tid)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[string]any) error {
 	if len(updates) == 0 {
 		return nil

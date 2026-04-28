@@ -1,4 +1,4 @@
-# Base docker-compose — shared service definition.
+# Base docker-compose - shared service definition.
 # Pre-built images: ghcr.io/nextlevelbuilder/goclaw (also on Docker Hub: digitop/goclaw)
 #
 # The default `latest` image includes an embedded web dashboard (no separate nginx needed).
@@ -14,10 +14,10 @@
 #   # Dashboard via nginx: http://localhost:3000
 #
 # Docker image variants:
-#   latest       — Backend + embedded web UI + Python (recommended)
-#   latest-base  — Backend API-only, no web UI, no runtimes
-#   latest-full  — All runtimes + skill dependencies pre-installed
-#   latest-otel  — Latest + OpenTelemetry tracing
+#   latest       - Backend + embedded web UI + Python (recommended)
+#   latest-base  - Backend API-only, no web UI, no runtimes
+#   latest-full  - All runtimes + skill dependencies pre-installed
+#   latest-otel  - Latest + OpenTelemetry tracing
 #
 # With OTel tracing:  add -f docker-compose.otel.yml
 # With Claude CLI:    add -f docker-compose.claude-cli.yml
@@ -30,11 +30,10 @@ services:
       dockerfile: Dockerfile
       args:
         ENABLE_OTEL: "${ENABLE_OTEL:-false}"
-        ENABLE_EMBEDUI: "${ENABLE_EMBEDUI:-true}"  # set to false when using WITH_WEB_NGINX
+        ENABLE_EMBEDUI: "${ENABLE_EMBEDUI:-true}"
         ENABLE_PYTHON: "${ENABLE_PYTHON:-true}"
-        ENABLE_FULL_SKILLS: "${ENABLE_FULL_SKILLS:-false}"
+        ENABLE_FULL_SKILLS: "${ENABLE_FULL_SKILLS:-true}"
         VERSION: "${GOCLAW_VERSION:-dev}"
-    # Uncomment to test update UI: GOCLAW_VERSION=v1.0.0
     ports:
       - "${GOCLAW_PORT:-18790}:18790"
     env_file:
@@ -47,11 +46,21 @@ services:
       - GOCLAW_GATEWAY_TOKEN=${GOCLAW_GATEWAY_TOKEN:-}
       - GOCLAW_ENCRYPTION_KEY=${GOCLAW_ENCRYPTION_KEY:-}
       - GOCLAW_SKILLS_DIR=/app/data/skills
-      # Debug
       - GOCLAW_TRACE_VERBOSE=${GOCLAW_TRACE_VERBOSE:-0}
     volumes:
       - goclaw-data:/app/data
-      - goclaw-workspace:/app/workspace
+      - type: bind
+        source: D:\数据\存储
+        target: /app/workspace
+      - type: bind
+        source: D:\数据\包装流转单源
+        target: /mnt/source/flow-orders
+      - type: bind
+        source: D:\数据\包装流转单
+        target: /mnt/target/flow-orders
+      - type: bind
+        source: D:\数据\产品包装重量表
+        target: /mnt/source/product-package-weights
     extra_hosts:
       - "host.docker.internal:host-gateway"
     security_opt:
@@ -69,7 +78,7 @@ services:
       resources:
         limits:
           memory: 1G
-          cpus: '2.0'
+          cpus: "2.0"
           pids: 200
     networks:
       - default

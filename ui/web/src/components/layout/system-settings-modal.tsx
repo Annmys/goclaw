@@ -27,7 +27,7 @@ interface SystemSettingsModalProps {
 export function SystemSettingsModal({ open, onOpenChange }: SystemSettingsModalProps) {
   const { t } = useTranslation("system-settings");
   const http = useHttp();
-  const { providers } = useProviders();
+  const { providers } = useProviders(open);
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);

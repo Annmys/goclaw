@@ -597,6 +597,47 @@ func parseSimpleYAML(content string) map[string]string {
 	return result
 }
 
+func parseSimpleYAMLLists(content string) map[string][]string {
+	result := make(map[string][]string)
+	lines := strings.Split(content, "\n")
+
+	var currentKey string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if len(line) > 0 && (line[0] == ' ' || line[0] == '\t') {
+			if currentKey == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				value := strings.TrimSpace(trimmed[2:])
+				value = strings.Trim(value, "\"'")
+				if value != "" {
+					result[currentKey] = append(result[currentKey], value)
+				}
+			}
+			continue
+		}
+		currentKey = ""
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		val := strings.TrimSpace(parts[1])
+		if val == "" || val == "|" || val == ">" || val == "|-" || val == ">-" {
+			currentKey = key
+			if _, ok := result[currentKey]; !ok {
+				result[currentKey] = nil
+			}
+			continue
+		}
+	}
+	return result
+}
+
 func escapeXML(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
 	s = strings.ReplaceAll(s, "<", "&lt;")

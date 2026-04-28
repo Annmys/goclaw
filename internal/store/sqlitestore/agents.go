@@ -118,6 +118,25 @@ func (s *SQLiteAgentStore) GetByID(ctx context.Context, id uuid.UUID) (*store.Ag
 	return d, nil
 }
 
+func (s *SQLiteAgentStore) ResetStuckSummoning(ctx context.Context) (int, error) {
+	query := "UPDATE agents SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE status = ? AND deleted_at IS NULL"
+	args := []any{store.AgentStatusSummonFailed, store.AgentStatusSummoning}
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return 0, nil
+		}
+		query += " AND tenant_id = ?"
+		args = append(args, tid)
+	}
+	res, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 func (s *SQLiteAgentStore) GetByIDUnscoped(ctx context.Context, id uuid.UUID) (*store.AgentData, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT `+agentSelectCols+` FROM agents WHERE id = ? AND deleted_at IS NULL`, id)

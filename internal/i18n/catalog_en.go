@@ -65,6 +65,8 @@ func init() {
 		MsgAlreadySummoning:      "agent is already being summoned",
 		MsgSummoningUnavailable:  "summoning not available",
 		MsgNoDescription:         "agent has no description to resummon from",
+		MsgCannotCancel:          "cannot cancel summon in current state",
+		MsgSummonCancelled:       "summon cancelled by user",
 		MsgInvalidPath:           "invalid path",
 
 		// Scheduler
@@ -100,6 +102,9 @@ func init() {
 		// Skills
 		MsgSkillsUpdateNotSupported: "skills.update not supported for file-based skills",
 		MsgCannotResolveSkillID:     "cannot resolve skill ID for file-based skill",
+
+		// Hooks
+		MsgHookBuiltinReadOnly: "builtin hooks are read-only except for the enabled toggle",
 
 		// Logs
 		MsgInvalidLogAction: "action must be 'start' or 'stop'",

@@ -241,6 +241,58 @@ func TestSQLiteCronStore_ExecuteOneJob_DoesNotRestoreNextRunAfterDisable(t *test
 	}
 }
 
+func TestSQLiteCronStore_ExecuteOneJob_PersistsHandlerErrorStatus(t *testing.T) {
+	cronStore, ctx, db := newTestSQLiteCronStore(t)
+	everyMS := int64(time.Minute / time.Millisecond)
+
+	job, err := cronStore.AddJob(ctx, "job-handler-error", store.CronSchedule{
+		Kind:    "every",
+		EveryMS: &everyMS,
+	}, "hello", false, "", "", "", "user-1")
+	if err != nil {
+		t.Fatalf("AddJob error: %v", err)
+	}
+	if job == nil {
+		job = mustOnlyJob(t, cronStore, ctx)
+	}
+
+	cronStore.executeOneJob(*job, func(job *store.CronJob) (*store.CronJobResult, error) {
+		return &store.CronJobResult{
+			Content: "FAILURE: source file doesn't exist",
+			Status:  "error",
+			Error:   "source file doesn't exist",
+		}, nil
+	}, false)
+
+	var (
+		lastStatus string
+		lastError  sql.NullString
+	)
+	if err := db.QueryRowContext(ctx,
+		"SELECT last_status, last_error FROM cron_jobs WHERE id = ? AND tenant_id = ?",
+		uuid.MustParse(job.ID), store.MasterTenantID,
+	).Scan(&lastStatus, &lastError); err != nil {
+		t.Fatalf("query cron_jobs error: %v", err)
+	}
+	if lastStatus != "error" {
+		t.Fatalf("last_status = %q, want error", lastStatus)
+	}
+	if !lastError.Valid || lastError.String != "source file doesn't exist" {
+		t.Fatalf("last_error = %#v, want source file doesn't exist", lastError)
+	}
+
+	var runStatus string
+	if err := db.QueryRowContext(ctx,
+		"SELECT status FROM cron_run_logs WHERE job_id = ? ORDER BY ran_at DESC LIMIT 1",
+		uuid.MustParse(job.ID),
+	).Scan(&runStatus); err != nil {
+		t.Fatalf("query cron_run_logs error: %v", err)
+	}
+	if runStatus != "error" {
+		t.Fatalf("run log status = %q, want error", runStatus)
+	}
+}
+
 func TestSQLiteCronStore_EnableJob_IgnoresMalformedPayload(t *testing.T) {
 	cronStore, ctx, db := newTestSQLiteCronStore(t)
 	everyMS := int64(time.Minute / time.Millisecond)

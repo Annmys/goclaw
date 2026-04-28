@@ -1,4 +1,4 @@
-# PostgreSQL overlay — pgvector for multi-tenant storage.
+# PostgreSQL overlay - pgvector for multi-tenant storage.
 #
 # Usage (web dashboard built-in by default):
 #   make up
@@ -34,7 +34,9 @@ services:
       - GOCLAW_POSTGRES_DSN=postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
     volumes:
       - goclaw-skills:/app/skills
-      - goclaw-workspace:/app/.goclaw
+      - type: bind
+        source: D:\数据\存储
+        target: /app/.goclaw
 
 volumes:
   postgres-data:

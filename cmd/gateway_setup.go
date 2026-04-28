@@ -207,13 +207,17 @@ func setupToolRegistry(
 
 	// Block exec from accessing sensitive directories (data dir, .goclaw, config file).
 	// Prevents `cp /app/data/config.json workspace/` and similar exfiltration.
-	// Exception: .goclaw/skills-store/ is allowed (skills may contain executable scripts).
+	// Exception: skill directories are allowed (skills may contain executable scripts).
 	if execTool, ok := toolsReg.Get("exec"); ok {
 		if et, ok := execTool.(*tools.ExecTool); ok {
 			et.DenyPaths(dataDir, ".goclaw/")
-			// Allow skills execution: master-tenant skills-store + all tenant-scoped skills-store dirs.
+			// Allow skills execution from both global file-based skills and managed
+			// skills-store. Agents may receive either path depending on skill source
+			// priority/cache state, but both are system-managed skill locations.
 			et.AllowPathExemptions(
+				".goclaw/skills/",
 				".goclaw/skills-store/",
+				filepath.Join(dataDir, "skills")+"/",
 				filepath.Join(dataDir, "skills-store")+"/",
 				filepath.Join(dataDir, "tenants")+"/",
 			)
@@ -388,6 +392,18 @@ func setupMemoryEmbeddings(
 						slog.Warn("KG embeddings backfill failed", "error", err)
 					} else if count > 0 {
 						slog.Info("KG embeddings backfill complete", "entities_updated", count)
+					}
+				}()
+			}
+
+			// Wire embedding provider into agent store for agent semantic search.
+			if pgAgents, ok := pgStores.Agents.(*pg.PGAgentStore); ok {
+				pgAgents.SetEmbeddingProvider(embProvider)
+				go func() {
+					if count, err := pgAgents.BackfillAgentEmbeddings(context.Background()); err != nil {
+						slog.Warn("agent embeddings backfill failed", "error", err)
+					} else if count > 0 {
+						slog.Info("agent embeddings backfill complete", "agents_updated", count)
 					}
 				}()
 			}

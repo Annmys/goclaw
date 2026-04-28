@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -311,7 +312,12 @@ func (t *ExecTool) executeOnHost(ctx context.Context, command, cwd string) *Resu
 	ctx, cancel := context.WithTimeout(ctx, t.timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", command)
+	} else {
+		cmd = exec.Command("sh", "-c", command)
+	}
 	cmd.Dir = cwd
 
 	// Limit output to 1MB to prevent OOM from runaway commands.
@@ -372,7 +378,11 @@ func (t *ExecTool) executeInSandbox(ctx context.Context, command, cwd, sandboxKe
 		return ErrorResult(fmt.Sprintf("sandbox path mapping: %v", cwdErr))
 	}
 
-	result, err := sb.Exec(ctx, []string{"sh", "-c", command}, containerCwd) //nolint: no ExecOption for normal exec
+	shellCommand := []string{"sh", "-c", command}
+	if runtime.GOOS == "windows" {
+		shellCommand = []string{"cmd", "/C", command}
+	}
+	result, err := sb.Exec(ctx, shellCommand, containerCwd) //nolint: no ExecOption for normal exec
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("sandbox exec: %v", err))
 	}

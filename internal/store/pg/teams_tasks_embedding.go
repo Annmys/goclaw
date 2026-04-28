@@ -39,7 +39,7 @@ func (s *PGTeamStore) BackfillTaskEmbeddings(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 
-	const batchSize = 50
+	batchSize := embeddingBackfillBatchSize(s.embProvider)
 	total := 0
 
 	for {

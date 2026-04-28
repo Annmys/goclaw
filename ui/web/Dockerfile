@@ -19,7 +19,7 @@ RUN pnpm build
 FROM nginx:1.27-alpine
 
 # Copy built assets
-COPY --from=builder /app/dist /usr/share/nginx/html
+COPY --chmod=0755 --from=builder /app/dist /usr/share/nginx/html
 
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf

@@ -27,6 +27,18 @@ export const VAULT_TYPE_COLORS_DARK: Record<string, string> = {
 const DEFAULT_COLOR_LIGHT = "#475569"; // slate-600
 const DEFAULT_COLOR_DARK = "#94a3b8";  // slate-400
 
+function safeString(value: unknown, fallback = ""): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function vaultNodeLabel(node: VaultGraphNode): string {
+  const title = safeString(node.t);
+  const path = safeString(node.p);
+  const id = safeString(node.id, "unknown");
+  const fileName = path ? path.split("/").filter(Boolean).pop() : "";
+  return title || fileName || id.slice(0, 8);
+}
+
 /** Get node color based on doc type and theme */
 export function getVaultNodeColor(docType: string, isDark: boolean): string {
   const colors = isDark ? VAULT_TYPE_COLORS_DARK : VAULT_TYPE_COLORS_LIGHT;
@@ -53,22 +65,30 @@ export function limitVaultDocsByDegree(
 /** Build graph from lightweight DTOs (degree pre-computed, no client loop). */
 export function buildVaultGraphFromDTO(nodes: VaultGraphNode[], edges: VaultGraphEdge[]): Graph {
   const graph = new Graph({ multi: false, type: "directed" });
-  const nodeIds = new Set(nodes.map((n) => n.id));
+  const nodeIds = new Set<string>();
 
   for (const n of nodes) {
-    graph.addNode(n.id, {
-      label: truncateMiddle(n.t || n.p.split("/").pop() || n.id.slice(0, 8), 28),
+    const id = safeString(n.id);
+    if (!id || graph.hasNode(id)) continue;
+    nodeIds.add(id);
+    const docType = safeString(n.dt, "document");
+    graph.addNode(id, {
+      label: truncateMiddle(vaultNodeLabel(n), 28),
       x: 0, y: 0,
-      size: getNodeSize(n.deg, nodes.length),
-      color: VAULT_TYPE_COLORS_LIGHT[n.dt] ?? DEFAULT_COLOR_LIGHT,
-      docType: n.dt,
+      size: getNodeSize(Number.isFinite(n.deg) ? n.deg : 0, nodes.length),
+      color: VAULT_TYPE_COLORS_LIGHT[docType] ?? DEFAULT_COLOR_LIGHT,
+      docType,
     });
   }
 
   for (const e of edges) {
-    if (nodeIds.has(e.from) && nodeIds.has(e.to) && !graph.hasEdge(e.from, e.to)) {
-      graph.addEdgeWithKey(e.id, e.from, e.to, {
-        label: e.type, type: "curvedArrow",
+    const from = safeString(e.from);
+    const to = safeString(e.to);
+    if (!from || !to || !nodeIds.has(from) || !nodeIds.has(to) || graph.hasEdge(from, to)) continue;
+    const edgeId = safeString(e.id, `${from}->${to}`);
+    if (!graph.hasEdge(edgeId)) {
+      graph.addEdgeWithKey(edgeId, from, to, {
+        label: safeString(e.type, "link"), type: "curvedArrow",
         color: "#a1a1aa", size: 0.4,
       });
     }

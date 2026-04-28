@@ -29,6 +29,7 @@ prompt.md
 ui/web/node_modules/
 ui/web/dist/
 ui/web/.vite/
+ui/web/.pnpm-store/
 *.tsbuildinfo
 
 # UI Desktop (Wails + React)
@@ -89,3 +90,10 @@ compose.d/*
 /mise
 /.mise
 goclaw-patched-linux-amd64
+
+# Local scratch files created during production debugging
+_tmp_*
+tmp_*
+tmp_shiptest/
+*.test
+hooks.test

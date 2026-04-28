@@ -38,4 +38,6 @@ type Stores struct {
 	Episodic               EpisodicStore
 	EvolutionMetrics       EvolutionMetricsStore
 	EvolutionSuggestions   EvolutionSuggestionStore
+	// Hooks is hooks.HookStore, typed as any to avoid an import cycle.
+	Hooks any
 }

@@ -12,6 +12,9 @@ import (
 	"strings"
 )
 
+const defaultEmbeddingBatchSize = 2048
+const dashScopeEmbeddingBatchSize = 10
+
 // ContentHash returns a short SHA256 hex digest of the content (first 16 bytes).
 func ContentHash(text string) string {
 	h := sha256.Sum256([]byte(text))
@@ -173,6 +176,36 @@ func (p *OpenAIEmbeddingProvider) Name() string  { return p.name }
 func (p *OpenAIEmbeddingProvider) Model() string { return p.model }
 
 func (p *OpenAIEmbeddingProvider) Embed(ctx context.Context, texts []string) ([][]float32, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	results := make([][]float32, len(texts))
+	batchSize := p.batchSize()
+	for start := 0; start < len(texts); start += batchSize {
+		end := min(start+batchSize, len(texts))
+		embeddings, err := p.embedBatch(ctx, texts[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("embedding batch [%d:%d]: %w", start, end, err)
+		}
+		for i, emb := range embeddings {
+			results[start+i] = emb
+		}
+	}
+
+	return results, nil
+}
+
+func (p *OpenAIEmbeddingProvider) batchSize() int {
+	apiURL := strings.ToLower(p.apiURL)
+	name := strings.ToLower(p.name)
+	if strings.Contains(apiURL, "dashscope.aliyuncs.com") || strings.Contains(name, "dashscope") || strings.Contains(name, "bailian") {
+		return dashScopeEmbeddingBatchSize
+	}
+	return defaultEmbeddingBatchSize
+}
+
+func (p *OpenAIEmbeddingProvider) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {
 	reqBody := map[string]any{
 		"input": texts,
 		"model": p.model,

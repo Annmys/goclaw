@@ -76,6 +76,8 @@ type CronRunLogEntry struct {
 // CronJobResult is the output of a cron job handler execution.
 type CronJobResult struct {
 	Content      string `json:"content" db:"-"`
+	Status       string `json:"status,omitempty" db:"-"`
+	Error        string `json:"error,omitempty" db:"-"`
 	InputTokens  int    `json:"inputTokens,omitempty" db:"-"`
 	OutputTokens int    `json:"outputTokens,omitempty" db:"-"`
 	DurationMS   int64  `json:"durationMs,omitempty" db:"-"`
