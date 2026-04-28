@@ -38,9 +38,8 @@ type evolutionFeedbackResponse struct {
 
 func (h *EvolutionHandler) handleCreateFeedback(w http.ResponseWriter, r *http.Request) {
 	locale := extractLocale(r)
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 
@@ -113,9 +112,8 @@ func (h *EvolutionHandler) handleCreateFeedback(w http.ResponseWriter, r *http.R
 }
 
 func (h *EvolutionHandler) handleListFeedback(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 

@@ -44,9 +44,8 @@ type evolutionAuditEvent struct {
 }
 
 func (h *EvolutionHandler) handleListRegressionRuns(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 	limit := boundedLimit(r.URL.Query().Get("limit"), 20, 100)
@@ -70,9 +69,8 @@ func (h *EvolutionHandler) handleListRegressionRuns(w http.ResponseWriter, r *ht
 
 func (h *EvolutionHandler) handleRunRegression(w http.ResponseWriter, r *http.Request) {
 	locale := extractLocale(r)
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 	var body struct {
@@ -182,9 +180,8 @@ func (h *EvolutionHandler) executeRegressionRun(r *http.Request, agentID uuid.UU
 }
 
 func (h *EvolutionHandler) handleListAudit(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 	limit := boundedLimit(r.URL.Query().Get("limit"), 50, 200)

@@ -82,12 +82,28 @@ func (h *EvolutionHandler) adminAuth(next http.HandlerFunc) http.HandlerFunc {
 	return requireAuth(permissions.RoleAdmin, next)
 }
 
+func (h *EvolutionHandler) resolveAgentID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	raw := r.PathValue("agentID")
+	if id, err := uuid.Parse(raw); err == nil {
+		return id, true
+	}
+	if h.agentStore == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+		return uuid.Nil, false
+	}
+	ag, err := h.agentStore.GetByKey(r.Context(), raw)
+	if err != nil || ag == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+		return uuid.Nil, false
+	}
+	return ag.ID, true
+}
+
 // handleGetMetrics returns raw or aggregated evolution metrics for an agent.
 // Query params: type (tool|retrieval|feedback), since (ISO timestamp), aggregate (true/false).
 func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 
@@ -153,9 +169,8 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 // handleListSuggestions returns evolution suggestions for an agent.
 // Query params: status (pending|approved|applied|rejected|rolled_back), limit.
 func (h *EvolutionHandler) handleListSuggestions(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 
@@ -183,9 +198,8 @@ func (h *EvolutionHandler) handleListSuggestions(w http.ResponseWriter, r *http.
 // handleUpdateSuggestion updates a suggestion's status (approve/reject/rollback).
 func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http.Request) {
 	locale := extractLocale(r)
-	agentID, err := uuid.Parse(r.PathValue("agentID"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
 		return
 	}
 
