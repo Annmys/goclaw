@@ -26,6 +26,7 @@ export function useEvolutionMetrics(agentId: string, timeRange: string) {
         aggregate: "true",
         since,
       }),
+    enabled: !!agentId,
   });
 
   return {

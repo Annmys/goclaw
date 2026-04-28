@@ -111,6 +111,9 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           )}
           <SidebarItem to={ROUTES.CRON} icon={Clock} label={t("nav.cron")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.HOOKS} icon={Webhook} label={t("nav.hooks")} collapsed={collapsed} />
+          {isAdmin && (
+            <SidebarItem to={ROUTES.EVOLUTION_CENTER} icon={Sparkles} label={t("nav.evolutionCenter")} collapsed={collapsed} />
+          )}
         </SidebarGroup>
 
         <SidebarGroup label={t("groups.data")} collapsed={collapsed}>
@@ -136,7 +139,6 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           <SidebarItem to={ROUTES.CLI_CREDENTIALS} icon={KeyRound} label={t("nav.cliCredentials")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.API_KEYS} icon={KeyRound} label={t("nav.apiKeys")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.PACKAGES} icon={Blocks} label={t("nav.packages")} collapsed={collapsed} />
-          <SidebarItem to={ROUTES.EVOLUTION_CENTER} icon={Sparkles} label={t("nav.evolutionCenter")} collapsed={collapsed} />
           {isOwner && (
             <SidebarItem to={ROUTES.CONFIG} icon={Settings} label={t("nav.config")} collapsed={collapsed} />
           )}

@@ -55,6 +55,19 @@ function graphNodeType(attrs: Record<string, unknown>) {
   return safeString(attrs.docType, safeString(attrs.entityType, "other"));
 }
 
+function canCreateWebGLContext(): boolean {
+  if (typeof document === "undefined") return false;
+  try {
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
+    if (!gl) return false;
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeGraphForSigma(graph: Graph) {
   const edgesToDrop: string[] = [];
   const seenPairs = new Set<string>();
@@ -103,6 +116,136 @@ function sanitizeGraphForSigma(graph: Graph) {
       ...(entityType ? { entityType } : {}),
     });
   });
+}
+
+interface SvgFallbackGraphProps {
+  graph: Graph;
+  selectedNodeId?: string | null;
+  onNodeSelect?: (nodeId: string | null) => void;
+  onNodeDoubleClick?: (nodeId: string) => void;
+  hiddenTypes?: Set<string>;
+  isDark: boolean;
+  message?: string | null;
+}
+
+function SvgFallbackGraph({
+  graph,
+  selectedNodeId,
+  onNodeSelect,
+  onNodeDoubleClick,
+  hiddenTypes,
+  isDark,
+  message,
+}: SvgFallbackGraphProps) {
+  const nodes = graph.nodes()
+    .map((id) => ({ id, attrs: graph.getNodeAttributes(id) as Record<string, unknown> }))
+    .filter(({ attrs }) => !hiddenTypes?.has(graphNodeType(attrs)));
+  const nodeIds = new Set(nodes.map((n) => n.id));
+
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        No visible graph data
+      </div>
+    );
+  }
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const { attrs } of nodes) {
+    const x = finiteNumber(attrs.x, 0);
+    const y = finiteNumber(attrs.y, 0);
+    minX = Math.min(minX, x);
+    maxX = Math.max(maxX, x);
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  }
+  const pad = 40;
+  const width = Math.max(maxX - minX + pad * 2, 240);
+  const height = Math.max(maxY - minY + pad * 2, 180);
+  const ox = -minX + pad;
+  const oy = -minY + pad;
+
+  const edges: Array<{ key: string; source: string; target: string; label: string }> = [];
+  graph.forEachEdge((edge, attrs, source, target) => {
+    if (!nodeIds.has(source) || !nodeIds.has(target)) return;
+    edges.push({ key: edge, source, target, label: safeString(attrs.label, "") });
+  });
+
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-background">
+      {message && (
+        <div className="absolute left-2 top-2 z-10 rounded-md border bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+          {message}
+        </div>
+      )}
+      <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img">
+        <g>
+          {edges.map((edge) => {
+            const source = graph.getNodeAttributes(edge.source) as Record<string, unknown>;
+            const target = graph.getNodeAttributes(edge.target) as Record<string, unknown>;
+            const x1 = finiteNumber(source.x, 0) + ox;
+            const y1 = finiteNumber(source.y, 0) + oy;
+            const x2 = finiteNumber(target.x, 0) + ox;
+            const y2 = finiteNumber(target.y, 0) + oy;
+            return (
+              <line
+                key={edge.key}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke={isDark ? "#52525b" : "#d4d4d8"}
+                strokeWidth="0.8"
+                opacity="0.65"
+              />
+            );
+          })}
+        </g>
+        <g>
+          {nodes.map(({ id, attrs }) => {
+            const type = graphNodeType(attrs);
+            const selected = selectedNodeId === id;
+            const x = finiteNumber(attrs.x, 0) + ox;
+            const y = finiteNumber(attrs.y, 0) + oy;
+            const size = Math.max(finiteNumber(attrs.size, 4), 3);
+            const color = getVaultNodeColor(type, isDark);
+            const label = safeString(attrs.label, id);
+            return (
+              <g
+                key={id}
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer"
+                onClick={() => onNodeSelect?.(selected ? null : id)}
+                onDoubleClick={() => onNodeDoubleClick?.(id)}
+              >
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={selected ? size + 2 : size}
+                  fill={color}
+                  stroke={selected ? (isDark ? "#f8fafc" : "#0f172a") : "transparent"}
+                  strokeWidth="2"
+                />
+                {(selected || graph.degree(id) > 0) && (
+                  <text
+                    x={x + size + 4}
+                    y={y + 4}
+                    className="fill-foreground text-[10px]"
+                    paintOrder="stroke"
+                    stroke={isDark ? "#020617" : "#ffffff"}
+                    strokeWidth="3"
+                  >
+                    {label}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </g>
+      </svg>
+    </div>
+  );
 }
 
 /** Reposition orphan nodes (degree=0) into a compact ring around the connected cluster.
@@ -207,6 +350,12 @@ export function SigmaGraphContainer({
       const message = err instanceof Error ? err.message : "Invalid graph data";
       console.error("[SigmaGraphContainer] invalid graph data", err);
       setRenderError(message);
+      onSigmaReady?.(null);
+      return;
+    }
+
+    if (!canCreateWebGLContext()) {
+      setRenderError("当前浏览器或远程桌面环境不可用 WebGL，已切换到兼容图谱视图。");
       onSigmaReady?.(null);
       return;
     }
@@ -602,9 +751,15 @@ export function SigmaGraphContainer({
 
   if (renderError) {
     return (
-      <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
-        Graph render failed: {renderError}
-      </div>
+      <SvgFallbackGraph
+        graph={graph}
+        selectedNodeId={selectedNodeId}
+        onNodeSelect={onNodeSelect}
+        onNodeDoubleClick={onNodeDoubleClick}
+        hiddenTypes={hiddenTypes}
+        isDark={isDark}
+        message={renderError}
+      />
     );
   }
 

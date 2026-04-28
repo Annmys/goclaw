@@ -20,6 +20,7 @@ export function useEvolutionSuggestions(agentId: string, status?: string) {
     queryKey: queryKeys.evolution.suggestions(agentId, { status: status ?? "" }),
     queryFn: () =>
       http.get<EvolutionSuggestion[]>(`/v1/agents/${agentId}/evolution/suggestions`, params),
+    enabled: !!agentId,
   });
 
   const updateStatus = useCallback(
