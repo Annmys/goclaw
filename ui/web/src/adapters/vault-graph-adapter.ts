@@ -39,6 +39,24 @@ function vaultNodeLabel(node: VaultGraphNode): string {
   return title || fileName || id.slice(0, 8);
 }
 
+function safeEdgeKey(graph: Graph, preferred: string, from: string, to: string): string {
+  const base = preferred || `${from}->${to}`;
+  let key = base;
+  let i = 1;
+  while (graph.hasEdge(key)) {
+    key = `${base}#${i++}`;
+  }
+  return key;
+}
+
+function hasDirectedEdge(graph: Graph, from: string, to: string): boolean {
+  try {
+    return graph.hasDirectedEdge(from, to);
+  } catch {
+    return false;
+  }
+}
+
 /** Get node color based on doc type and theme */
 export function getVaultNodeColor(docType: string, isDark: boolean): string {
   const colors = isDark ? VAULT_TYPE_COLORS_DARK : VAULT_TYPE_COLORS_LIGHT;
@@ -84,14 +102,12 @@ export function buildVaultGraphFromDTO(nodes: VaultGraphNode[], edges: VaultGrap
   for (const e of edges) {
     const from = safeString(e.from);
     const to = safeString(e.to);
-    if (!from || !to || !nodeIds.has(from) || !nodeIds.has(to) || graph.hasEdge(from, to)) continue;
+    if (!from || !to || from === to || !nodeIds.has(from) || !nodeIds.has(to) || hasDirectedEdge(graph, from, to)) continue;
     const edgeId = safeString(e.id, `${from}->${to}`);
-    if (!graph.hasEdge(edgeId)) {
-      graph.addEdgeWithKey(edgeId, from, to, {
-        label: safeString(e.type, "link"), type: "curvedArrow",
-        color: "#a1a1aa", size: 0.4,
-      });
-    }
+    graph.addEdgeWithKey(safeEdgeKey(graph, edgeId, from, to), from, to, {
+      label: safeString(e.type, "link"), type: "curvedArrow",
+      color: "#a1a1aa", size: 0.4,
+    });
   }
 
   return graph;
@@ -131,10 +147,10 @@ export function buildVaultGraph(
 
   // Add edges (only where both endpoints exist)
   for (const link of links) {
-    if (docIds.has(link.from_doc_id) && docIds.has(link.to_doc_id)) {
+    if (link.from_doc_id !== link.to_doc_id && docIds.has(link.from_doc_id) && docIds.has(link.to_doc_id)) {
       // Avoid duplicate edges for same source→target
-      if (!graph.hasEdge(link.from_doc_id, link.to_doc_id)) {
-        graph.addEdgeWithKey(link.id, link.from_doc_id, link.to_doc_id, {
+      if (!hasDirectedEdge(graph, link.from_doc_id, link.to_doc_id)) {
+        graph.addEdgeWithKey(safeEdgeKey(graph, link.id, link.from_doc_id, link.to_doc_id), link.from_doc_id, link.to_doc_id, {
           label: link.link_type,
           type: "curvedArrow",
           color: "#a1a1aa", // zinc-400, lighter gray

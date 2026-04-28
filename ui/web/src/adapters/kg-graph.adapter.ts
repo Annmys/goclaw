@@ -15,6 +15,24 @@ function safeString(value: unknown, fallback = ""): string {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function safeEdgeKey(graph: Graph, preferred: string, source: string, target: string): string {
+  const base = preferred || `${source}->${target}`;
+  let key = base;
+  let i = 1;
+  while (graph.hasEdge(key)) {
+    key = `${base}#${i++}`;
+  }
+  return key;
+}
+
+function hasDirectedEdge(graph: Graph, source: string, target: string): boolean {
+  try {
+    return graph.hasDirectedEdge(source, target);
+  } catch {
+    return false;
+  }
+}
+
 /** Compute degree (edge count) for each entity id. */
 export function computeDegreeMap(entities: KGEntity[], relations: KGRelation[]): Map<string, number> {
   const deg = new Map<string, number>();
@@ -60,13 +78,11 @@ export function buildKGGraphFromDTO(nodes: KGGraphNode[], edges: KGGraphEdge[]):
   for (const e of edges) {
     const src = safeString(e.src);
     const tgt = safeString(e.tgt);
-    if (!src || !tgt || !nodeIds.has(src) || !nodeIds.has(tgt) || graph.hasEdge(src, tgt)) continue;
+    if (!src || !tgt || src === tgt || !nodeIds.has(src) || !nodeIds.has(tgt) || hasDirectedEdge(graph, src, tgt)) continue;
     const edgeId = safeString(e.id, `${src}->${tgt}`);
-    if (!graph.hasEdge(edgeId)) {
-      graph.addEdgeWithKey(edgeId, src, tgt, {
-        label: safeString(e.type, "related").replace(/_/g, " "), type: "curvedArrow",
-      });
-    }
+    graph.addEdgeWithKey(safeEdgeKey(graph, edgeId, src, tgt), src, tgt, {
+      label: safeString(e.type, "related").replace(/_/g, " "), type: "curvedArrow",
+    });
   }
 
   return graph;
@@ -99,14 +115,12 @@ export function buildKGGraph(entities: KGEntity[], allRelations: KGRelation[]): 
   for (const r of allRelations) {
     const source = safeString(r.source_entity_id);
     const target = safeString(r.target_entity_id);
-    if (source && target && entityIds.has(source) && entityIds.has(target) && !graph.hasEdge(source, target)) {
+    if (source && target && source !== target && entityIds.has(source) && entityIds.has(target) && !hasDirectedEdge(graph, source, target)) {
       const edgeId = safeString(r.id, `${source}->${target}`);
-      if (!graph.hasEdge(edgeId)) {
-        graph.addEdgeWithKey(edgeId, source, target, {
-          label: safeString(r.relation_type, "related").replace(/_/g, " "),
-          type: "curvedArrow",
-        });
-      }
+      graph.addEdgeWithKey(safeEdgeKey(graph, edgeId, source, target), source, target, {
+        label: safeString(r.relation_type, "related").replace(/_/g, " "),
+        type: "curvedArrow",
+      });
     }
   }
 

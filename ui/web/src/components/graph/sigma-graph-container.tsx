@@ -43,6 +43,68 @@ function useThemeColors() {
   };
 }
 
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function safeString(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function graphNodeType(attrs: Record<string, unknown>) {
+  return safeString(attrs.docType, safeString(attrs.entityType, "other"));
+}
+
+function sanitizeGraphForSigma(graph: Graph) {
+  const edgesToDrop: string[] = [];
+  const seenPairs = new Set<string>();
+
+  graph.forEachEdge((edge, attrs, source, target) => {
+    if (!graph.hasNode(source) || !graph.hasNode(target) || source === target) {
+      edgesToDrop.push(edge);
+      return;
+    }
+
+    const pairKey = `${source}\u0000${target}`;
+    if (seenPairs.has(pairKey)) {
+      edgesToDrop.push(edge);
+      return;
+    }
+    seenPairs.add(pairKey);
+
+    graph.mergeEdgeAttributes(edge, {
+      label: safeString(attrs.label, "related"),
+      type: safeString(attrs.type, "arrow") === "curvedArrow" ? "curvedArrow" : "arrow",
+      color: safeString(attrs.color, "#a1a1aa"),
+      size: Math.max(finiteNumber(attrs.size, 0.4), 0.1),
+    });
+  });
+
+  for (const edge of edgesToDrop) {
+    if (graph.hasEdge(edge)) graph.dropEdge(edge);
+  }
+
+  const count = Math.max(graph.order, 1);
+  let index = 0;
+  graph.forEachNode((node, attrs) => {
+    const angle = (index / count) * Math.PI * 2;
+    const radius = Math.max(10, Math.sqrt(count) * 8);
+    const docType = safeString(attrs.docType, "");
+    const entityType = safeString(attrs.entityType, "");
+    index++;
+
+    graph.mergeNodeAttributes(node, {
+      label: safeString(attrs.label, String(node)),
+      x: finiteNumber(attrs.x, Math.cos(angle) * radius),
+      y: finiteNumber(attrs.y, Math.sin(angle) * radius),
+      size: Math.max(finiteNumber(attrs.size, 3), 0.5),
+      color: safeString(attrs.color, "#9ca3af"),
+      ...(docType ? { docType } : {}),
+      ...(entityType ? { entityType } : {}),
+    });
+  });
+}
+
 /** Reposition orphan nodes (degree=0) into a compact ring around the connected cluster.
  *  Prevents FA2 from scattering them far away and forcing camera to zoom out. */
 function compactOrphans(graph: Graph) {
@@ -108,6 +170,7 @@ export function SigmaGraphContainer({
   const [cameraRatio, setCameraRatio] = useState(1);
   // Layout running state
   const [layoutRunning, setLayoutRunning] = useState(false);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const { isDark, labelColor, edgeColor, highlightEdgeColor } = useThemeColors();
 
   const setSigmaRef = useCallback(
@@ -137,6 +200,16 @@ export function SigmaGraphContainer({
   // --- Initialize Sigma + FA2 worker layout (non-blocking) ---
   useEffect(() => {
     if (!containerRef.current || graph.order === 0) return;
+    setRenderError(null);
+    try {
+      sanitizeGraphForSigma(graph);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Invalid graph data";
+      console.error("[SigmaGraphContainer] invalid graph data", err);
+      setRenderError(message);
+      onSigmaReady?.(null);
+      return;
+    }
 
     // Random disc init — scale spread with canvas diagonal for responsive layout
     if (graph.order > 1) {
@@ -158,7 +231,9 @@ export function SigmaGraphContainer({
     };
 
     // Create Sigma — shows nodes at random positions immediately
-    const sigma = new Sigma(graph, containerRef.current, {
+    let sigma: Sigma;
+    try {
+      sigma = new Sigma(graph, containerRef.current, {
       allowInvalidContainer: true,
       renderLabels: true,
       labelRenderedSizeThreshold: compact ? 14 : SIGMA_SETTINGS.labelRenderedSizeThreshold,
@@ -175,7 +250,14 @@ export function SigmaGraphContainer({
       zoomingRatio: 1.3,
       zIndex: true,
       defaultDrawNodeHover: () => undefined,
-    });
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown graph render error";
+      console.error("[SigmaGraphContainer] failed to initialize", err);
+      setRenderError(message);
+      onSigmaReady?.(null);
+      return;
+    }
 
     setSigmaRef(sigma);
 
@@ -193,29 +275,43 @@ export function SigmaGraphContainer({
 
       // Phase 1: quick sync pass — rough but instant layout
       const syncIters = graph.order < 200 ? 300 : graph.order < 1000 ? 100 : 50;
-      forceAtlas2.assign(graph, { iterations: syncIters, settings });
-      compactOrphans(graph);
+      try {
+        forceAtlas2.assign(graph, { iterations: syncIters, settings });
+        compactOrphans(graph);
+      } catch (err) {
+        console.warn("[SigmaGraphContainer] sync layout failed; falling back to initial positions", err);
+      }
 
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (compact || prefersReducedMotion) {
         // Compact/reduced-motion: sync-only, no worker
         if (orphanRatio < 0.3) {
-          noverlap.assign(graph, {
-            maxIterations: 30,
-            settings: { margin: 2, ratio: 1.02, speed: 3, gridSize: 20 },
-          });
+          try {
+            noverlap.assign(graph, {
+              maxIterations: 30,
+              settings: { margin: 2, ratio: 1.02, speed: 3, gridSize: 20 },
+            });
+          } catch (err) {
+            console.warn("[SigmaGraphContainer] noverlap layout failed", err);
+          }
         }
       } else {
         // Phase 2: worker refinement — subtle position tweaks, short duration
         const refineDuration = graph.order < 500 ? 1500 : graph.order < 2000 ? 2500 : 4000;
-        const layout = new FA2Layout(graph, { settings });
-        layoutRef.current = layout;
-        setLayoutRunning(true);
-        layout.start();
+        try {
+          const layout = new FA2Layout(graph, { settings });
+          layoutRef.current = layout;
+          setLayoutRunning(true);
+          layout.start();
 
-        timer = setTimeout(() => {
-          stopLayout(sigma, orphanRatio);
-        }, refineDuration);
+          timer = setTimeout(() => {
+            stopLayout(sigma, orphanRatio);
+          }, refineDuration);
+        } catch (err) {
+          console.warn("[SigmaGraphContainer] worker layout failed", err);
+          layoutRef.current = null;
+          setLayoutRunning(false);
+        }
       }
     }
 
@@ -276,11 +372,8 @@ export function SigmaGraphContainer({
     const sigma = internalSigmaRef.current;
     if (!sigma) return;
 
-    const getNodeType = (attrs: Record<string, unknown>) =>
-      (attrs.docType || attrs.entityType || "other") as string;
-
     sigma.setSetting("nodeReducer", (node, data) => {
-      const docType = getNodeType(data);
+      const docType = graphNodeType(data);
       const themedColor = getVaultNodeColor(docType, isDark);
       const themedData = { ...data, color: themedColor };
 
@@ -321,7 +414,7 @@ export function SigmaGraphContainer({
       if (hiddenTypes?.size) {
         const srcAttrs = graph.getNodeAttributes(graph.source(edge));
         const tgtAttrs = graph.getNodeAttributes(graph.target(edge));
-        if (hiddenTypes.has(getNodeType(srcAttrs)) || hiddenTypes.has(getNodeType(tgtAttrs))) {
+        if (hiddenTypes.has(graphNodeType(srcAttrs)) || hiddenTypes.has(graphNodeType(tgtAttrs))) {
           return { ...data, hidden: true };
         }
       }
@@ -503,6 +596,14 @@ export function SigmaGraphContainer({
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         No data to display
+      </div>
+    );
+  }
+
+  if (renderError) {
+    return (
+      <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+        Graph render failed: {renderError}
       </div>
     );
   }

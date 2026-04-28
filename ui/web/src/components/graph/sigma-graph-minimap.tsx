@@ -9,6 +9,10 @@ interface SigmaGraphMinimapProps {
   size?: number;
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 /**
  * Lightweight canvas-overlay minimap.
  * Draws all nodes as small dots + a viewport rectangle showing the current camera view.
@@ -21,14 +25,22 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
   // Compute graph bounding box from node positions
   const getBounds = useCallback(() => {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let count = 0;
     graph.forEachNode((_node, attrs) => {
-      const x = attrs.x as number;
-      const y = attrs.y as number;
+      const x = finiteNumber(attrs.x);
+      const y = finiteNumber(attrs.y);
+      if (x === null || y === null) return;
+      count++;
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     });
+
+    if (count === 0) {
+      return null;
+    }
+
     // Add padding
     const padX = (maxX - minX) * 0.1 || 50;
     const padY = (maxY - minY) * 0.1 || 50;
@@ -47,9 +59,11 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
     ctx.scale(dpr, dpr);
 
     const bounds = getBounds();
+    if (!bounds) return;
     const bw = bounds.maxX - bounds.minX;
     const bh = bounds.maxY - bounds.minY;
     const scale = Math.min(size / bw, size / bh);
+    if (!Number.isFinite(scale) || scale <= 0) return;
     const offsetX = (size - bw * scale) / 2;
     const offsetY = (size - bh * scale) / 2;
 
@@ -62,8 +76,12 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
 
     // Draw nodes as 1.5px dots
     graph.forEachNode((_node, attrs) => {
-      const x = ((attrs.x as number) - bounds.minX) * scale + offsetX;
-      const y = ((attrs.y as number) - bounds.minY) * scale + offsetY;
+      const graphX = finiteNumber(attrs.x);
+      const graphY = finiteNumber(attrs.y);
+      if (graphX === null || graphY === null) return;
+      const x = (graphX - bounds.minX) * scale + offsetX;
+      const y = (graphY - bounds.minY) * scale + offsetY;
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
       ctx.beginPath();
       ctx.arc(x, y, 1.5, 0, Math.PI * 2);
       ctx.fillStyle = (attrs.color as string) || "#9ca3af";
@@ -75,6 +93,7 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
     const { width, height } = sigma.getDimensions();
     const topLeft = sigma.viewportToGraph({ x: 0, y: 0 });
     const bottomRight = sigma.viewportToGraph({ x: width, y: height });
+    if (![topLeft.x, topLeft.y, bottomRight.x, bottomRight.y].every(Number.isFinite)) return;
 
     const vx1 = (topLeft.x - bounds.minX) * scale + offsetX;
     const vy1 = (topLeft.y - bounds.minY) * scale + offsetY;
@@ -129,9 +148,11 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
       if (!rect) return;
 
       const bounds = getBounds();
+      if (!bounds) return;
       const bw = bounds.maxX - bounds.minX;
       const bh = bounds.maxY - bounds.minY;
       const scale = Math.min(size / bw, size / bh);
+      if (!Number.isFinite(scale) || scale <= 0) return;
       const offsetX = (size - bw * scale) / 2;
       const offsetY = (size - bh * scale) / 2;
 
@@ -145,8 +166,11 @@ export function SigmaGraphMinimap({ sigma, graph, size = 140 }: SigmaGraphMinima
       let nearestId: string | null = null;
       let minDist = Infinity;
       graph.forEachNode((id, attrs) => {
-        const dx = (attrs.x as number) - targetGraphX;
-        const dy = (attrs.y as number) - targetGraphY;
+        const graphX = finiteNumber(attrs.x);
+        const graphY = finiteNumber(attrs.y);
+        if (graphX === null || graphY === null) return;
+        const dx = graphX - targetGraphX;
+        const dy = graphY - targetGraphY;
         const d = dx * dx + dy * dy;
         if (d < minDist) { minDist = d; nearestId = id; }
       });

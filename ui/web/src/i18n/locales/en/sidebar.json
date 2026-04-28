@@ -42,6 +42,7 @@
     "apiKeys": "API Keys",
     "apiDocs": "API Docs",
     "packages": "Packages",
+    "evolutionCenter": "Evolution Center",
     "tenants": "Tenants",
     "backupRestore": "Backup & Restore"
   }

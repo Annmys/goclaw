@@ -1,4 +1,4 @@
-{
+﻿{
   "groups": {
     "core": "核心",
     "conversations": "会话",
@@ -42,6 +42,8 @@
     "apiDocs": "API 文档",
     "packages": "软件包",
     "tenants": "租户",
-    "backupRestore": "备份与恢复"
+    "backupRestore": "备份与恢复",
+    "evolutionCenter": "智能进化中心"
   }
 }
+

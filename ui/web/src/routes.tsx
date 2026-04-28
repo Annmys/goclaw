@@ -117,6 +117,9 @@ const BackupRestorePage = lazyWithRetry(() =>
 const HooksPage = lazyWithRetry(() =>
   import("@/pages/hooks").then((m) => ({ default: m.HooksPage })),
 );
+const EvolutionCenterPage = lazyWithRetry(() =>
+  import("@/pages/evolution-center/evolution-center-page").then((m) => ({ default: m.EvolutionCenterPage })),
+);
 const TenantSelectorPage = lazyWithRetry(() =>
   import("@/pages/login/tenant-selector").then((m) => ({ default: m.TenantSelectorPage })),
 );
@@ -192,6 +195,7 @@ export function AppRoutes() {
           <Route path={ROUTES.TTS} element={<RequireCrossTenant><TtsPage /></RequireCrossTenant>} />
           <Route path={ROUTES.STORAGE} element={<StoragePage />} />
           <Route path={ROUTES.PACKAGES} element={<RequireAdmin><PackagesPage /></RequireAdmin>} />
+          <Route path={ROUTES.EVOLUTION_CENTER} element={<RequireAdmin><EvolutionCenterPage /></RequireAdmin>} />
           <Route path={ROUTES.TENANTS} element={<RequireCrossTenant><TenantsAdminPage /></RequireCrossTenant>} />
           <Route path={ROUTES.TENANT_DETAIL} element={<RequireCrossTenant><TenantDetailPage /></RequireCrossTenant>} />
 
