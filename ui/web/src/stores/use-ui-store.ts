@@ -11,7 +11,7 @@ interface UiState {
   timezone: string; // IANA timezone or "auto"
   sidebarCollapsed: boolean;
   mobileSidebarOpen: boolean;
-  pageSize: number;
+  pageSize: number; // global pagination page size preference
 
   setTheme: (theme: Theme) => void;
   setLanguage: (language: Language) => void;
@@ -28,7 +28,7 @@ export const useUiStore = create<UiState>()(
       theme: "dark" as Theme,
       language: (i18n.language as Language) ?? "en",
       timezone: "auto",
-      sidebarCollapsed: false,
+      sidebarCollapsed: true,
       mobileSidebarOpen: false,
       pageSize: 20,
 
@@ -54,6 +54,7 @@ export const useUiStore = create<UiState>()(
       },
 
       setMobileSidebarOpen: (open) => set({ mobileSidebarOpen: open }),
+
       setPageSize: (size) => set({ pageSize: size }),
     }),
     {

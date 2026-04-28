@@ -1,4 +1,4 @@
-﻿{
+{
   "event": "stop",
   "handler_type": "http",
   "scope": "tenant",

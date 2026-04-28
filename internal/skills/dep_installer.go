@@ -13,6 +13,9 @@ import (
 	"time"
 )
 
+// InstallTimeout is the wall-clock cap applied to a single package install.
+// Exported so HTTP handlers that bypass InstallSingleDep (e.g. the github:
+// fast path) can wrap their context with the same deadline.
 const InstallTimeout = 5 * time.Minute
 
 // pkgHelperSocket is the Unix socket path for the root-privileged pkg-helper.
@@ -53,6 +56,17 @@ func InstallSingleDep(ctx context.Context, dep string) (bool, string) {
 	slog.Info("skills: installing dep", "dep", dep)
 
 	switch {
+	case strings.HasPrefix(dep, "github:"):
+		gh := DefaultGitHubInstaller()
+		if gh == nil {
+			return false, "github installer not configured"
+		}
+		if _, err := gh.Install(ctx, dep); err != nil {
+			slog.Error("skills: github install failed", "dep", dep, "error", err)
+			return false, err.Error()
+		}
+		slog.Info("skills: dep installed", "dep", dep)
+		return true, ""
 	case strings.HasPrefix(dep, "pip:"):
 		pkg := strings.TrimPrefix(dep, "pip:")
 		cmd := exec.CommandContext(ctx, "pip3", "install", "--no-cache-dir", "--break-system-packages", pkg)
@@ -169,6 +183,40 @@ func UninstallPackage(ctx context.Context, dep string) (bool, string) {
 	slog.Info("skills: uninstalling package", "dep", dep)
 
 	switch {
+	case strings.HasPrefix(dep, "github:"):
+		gh := DefaultGitHubInstaller()
+		if gh == nil {
+			return false, "github installer not configured"
+		}
+		// Accept either "github:name" (manifest name only) or the full
+		// "github:owner/repo[@tag]". For the full form we look up the manifest
+		// entry by owner/repo so packages whose binary name differs from the
+		// repo name (e.g. cli/cli → gh) can still be uninstalled via spec.
+		name := strings.TrimPrefix(dep, "github:")
+		if spec, err := ParseGitHubSpec(dep); err == nil {
+			name = spec.Repo
+			if entries, lerr := gh.List(); lerr == nil {
+				want := spec.Owner + "/" + spec.Repo
+				for _, e := range entries {
+					if strings.EqualFold(e.Repo, want) {
+						name = e.Name
+						break
+					}
+				}
+			}
+		} else if slash := strings.Index(name, "/"); slash >= 0 {
+			// Tolerate bare "owner/repo" without the scheme prefix.
+			name = name[slash+1:]
+			if at := strings.IndexByte(name, '@'); at >= 0 {
+				name = name[:at]
+			}
+		}
+		if err := gh.Uninstall(ctx, name); err != nil {
+			slog.Error("skills: github uninstall failed", "dep", dep, "error", err)
+			return false, err.Error()
+		}
+		slog.Info("skills: package uninstalled", "dep", dep)
+		return true, ""
 	case strings.HasPrefix(dep, "pip:"):
 		pkg := strings.TrimPrefix(dep, "pip:")
 		cmd := exec.CommandContext(ctx, "pip3", "uninstall", "-y", pkg)

@@ -1,4 +1,4 @@
-﻿// Package handlers provides hook handler implementations for the agent hook system.
+// Package handlers provides hook handler implementations for the agent hook system.
 package handlers
 
 import (

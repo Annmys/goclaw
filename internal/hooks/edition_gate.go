@@ -1,4 +1,4 @@
-﻿package hooks
+package hooks
 
 import "github.com/nextlevelbuilder/goclaw/internal/edition"
 

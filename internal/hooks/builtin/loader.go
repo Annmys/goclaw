@@ -1,4 +1,4 @@
-﻿// Package builtin discovers, parses, and seeds builtin hook rows.
+// Package builtin discovers, parses, and seeds builtin hook rows.
 // Builtins are shipped with the binary via //go:embed and are the only hooks
 // allowed to mutate event input (source-tier gate in dispatcher).
 //

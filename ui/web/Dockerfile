@@ -18,7 +18,8 @@ RUN pnpm build
 # ── Stage 2: Serve ──
 FROM nginx:1.27-alpine
 
-# Copy built assets
+# Copy built assets — force 0755 so the nginx worker (non-root) can read them
+# regardless of pnpm's build-time umask (see #761).
 COPY --chmod=0755 --from=builder /app/dist /usr/share/nginx/html
 
 # Copy nginx config

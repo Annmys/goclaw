@@ -1,4 +1,4 @@
-﻿// Package hooks defines the agent hook system: typed events, config structs,
+// Package hooks defines the agent hook system: typed events, config structs,
 // execution payloads, and the store interface. Handlers and dispatcher live
 // in separate files; this file is pure type definitions.
 package hooks

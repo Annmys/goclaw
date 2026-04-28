@@ -110,6 +110,7 @@ export function SummoningModal({
     setCancelling(true);
     try {
       await onCancel(agentId);
+      // BE emits WS type=failed → existing handler closes modal
     } catch {
       // keep modal open
     } finally {

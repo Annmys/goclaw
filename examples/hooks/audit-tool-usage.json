@@ -1,4 +1,4 @@
-﻿{
+{
   "event": "post_tool_use",
   "handler_type": "http",
   "scope": "tenant",

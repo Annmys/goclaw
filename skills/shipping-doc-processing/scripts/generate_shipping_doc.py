@@ -16,6 +16,9 @@ from openpyxl.utils import get_column_letter
 from resolve_shipping_doc import resolve_shipping_doc
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPT_DIR.parent
+
 FLOW_ROOT_CANDIDATES = [
     Path("/mnt/target/flow-orders"),
     Path(r"D:\数据\包装流转单"),
@@ -1158,11 +1161,12 @@ def first_existing_template(input_file: Path) -> Path | None:
             dynamic_names.append(stripped.replace("input", "expected"))
     names = [
         *dynamic_names,
+        "epl_template.xlsx",
         "_tmp_order2_expected.xlsx",
         "测试订单-完成.xlsx",
         "EPL  CI PO#11197.xlsx  LED FLEX Ltd（test）XS25110808.xlsx",
     ]
-    roots = [input_file.parent, *FLOW_ROOT_CANDIDATES]
+    roots = [input_file.parent, SKILL_DIR / "templates", SKILL_DIR, *FLOW_ROOT_CANDIDATES]
     for root in roots:
         for name in names:
             candidate = root / name

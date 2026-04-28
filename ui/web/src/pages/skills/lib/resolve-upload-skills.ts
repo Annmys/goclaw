@@ -5,6 +5,9 @@ type SkillEntrySeed = Omit<SkillEntry, "id">;
 
 type ValidateSkillArchive = (file: File) => Promise<MultiSkillZipValidation>;
 
+// Browser-side ZIP parsing is best-effort only. Some valid ZIP variants are
+// accepted by the backend but rejected by JSZip, so fall back to a direct
+// single-file upload instead of blocking the user locally.
 export async function resolveUploadSkills(
   file: File,
   validateArchive: ValidateSkillArchive = validateMultiSkillZip,

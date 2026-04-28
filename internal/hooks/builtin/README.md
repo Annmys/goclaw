@@ -1,4 +1,4 @@
-﻿# Builtin Hooks
+# Builtin Hooks
 
 Canonical, embed-shipped hook rows. Users may toggle `enabled` but cannot
 edit content — the embedded `.js` is overwritten on every boot.

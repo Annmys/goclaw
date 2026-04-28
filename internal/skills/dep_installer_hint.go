@@ -2,21 +2,31 @@ package skills
 
 import "strings"
 
-func pipBuildFailHint(pkg string, stderr string) string {
-	lower := strings.ToLower(stderr)
-	switch {
-	case strings.Contains(lower, "pg_config executable not found"):
-		return "psycopg2 缺少 pg_config，可改用 pip:psycopg2-binary 或安装 PostgreSQL 开发头文件。"
-	case strings.Contains(lower, "fatal error: openssl") || strings.Contains(lower, "libssl"):
-		return "缺少 OpenSSL 开发库，建议安装系统依赖后重试。"
-	case strings.Contains(lower, "mysql_config") || strings.Contains(lower, "mariadb_config"):
-		return "缺少 MySQL/MariaDB 开发工具，可改用 mysqlclient 对应系统依赖。"
-	case strings.Contains(lower, "rust compiler"):
-		return "该包需要 Rust 编译器，建议换二进制 wheel 或补装 Rust。"
-	case strings.Contains(lower, "failed building wheel"):
-		return "该 pip 包构建 wheel 失败，通常是缺少系统头文件或编译工具链。"
-	default:
-		_ = pkg
+// pipBuildFailHint returns a human-readable hint when a pip install fails
+// due to a build-from-source error (missing system lib or compiler).
+// Returns "" when no known pattern matches the combined stdout+stderr.
+//
+// Hints are log-side only — never returned to callers / HTTP responses —
+// so they can safely suggest alternatives without altering install semantics.
+// There is no auto-retry: failing packages typically have no wheel at all,
+// and a retry would burn the 5-minute install timeout uselessly.
+func pipBuildFailHint(pkg, combinedOutput string) string {
+	out := combinedOutput
+	if !strings.Contains(out, "Failed building wheel") &&
+		!strings.Contains(out, "Could not build wheels") &&
+		!strings.Contains(out, "pg_config") &&
+		!strings.Contains(out, "mysql_config") {
 		return ""
 	}
+	switch {
+	case strings.Contains(out, "pg_config"):
+		return "install 'pip:psycopg2-binary' (prebuilt wheel, no pg_config needed) or declare deps: in SKILL.md"
+	case strings.Contains(out, "mysql_config"):
+		return "install 'pip:PyMySQL' (pure-Python) or add 'system:mysql-dev' to deps: in SKILL.md"
+	case strings.Contains(pkg, "psycopg") && !strings.Contains(pkg, "binary"):
+		return "try 'pip:psycopg[binary]' (v3) or 'pip:psycopg2-binary' (v2) and declare explicitly in SKILL.md deps:"
+	case strings.Contains(pkg, "crypto") || strings.Contains(pkg, "Crypto"):
+		return "use 'pip:pycryptodome' (modern successor) and declare in SKILL.md deps:"
+	}
+	return "pip failed to build from source — try a '-binary' variant if available, or declare explicit deps: in SKILL.md"
 }

@@ -1,4 +1,4 @@
-﻿# GoClaw builtin hooks registry.
+# GoClaw builtin hooks registry.
 #
 # Each entry is shipped with the binary (`//go:embed *.js`) and seeded into
 # agent_hooks at startup with source='builtin' and a stable UUIDv5. Users may

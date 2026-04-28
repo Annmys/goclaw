@@ -1,4 +1,4 @@
-﻿// Package budget implements atomic per-tenant monthly token budgets for the
+// Package budget implements atomic per-tenant monthly token budgets for the
 // prompt hook handler. The single-UPDATE deduct pattern avoids select-then-
 // update races (L2 mitigation).
 package budget

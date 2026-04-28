@@ -3,9 +3,9 @@ package http
 import (
 	"net/http"
 
-	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/google/uuid"
 
+	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
@@ -211,6 +211,8 @@ func (h *AgentsHandler) handleResummon(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"ok": "true", "status": store.AgentStatusSummoning})
 }
 
+// handleCancelSummon force-transitions a stuck 'summoning' agent to 'summon_failed'.
+// Used when user wants to abort a hanging summon (UI Cancel button after 60s).
 func (h *AgentsHandler) handleCancelSummon(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserIDFromContext(r.Context())
 	locale := store.LocaleFromContext(r.Context())

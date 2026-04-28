@@ -1,4 +1,4 @@
-﻿{
+{
   "event": "session_start",
   "handler_type": "http",
   "scope": "agent",

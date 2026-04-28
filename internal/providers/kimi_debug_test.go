@@ -19,7 +19,7 @@ func TestKimiCodingBuildRequestUsesAnthropicMessagesFormat(t *testing.T) {
 		Tools: []ToolDefinition{
 			{
 				Type: "function",
-				Function: ToolFunctionSchema{
+				Function: &ToolFunctionSchema{
 					Name:        "bash",
 					Description: "Run shell command",
 					Parameters: map[string]any{

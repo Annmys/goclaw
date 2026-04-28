@@ -1,4 +1,4 @@
-﻿// Package security provides SSRF-safe HTTP utilities for outbound webhook calls.
+// Package security provides SSRF-safe HTTP utilities for outbound webhook calls.
 // All production webhook HTTP clients MUST use NewSafeClient to prevent
 // admin-configured hooks from probing internal infrastructure.
 package security

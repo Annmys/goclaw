@@ -62,7 +62,10 @@ export function useUserPicker(
 
   const results = data ?? [];
 
-  /** Format results as ComboboxOptions with source badges. */
+  /** Format results as ComboboxOptions with source badges.
+   *  Committed value = tenant_user UUID only when valueMode === "uuid" AND the
+   *  result is a tenant_user row. All other callers (allow/deny lists, MCP/CLI
+   *  credentials, add-tenant-user dialog) still receive the user_id string. */
   const options: ComboboxOption[] = useMemo(() =>
     results.map((r) => {
       const parts: string[] = [];

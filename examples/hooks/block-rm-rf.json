@@ -1,4 +1,4 @@
-﻿{
+{
   "event": "pre_tool_use",
   "handler_type": "command",
   "scope": "agent",

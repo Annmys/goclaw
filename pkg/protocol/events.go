@@ -1,4 +1,4 @@
-package protocol
+﻿package protocol
 
 // WebSocket event names pushed from server to client.
 const (
@@ -73,6 +73,8 @@ const (
 
 	// Trace lifecycle events (realtime trace/span updates).
 	EventTraceUpdated = "trace.updated"
+	// Immediate status change event (not flush-buffered; fired on every status write).
+	EventTraceStatusChanged = "trace.status"
 
 	// Skill dependency check events (realtime progress during startup/rescan).
 	EventSkillDepsChecked  = "skill.deps.checked"
@@ -103,7 +105,7 @@ const (
 	EventWhatsAppQRCode = "whatsapp.qr.code"
 	EventWhatsAppQRDone = "whatsapp.qr.done"
 
-	// Tenant access revocation — forces affected user's UI to logout.
+	// Tenant access revocation 鈥?forces affected user's UI to logout.
 	EventTenantAccessRevoked = "tenant.access.revoked"
 
 	// Vault enrichment pipeline progress.
@@ -131,15 +133,4 @@ const (
 	ChatEventChunk     = "chunk"
 	ChatEventMessage   = "message"
 	ChatEventThinking  = "thinking"
-)
-
-// Hook RPC method names.
-const (
-	MethodHooksList    = "hooks.list"
-	MethodHooksCreate  = "hooks.create"
-	MethodHooksUpdate  = "hooks.update"
-	MethodHooksDelete  = "hooks.delete"
-	MethodHooksToggle  = "hooks.toggle"
-	MethodHooksTest    = "hooks.test"
-	MethodHooksHistory = "hooks.history"
 )

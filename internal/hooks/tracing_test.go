@@ -1,4 +1,4 @@
-﻿package hooks_test
+package hooks_test
 
 import (
 	"context"
@@ -37,10 +37,6 @@ func (c *capturingTracingStore) BatchUpdateTraceAggregates(_ context.Context, _ 
 }
 
 func (c *capturingTracingStore) DeleteTracesOlderThan(_ context.Context, _ time.Time) (int64, error) {
-	return 0, nil
-}
-
-func (c *capturingTracingStore) RecoverStaleRunningTraces(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 

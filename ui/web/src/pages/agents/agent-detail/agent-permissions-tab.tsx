@@ -111,6 +111,9 @@ export function AgentPermissionsTab({ agentId }: AgentPermissionsTabProps) {
     const trimmed = userId.trim();
     if (!trimmed) return;
     setAdding(true);
+    // Look up contact info so the grant carries displayName/username metadata
+    // upfront — avoids the round-trip to Telegram's getChatMember on the
+    // backend and works even if the bot isn't in the group yet.
     let metadata: Record<string, string> | undefined;
     try {
       const res = await http.get<{ contacts: Record<string, ChannelContact> }>(
@@ -124,9 +127,7 @@ export function AgentPermissionsTab({ agentId }: AgentPermissionsTabProps) {
           username: c.username ?? "",
         };
       }
-    } catch {
-      // best effort only
-    }
+    } catch { /* best-effort — backend still auto-enriches via getChatMember */ }
     await grant(scope, configType, trimmed, permission, metadata);
     setUserId("");
     setAdding(false);
@@ -256,6 +257,8 @@ export function AgentPermissionsTab({ agentId }: AgentPermissionsTabProps) {
                       <span className="text-xs font-medium text-muted-foreground">{scopeLabels.get(scopeKey) ?? scopeKey}</span>
                     </div>
                     {writers.map((p) => {
+                      // Label preference: displayName → contact resolver → "User <id>" fallback.
+                      // Username is rendered separately next to the label when present.
                       const resolved = formatUserLabel(p.userId, resolve);
                       const isNumericFallback = /^#?-?\d+$/.test(resolved);
                       const label = p.metadata?.displayName

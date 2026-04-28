@@ -1,4 +1,4 @@
-﻿package budget_test
+package budget_test
 
 import (
 	"context"

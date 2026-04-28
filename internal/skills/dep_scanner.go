@@ -9,15 +9,17 @@ import (
 )
 
 // SkillManifest holds dependency info for a skill.
-// Populated by ScanSkillDeps via static analysis of scripts/ directory.
+// Populated by ScanSkillDeps via static analysis of scripts/ directory,
+// optionally overridden/filtered by SKILL.md frontmatter (deps: / exclude_deps:).
 type SkillManifest struct {
 	Requires       []string `json:"requires,omitempty"`        // system binaries (python3, pandoc, ffmpeg)
 	RequiresPython []string `json:"requires_python,omitempty"` // raw Python import names (e.g. "openpyxl", "cv2")
 	RequiresNode   []string `json:"requires_node,omitempty"`   // npm package names (e.g. "docx", "pptxgenjs")
 	ScriptsDir     string   `json:"-"`                         // absolute path to scripts/ dir, used for PYTHONPATH
-	Explicit       []string `json:"-"`                         // manifest-declared deps
-	ExcludeDeps    []string `json:"-"`                         // manifest-declared exclusions
-	FromManifest   bool     `json:"-"`                         // whether deps came from SKILL.md frontmatter
+	// Manifest-origin fields — populated when SKILL.md declares deps:/exclude_deps:.
+	Explicit     []string `json:"explicit,omitempty"`      // raw dep strings from SKILL.md deps: (e.g. "pip:psycopg2-binary")
+	ExcludeDeps  []string `json:"exclude_deps,omitempty"`  // filter list from SKILL.md exclude_deps:
+	FromManifest bool     `json:"from_manifest,omitempty"` // true when Explicit was the authoritative source
 }
 
 // IsEmpty returns true if the manifest has no dependencies.
@@ -25,11 +27,26 @@ func (m *SkillManifest) IsEmpty() bool {
 	return len(m.Requires) == 0 && len(m.RequiresPython) == 0 && len(m.RequiresNode) == 0
 }
 
-// ScanSkillDeps auto-detects dependencies by statically analyzing the scripts/ directory.
+// ScanSkillDeps auto-detects dependencies by statically analyzing the scripts/ directory,
+// then applies any SKILL.md frontmatter overrides (deps: / exclude_deps:).
 func ScanSkillDeps(skillDir string) *SkillManifest {
 	scan := scanScriptsDir(filepath.Join(skillDir, "scripts"))
 	deps, excludeDeps := parseSkillManifestFile(skillMdPath(skillDir))
-	return applyManifestOverride(scan, deps, excludeDeps)
+	if len(deps) == 0 && len(excludeDeps) == 0 {
+		return scan
+	}
+	merged := applyManifestOverride(scan, deps, excludeDeps)
+	if merged.FromManifest {
+		slog.Debug("dep_scanner: manifest override applied",
+			"dir", skillDir,
+			"explicit_count", len(deps),
+			"scan_py", len(scan.RequiresPython),
+			"scan_node", len(scan.RequiresNode))
+	} else if len(excludeDeps) > 0 {
+		slog.Debug("dep_scanner: manifest exclude applied",
+			"dir", skillDir, "exclude_count", len(excludeDeps))
+	}
+	return merged
 }
 
 // scanScriptsDir statically analyzes script files to detect dependencies.
@@ -122,7 +139,7 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 
 var (
 	pyImportRe     = regexp.MustCompile(`^import\s+(\w+)`)
-	pyFromRe       = regexp.MustCompile(`^from\s+([A-Za-z_]\w*)\s+import\b`)
+	pyFromRe       = regexp.MustCompile(`^from\s+(\w+)`)
 	nodeRequireRe  = regexp.MustCompile(`require\(['"]([\w@][^'"]*)['"]\)`)
 	nodeESImportRe = regexp.MustCompile(`from\s+['"]([^'"./][^'"]*?)['"]`)
 	shebangRe      = regexp.MustCompile(`^#!\s*/usr/bin/env\s+(\S+)`)
@@ -149,15 +166,20 @@ func scanFile(path string, pyImports, nodeImports map[string]bool, binaries map[
 
 	switch ext {
 	case ".py":
+		inTripleQuotedString := false
 		for _, line := range strings.Split(content, "\n") {
 			line = strings.TrimSpace(line)
-			if m := pyImportRe.FindStringSubmatch(line); len(m) > 1 {
+			codeLine := stripPythonTripleQuotedStringLine(line, &inTripleQuotedString)
+			if codeLine == "" {
+				continue
+			}
+			if m := pyImportRe.FindStringSubmatch(codeLine); len(m) > 1 {
 				// Skip JS ES module imports inside string literals (e.g. `import mermaid from '...'`)
-				if !jsFromStringRe.MatchString(line) {
+				if !jsFromStringRe.MatchString(codeLine) {
 					pyImports[m[1]] = true
 				}
 			}
-			if m := pyFromRe.FindStringSubmatch(line); len(m) > 1 {
+			if m := pyFromRe.FindStringSubmatch(codeLine); len(m) > 1 {
 				pyImports[m[1]] = true
 			}
 		}
@@ -175,6 +197,32 @@ func scanFile(path string, pyImports, nodeImports map[string]bool, binaries map[
 	}
 }
 
+func stripPythonTripleQuotedStringLine(line string, inTriple *bool) string {
+	var out strings.Builder
+	for len(line) > 0 {
+		iDouble := strings.Index(line, `"""`)
+		iSingle := strings.Index(line, `'''`)
+		i := -1
+		if iDouble >= 0 && (iSingle < 0 || iDouble < iSingle) {
+			i = iDouble
+		} else if iSingle >= 0 {
+			i = iSingle
+		}
+		if i < 0 {
+			if !*inTriple {
+				out.WriteString(line)
+			}
+			break
+		}
+		if !*inTriple {
+			out.WriteString(line[:i])
+		}
+		*inTriple = !*inTriple
+		line = line[i+3:]
+	}
+	return strings.TrimSpace(out.String())
+}
+
 func normalizeNodePkg(pkg string) string {
 	if strings.HasPrefix(pkg, "@") {
 		parts := strings.SplitN(pkg, "/", 3)
@@ -187,6 +235,8 @@ func normalizeNodePkg(pkg string) string {
 }
 
 // MergeDeps merges two manifests, deduplicating entries.
+// Manifest-origin fields (Explicit, ExcludeDeps, FromManifest) are OR-folded /
+// unioned so the merged result remains authoritative if either side was.
 func MergeDeps(a, b *SkillManifest) *SkillManifest {
 	if a == nil {
 		return b
@@ -198,6 +248,9 @@ func MergeDeps(a, b *SkillManifest) *SkillManifest {
 		Requires:       mergeUnique(a.Requires, b.Requires),
 		RequiresPython: mergeUnique(a.RequiresPython, b.RequiresPython),
 		RequiresNode:   mergeUnique(a.RequiresNode, b.RequiresNode),
+		Explicit:       mergeUnique(a.Explicit, b.Explicit),
+		ExcludeDeps:    mergeUnique(a.ExcludeDeps, b.ExcludeDeps),
+		FromManifest:   a.FromManifest || b.FromManifest,
 	}
 }
 

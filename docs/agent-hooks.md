@@ -1,4 +1,4 @@
-﻿# Agent Hooks
+# Agent Hooks
 
 Lifecycle hooks let you intercept, observe, or inject behavior at defined points in the agent loop. Use cases: block unsafe tool calls, auto-lint after writes, inject session context, notify on stop, audit tool usage.
 

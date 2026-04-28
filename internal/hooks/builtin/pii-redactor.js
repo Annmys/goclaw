@@ -1,4 +1,4 @@
-﻿// Builtin: PII redactor (email + phone)
+// Builtin: PII redactor (email + phone)
 // Version: 1 — matches builtins.yaml
 // Runs on: user_prompt_submit, pre_tool_use
 // Mutates: rawInput, toolInput.command, toolInput.query, toolInput.content

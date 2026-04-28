@@ -26,6 +26,7 @@ export function usePagination<T>(
 ): UsePaginationReturn<T> {
   const globalPageSize = useUiStore((s) => s.pageSize);
   const setGlobalPageSize = useUiStore((s) => s.setPageSize);
+
   const [page, setPageRaw] = useState(1);
   const [pageSize, setPageSizeRaw] = useState(options.defaultPageSize ?? globalPageSize);
 

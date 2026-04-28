@@ -13,6 +13,7 @@ import (
 
 const defaultEmbeddingBatchSize = 2048
 const dashScopeEmbeddingBatchSize = 10
+const embeddingBatchSize = defaultEmbeddingBatchSize
 
 // ExpectedEmbeddingDim is the pgvector column dimension used across the system.
 // All embedding providers must return vectors of this dimension.

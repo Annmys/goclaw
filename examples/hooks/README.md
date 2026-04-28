@@ -1,4 +1,4 @@
-﻿# Example Hooks Library
+# Example Hooks Library
 
 Copy-paste-ready hook configurations for common use cases. Each JSON is a valid `hooks.create` WS payload — send it via the Web UI → **Hooks → Create** (paste into the relevant fields) or POST directly to the RPC endpoint.
 

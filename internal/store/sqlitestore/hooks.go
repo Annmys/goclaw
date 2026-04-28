@@ -1,4 +1,4 @@
-﻿//go:build sqlite || sqliteonly
+//go:build sqlite || sqliteonly
 
 package sqlitestore
 

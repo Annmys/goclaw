@@ -1,4 +1,4 @@
-﻿package handlers_test
+package handlers_test
 
 import (
 	"context"
@@ -236,7 +236,7 @@ func TestHTTP_ResponseBodyCappedAt1MiB(t *testing.T) {
 		for i := range chunk {
 			chunk[i] = 'x'
 		}
-		for i := 0; i < 32; i++ { // 32 × 64 KiB = 2 MiB
+		for range 32 { // 32 × 64 KiB = 2 MiB
 			w.Write(chunk)
 		}
 	}))

@@ -8,19 +8,24 @@ import (
 	"strings"
 )
 
+// Identifier allowlists for manifest-declared deps. Manifest strings flow
+// into python3/node subprocesses via fmt.Sprintf — an unvalidated name would
+// let a SKILL.md author inject arbitrary code (e.g. "foo;__import__('os').system(...)").
+// Auto-scan already sanitizes via regex capture (\w+); these guards only apply
+// to manifest-origin data.
+//
+// Note: python import allows hyphen/dot even though "import psycopg2-binary"
+// yields a SyntaxError at python parse time — that's a SAFE failure (no exec),
+// and the installer still treats the package as missing → installs it, matching
+// the author's intent when declaring pip install names like "psycopg2-binary".
 var (
 	pythonIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_.\-]*$`)
 	npmPkgNameRe  = regexp.MustCompile(`^(@[a-z0-9][a-z0-9_.\-]*/)?[a-z0-9][a-z0-9_.\-]*$`)
 	sysBinRe      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+\-]*$`)
 )
 
-type ParsedDep struct {
-	Raw         string
-	Category    string
-	ImportName  string
-	InstallSpec string
-}
-
+// isValidDepName returns true when name passes the per-category allowlist.
+// Called before manifest strings reach exec subprocesses. Empty names fail.
 func isValidDepName(category, name string) bool {
 	if name == "" {
 		return false
@@ -33,11 +38,29 @@ func isValidDepName(category, name string) bool {
 	case "system":
 		return sysBinRe.MatchString(name)
 	case "github":
-		return true
+		return true // github spec validated by ParseGitHubSpec at install time
 	}
 	return false
 }
 
+// ParsedDep describes a manifest-declared dependency after prefix categorization.
+type ParsedDep struct {
+	Raw         string // original manifest string (e.g. "pip:requests>=2.31")
+	Category    string // "pip" | "npm" | "system" | "github"
+	ImportName  string // bare name used for import-check (e.g. "requests")
+	InstallSpec string // pass-through string for installer (e.g. "requests>=2.31")
+}
+
+// categorizeManifestDep parses a raw manifest dep string into its category
+// (pip/npm/system/github) and normalized import/install names.
+//
+// Accepted forms:
+//
+//	pip:<spec>       e.g. pip:psycopg2-binary, pip:requests>=2.31, pip:psycopg[binary]
+//	npm:<pkg>        e.g. npm:typescript
+//	github:<spec>    e.g. github:cli/cli@v2.40.0
+//	system:<bin>     e.g. system:ffmpeg
+//	<bare-name>      treated as system binary (matches installer default branch)
 func categorizeManifestDep(raw string) ParsedDep {
 	p := ParsedDep{Raw: raw}
 	switch {
@@ -64,6 +87,18 @@ func categorizeManifestDep(raw string) ParsedDep {
 	return p
 }
 
+// splitPipSpec separates the import-check name from the install spec.
+// Strips version operators (>=, <=, ==, !=, ~=, >, <) and pip extras ([binary]).
+//
+// Returns an empty importName when the spec is malformed (e.g. ">=1.0" with no
+// package name, or a leading operator at index 0). Callers MUST check and skip
+// empty-name entries to avoid feeding syntax errors into python subprocesses.
+//
+//	"requests>=2.31"   → ("requests",  "requests>=2.31")
+//	"psycopg[binary]"  → ("psycopg",   "psycopg[binary]")
+//	"psycopg2-binary"  → ("psycopg2-binary", "psycopg2-binary")
+//	">=1.0"            → ("", ">=1.0")           — malformed, skip
+//	"[binary]"         → ("", "[binary]")        — malformed, skip
 func splitPipSpec(spec string) (importName, installSpec string) {
 	installSpec = spec
 	importName = spec
@@ -85,12 +120,16 @@ func splitPipSpec(spec string) (importName, installSpec string) {
 	return importName, installSpec
 }
 
+// skillMdPath returns the absolute path to SKILL.md in a skill directory.
 func skillMdPath(skillDir string) string {
 	return filepath.Join(skillDir, "SKILL.md")
 }
 
-func parseSkillManifestFile(path string) (deps []string, excludeDeps []string) {
-	data, err := os.ReadFile(path)
+// parseSkillManifestFile reads SKILL.md and extracts deps: / exclude_deps:
+// lists from its YAML frontmatter. Returns zero slices if file absent,
+// frontmatter missing, or fields absent.
+func parseSkillManifestFile(skillMdPath string) (deps []string, excludeDeps []string) {
+	data, err := os.ReadFile(skillMdPath)
 	if err != nil {
 		return nil, nil
 	}
@@ -102,6 +141,15 @@ func parseSkillManifestFile(path string) (deps []string, excludeDeps []string) {
 	return lists["deps"], lists["exclude_deps"]
 }
 
+// applyManifestOverride merges a scan result with manifest-declared deps.
+//
+// When explicit deps are present, they become authoritative: scan-derived
+// slices (Requires, RequiresPython, RequiresNode) are replaced with
+// manifest-categorized entries and FromManifest flips to true.
+//
+// When only excludeDeps are present, the scan result is filtered in place.
+//
+// When both are empty, the scan result is returned unchanged.
 func applyManifestOverride(scan *SkillManifest, explicit, excludeDeps []string) *SkillManifest {
 	if scan == nil {
 		scan = &SkillManifest{}
@@ -142,6 +190,9 @@ func applyManifestOverride(scan *SkillManifest, explicit, excludeDeps []string) 
 	return scan
 }
 
+// filterOutByImportName removes entries whose prefixed form appears in
+// excludeDeps. For category "pip"/"npm" the prefix is "<category>:".
+// For "system" both "system:<name>" and bare "<name>" are accepted.
 func filterOutByImportName(names, excludeDeps []string, category string) []string {
 	if len(names) == 0 || len(excludeDeps) == 0 {
 		return names
