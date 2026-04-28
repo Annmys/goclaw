@@ -33,6 +33,7 @@ export function useEvolutionFeedback(agentId: string, timeRange = "30d") {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: queryKeys.evolution.suggestions(agentId, { status: "" }) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.evolution.audit(agentId, { limit: 50 }) });
     },
   });
 
@@ -42,8 +43,10 @@ export function useEvolutionFeedback(agentId: string, timeRange = "30d") {
       try {
         await mutation.mutateAsync(input);
         if (!options?.silent) toast.success("反馈已记录");
-      } catch {
+      } catch (error) {
+        console.error("evolution feedback failed", error);
         if (!options?.silent) toast.error("反馈记录失败");
+        throw error;
       }
     },
     [agentId, mutation],

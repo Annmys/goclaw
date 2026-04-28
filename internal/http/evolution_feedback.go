@@ -104,6 +104,7 @@ func (h *EvolutionHandler) handleCreateFeedback(w http.ResponseWriter, r *http.R
 			slog.Warn("evolution.feedback.suggestion_failed", "error", err)
 		}
 	}
+	h.recordAuditEvent(r, agentID, "feedback_received", "", body.FeedbackType, "ok", "chat feedback recorded")
 
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"status":      "ok",

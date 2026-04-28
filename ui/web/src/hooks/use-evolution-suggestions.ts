@@ -32,9 +32,11 @@ export function useEvolutionSuggestions(agentId: string, status?: string) {
         queryClient.invalidateQueries({
           queryKey: queryKeys.evolution.suggestions(agentId, { status: status ?? "" }),
         });
-        toast.success(`Suggestion ${newStatus}`);
-      } catch {
-        toast.error("Failed to update suggestion");
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolution.audit(agentId, { limit: 50 }) });
+        toast.success(`建议已${newStatus === "approved" ? "批准" : newStatus === "rejected" ? "拒绝" : "回滚"}`);
+      } catch (error) {
+        console.error("evolution suggestion update failed", error);
+        toast.error("建议状态更新失败");
       }
     },
     [http, agentId, status, queryClient],

@@ -12,9 +12,11 @@ import (
 type MetricType string
 
 const (
-	MetricRetrieval MetricType = "retrieval"
-	MetricTool      MetricType = "tool"
-	MetricFeedback  MetricType = "feedback"
+	MetricRetrieval  MetricType = "retrieval"
+	MetricTool       MetricType = "tool"
+	MetricFeedback   MetricType = "feedback"
+	MetricRegression MetricType = "regression"
+	MetricAudit      MetricType = "audit"
 )
 
 // EvolutionMetric is a single recorded metric data point.

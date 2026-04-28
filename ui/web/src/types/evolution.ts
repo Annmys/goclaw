@@ -63,6 +63,35 @@ export interface CreateEvolutionFeedbackInput {
   correction?: string;
 }
 
+export interface EvolutionRegressionCase {
+  name: string;
+  status: "passed" | "failed" | "skipped";
+  message: string;
+}
+
+export interface EvolutionRegressionRun {
+  run_id: string;
+  status: "passed" | "failed" | "skipped";
+  scope: string;
+  suggestion_id?: string;
+  total: number;
+  passed: number;
+  failed: number;
+  started_at: string;
+  completed_at: string;
+  cases: EvolutionRegressionCase[];
+}
+
+export interface EvolutionAuditEvent {
+  action: string;
+  actor?: string;
+  suggestion_id?: string;
+  status?: string;
+  result: "ok" | "failed" | string;
+  message?: string;
+  created_at: string;
+}
+
 /** Adaptation guardrails stored in agent other_config. */
 export interface AdaptationGuardrails {
   max_delta_per_cycle: number;

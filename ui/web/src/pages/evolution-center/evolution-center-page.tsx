@@ -8,8 +8,10 @@ import {
   GitBranch,
   MessageSquareWarning,
   RefreshCw,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
+  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,59 +20,65 @@ import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { TableSkeleton } from "@/components/shared/loading-skeleton";
 import { useAgents } from "@/pages/agents/hooks/use-agents";
+import { useEvolutionAudit } from "@/hooks/use-evolution-audit";
 import { useEvolutionFeedback } from "@/hooks/use-evolution-feedback";
 import { useEvolutionMetrics } from "@/hooks/use-evolution-metrics";
+import { useEvolutionRegression } from "@/hooks/use-evolution-regression";
 import { useEvolutionSuggestions } from "@/hooks/use-evolution-suggestions";
-import type { EvolutionFeedback, EvolutionSuggestion } from "@/types/evolution";
+import type {
+  EvolutionAuditEvent,
+  EvolutionFeedback,
+  EvolutionRegressionRun,
+  EvolutionSuggestion,
+} from "@/types/evolution";
 
 const pipeline = [
   {
     title: "聊天反馈入口",
-    description: "助手回复下方已接入有用、没用、纠错按钮，反馈进入进化中心。",
+    description: "助手回复下方可提交有用、没用、纠错反馈，反馈会进入智能进化中心。",
     icon: MessageSquareWarning,
     status: "已接入",
   },
   {
     title: "纠错暂存",
-    description: "纠错和负面反馈先进入待审批建议，不直接修改核心 skill 或配置。",
+    description: "负面和纠错反馈只生成待审批建议，不会自动修改核心 skill、模型、工具或源码。",
     icon: ClipboardList,
     status: "已接入",
   },
   {
     title: "演进建议审批",
-    description: "复用 GoClaw 原生 evolution suggestions，可批准、拒绝和回滚。",
+    description: "管理员可批准、拒绝和回滚建议；核心能力变更仍需人工审核。",
     icon: GitBranch,
     status: "已接入",
   },
   {
     title: "沙箱回归测试",
-    description: "后续要接入船务清单等标准测试订单，审批前自动跑回归。",
+    description: "审批前可运行非破坏性回归检查，结果写入审计记录。",
     icon: Beaker,
-    status: "待开发",
+    status: "已完成",
   },
   {
     title: "审批发布",
-    description: "核心 skill、模型、工具、源码级变更必须管理员审批，不自动发布。",
+    description: "核心 skill、模型、工具、租户、数据库和源码级变更必须审批。",
     icon: ShieldCheck,
     status: "已接入",
   },
   {
     title: "审计回滚",
-    description: "建议状态支持 pending、approved、rejected、applied、rolled_back。",
+    description: "所有反馈、审批、测试和回滚动作都会记录；阈值类建议可恢复基线。",
     icon: Activity,
-    status: "部分完成",
+    status: "已完成",
   },
 ];
 
 function statusVariant(status: string) {
-  if (status === "pending") return "secondary";
-  if (status === "applied" || status === "approved") return "outline";
-  if (status === "rejected" || status === "rolled_back") return "destructive";
+  if (status === "passed" || status === "applied" || status === "approved") return "outline";
+  if (status === "failed" || status === "rejected" || status === "rolled_back") return "destructive";
   return "secondary";
 }
 
 function pipelineVariant(status: string) {
-  if (status === "已接入") return "outline";
+  if (status === "已接入" || status === "已完成") return "outline";
   if (status === "部分完成") return "secondary";
   return "secondary";
 }
@@ -114,6 +122,7 @@ function SuggestionCard({
           )}
           {canRollback && (
             <Button size="sm" variant="destructive" onClick={() => onUpdateStatus(suggestion.id, "rolled_back")}>
+              <RotateCcw className="mr-1 h-3.5 w-3.5" />
               回滚
             </Button>
           )}
@@ -154,6 +163,113 @@ function FeedbackCard({ item }: { item: EvolutionFeedback }) {
   );
 }
 
+function RegressionCard({
+  run,
+  loading,
+  running,
+  onRun,
+}: {
+  run: EvolutionRegressionRun | null;
+  loading: boolean;
+  running: boolean;
+  onRun: () => Promise<EvolutionRegressionRun | null>;
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Beaker className="h-5 w-5 text-primary" />
+            <CardTitle>沙箱回归测试</CardTitle>
+          </div>
+          <Button size="sm" onClick={() => void onRun()} disabled={running}>
+            <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
+            运行测试
+          </Button>
+        </div>
+        <CardDescription>
+          当前执行非破坏性回归检查：Agent 可读性、建议队列、反馈指标、工具指标、检索指标和回滚基线。
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <TableSkeleton rows={4} />
+        ) : !run ? (
+          <EmptyState icon={Beaker} title="暂无回归记录" description="点击运行测试后会生成可审计记录。" />
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
+                  <span className="text-sm font-medium">{run.scope}</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {new Date(run.completed_at).toLocaleString()} · {run.passed}/{run.total} passed
+                </p>
+              </div>
+              {run.status === "passed" ? (
+                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-destructive" />
+              )}
+            </div>
+            <div className="space-y-2">
+              {run.cases.map((item) => (
+                <div key={item.name} className="flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+                  <div>
+                    <p className="font-medium">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">{item.message}</p>
+                  </div>
+                  <Badge variant={statusVariant(item.status)}>{item.status}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function AuditCard({ events, loading }: { events: EvolutionAuditEvent[]; loading: boolean }) {
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Activity className="h-5 w-5 text-primary" />
+          <CardTitle>审计记录</CardTitle>
+        </div>
+        <CardDescription>记录反馈、审批、回归测试和回滚动作，便于追溯谁在什么时候改了什么。</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {loading ? (
+          <TableSkeleton rows={5} />
+        ) : events.length === 0 ? (
+          <EmptyState icon={Activity} title="暂无审计记录" description="产生反馈、审批或测试后会显示在这里。" />
+        ) : (
+          <div className="space-y-2">
+            {events.map((event, index) => (
+              <div key={`${event.created_at}-${index}`} className="rounded-md border px-3 py-2 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant={event.result === "ok" ? "outline" : "destructive"}>{event.action}</Badge>
+                    {event.status && <Badge variant="secondary">{event.status}</Badge>}
+                    {event.actor && <span className="text-xs text-muted-foreground">操作者：{event.actor}</span>}
+                  </div>
+                  <span className="text-xs text-muted-foreground">{new Date(event.created_at).toLocaleString()}</span>
+                </div>
+                {event.suggestion_id && <p className="mt-1 truncate text-xs text-muted-foreground">建议：{event.suggestion_id}</p>}
+                {event.message && <p className="mt-1 text-xs text-muted-foreground">{event.message}</p>}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function EvolutionCenterPage() {
   const { agents, loading: agentsLoading, refresh } = useAgents();
   const [agentId, setAgentId] = useState("");
@@ -167,6 +283,8 @@ export function EvolutionCenterPage() {
   const { toolAggs, retrievalAggs, loading: metricsLoading } = useEvolutionMetrics(agentId, timeRange);
   const { suggestions, loading: suggestionsLoading, updateStatus } = useEvolutionSuggestions(agentId);
   const { feedback, loading: feedbackLoading } = useEvolutionFeedback(agentId, timeRange);
+  const { latestRun, loading: regressionLoading, running: regressionRunning, runRegression } = useEvolutionRegression(agentId);
+  const { events: auditEvents, loading: auditLoading } = useEvolutionAudit(agentId);
 
   const pendingCount = suggestions.filter((item) => item.status === "pending").length;
   const appliedCount = suggestions.filter((item) => item.status === "applied" || item.status === "approved").length;
@@ -176,7 +294,7 @@ export function EvolutionCenterPage() {
     <div className="p-4 sm:p-6 pb-10">
       <PageHeader
         title="智能进化中心"
-        description="管理员统一查看用户反馈、演进指标、待审批建议和安全发布状态。capability-evolver 只作为后台草稿生成能力，不直接改核心能力。"
+        description="管理员统一查看用户反馈、演进指标、待审批建议、沙箱回归测试和审计回滚。capability-evolver 只生成草案，不直接修改核心能力。"
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="secondary">管理员可见</Badge>
@@ -196,7 +314,7 @@ export function EvolutionCenterPage() {
               <CardTitle>目标闭环</CardTitle>
             </div>
             <CardDescription>
-              业务执行到用户反馈，再到纠错暂存、建议生成、沙箱测试、人工审批、发布和回滚。当前版本已完成反馈采集和审批入口，沙箱自动回归仍需后续补齐。
+              从业务执行、用户反馈、纠错暂存，到建议生成、沙箱回归、人工审批、发布和回滚，形成可控的长期迭代闭环。
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-4">
@@ -224,7 +342,7 @@ export function EvolutionCenterPage() {
         <Card>
           <CardHeader>
             <CardTitle>Agent 范围</CardTitle>
-            <CardDescription>当前按 Agent 查看反馈、指标和建议，后续再扩展租户总览。</CardDescription>
+            <CardDescription>当前按 Agent 查看反馈、指标、建议、回归测试和审计记录。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <select
@@ -270,6 +388,19 @@ export function EvolutionCenterPage() {
             </Card>
           );
         })}
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        {agentId ? (
+          <>
+            <RegressionCard run={latestRun} loading={regressionLoading} running={regressionRunning} onRun={runRegression} />
+            <AuditCard events={auditEvents} loading={auditLoading} />
+          </>
+        ) : (
+          <Card className="xl:col-span-2">
+            <EmptyState icon={Beaker} title="请选择 Agent" description="选择 Agent 后可运行沙箱回归测试并查看审计回滚记录。" />
+          </Card>
+        )}
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -358,7 +489,7 @@ export function EvolutionCenterPage() {
               <GitBranch className="h-5 w-5 text-primary" />
               <CardTitle>演进建议审批</CardTitle>
             </div>
-            <CardDescription>审批后才会进入下一步。核心 skill 和源码级改动仍必须人工复核。</CardDescription>
+            <CardDescription>审批后才会进入下一步；核心 skill 和源码级改动必须人工复核。</CardDescription>
           </CardHeader>
           <CardContent>
             {!agentId ? (

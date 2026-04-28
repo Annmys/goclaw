@@ -88,6 +88,8 @@ export const queryKeys = {
     metrics: (agentId: string, params: Record<string, unknown>) => ["evolution", "metrics", agentId, params] as const,
     suggestions: (agentId: string, params: Record<string, unknown>) => ["evolution", "suggestions", agentId, params] as const,
     feedback: (agentId: string, params: Record<string, unknown>) => ["evolution", "feedback", agentId, params] as const,
+    regression: (agentId: string, params: Record<string, unknown>) => ["evolution", "regression", agentId, params] as const,
+    audit: (agentId: string, params: Record<string, unknown>) => ["evolution", "audit", agentId, params] as const,
   },
   packages: {
     all: ["packages"] as const,

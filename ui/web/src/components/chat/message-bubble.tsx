@@ -73,7 +73,6 @@ export function MessageBubble({ message, agentId, sessionKey, messageRef, onFeed
     }
   };
 
-  // Tool-only message (no text content) — render compact without bubble wrapper
   const isToolOnly = isAssistant && !hasContent && !hasThinking && (hasToolDetails || hasToolCalls);
 
   return (
@@ -83,7 +82,6 @@ export function MessageBubble({ message, agentId, sessionKey, messageRef, onFeed
       </div>
 
       {isToolOnly ? (
-        /* Compact tool-only card — no bubble wrapper, full width */
         <div className="flex-1 min-w-0 rounded-md border bg-muted divide-y divide-border">
           {hasThinking && (
             <div className="px-2 py-1.5">
@@ -95,7 +93,6 @@ export function MessageBubble({ message, agentId, sessionKey, messageRef, onFeed
           ))}
         </div>
       ) : (
-        /* Normal message bubble — assistant uses full width, user capped at 85% */
         <div className={`rounded-lg px-4 py-2 ${
           isUser
             ? "max-w-[85%] bg-card text-card-foreground border border-border shadow-sm border-r-2 border-r-accent-foreground"
