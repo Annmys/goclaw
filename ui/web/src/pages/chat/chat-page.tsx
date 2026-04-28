@@ -16,6 +16,7 @@ import { useChatMessages } from "./hooks/use-chat-messages";
 import { useChatSend } from "./hooks/use-chat-send";
 import { isOwnSession, parseSessionKey } from "@/lib/session-key";
 import { useVirtualKeyboard } from "@/hooks/use-virtual-keyboard";
+import { useEvolutionFeedback } from "@/hooks/use-evolution-feedback";
 import { TaskPanel } from "@/components/chat/task-panel";
 import { LOCAL_STORAGE_KEYS } from "@/lib/constants";
 
@@ -176,6 +177,7 @@ export function ChatPage() {
     onMessageAdded: handleMessageAdded,
     onExpectRun: expectRun,
   });
+  const { submitFeedback } = useEvolutionFeedback(agentId);
 
   const handleNewChat = useCallback(() => {
     navigate(`/chat/${encodeURIComponent(buildNewSessionKey())}`);
@@ -348,6 +350,8 @@ export function ChatPage() {
 
         <DropZone onDrop={handleDropFiles}>
           <ChatThread
+            agentId={agentId}
+            sessionKey={sessionKey}
             messages={messages}
             streamText={streamText}
             thinkingText={thinkingText}
@@ -360,6 +364,7 @@ export function ChatPage() {
             loading={messagesLoading}
             scrollTrigger={scrollTrigger}
             onToggleTaskPanel={() => setTaskPanelOpen((v) => !v)}
+            onFeedback={submitFeedback}
           />
 
           {!isOwn ? (

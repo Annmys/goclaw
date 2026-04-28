@@ -14,6 +14,7 @@ type MetricType string
 const (
 	MetricRetrieval MetricType = "retrieval"
 	MetricTool      MetricType = "tool"
+	MetricFeedback  MetricType = "feedback"
 )
 
 // EvolutionMetric is a single recorded metric data point.
@@ -39,7 +40,7 @@ type ToolAggregate struct {
 // RetrievalAggregate summarizes per-source retrieval metrics.
 type RetrievalAggregate struct {
 	Source     string  `json:"source"`
-	QueryCount int    `json:"query_count"`
+	QueryCount int     `json:"query_count"`
 	UsageRate  float64 `json:"usage_rate"` // fraction of results used in reply
 	AvgScore   float64 `json:"avg_score"`
 }
@@ -57,9 +58,10 @@ type EvolutionMetricsStore interface {
 type SuggestionType string
 
 const (
-	SuggestThreshold SuggestionType = "threshold"
-	SuggestToolOrder SuggestionType = "tool_order"
-	SuggestSkillAdd  SuggestionType = "skill_add"
+	SuggestThreshold          SuggestionType = "threshold"
+	SuggestToolOrder          SuggestionType = "tool_order"
+	SuggestSkillAdd           SuggestionType = "skill_add"
+	SuggestFeedbackCorrection SuggestionType = "feedback_correction"
 )
 
 // EvolutionSuggestion is a data-driven suggestion for agent improvement.

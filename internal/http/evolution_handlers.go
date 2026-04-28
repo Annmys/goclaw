@@ -64,6 +64,8 @@ func NewEvolutionHandler(m store.EvolutionMetricsStore, s store.EvolutionSuggest
 
 func (h *EvolutionHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/metrics", h.auth(h.handleGetMetrics))
+	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/feedback", h.auth(h.handleListFeedback))
+	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/feedback", h.auth(h.handleCreateFeedback))
 	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/suggestions", h.auth(h.handleListSuggestions))
 	mux.HandleFunc("PATCH /v1/agents/{agentID}/evolution/suggestions/{suggestionID}", h.auth(h.handleUpdateSuggestion))
 }
@@ -223,6 +225,14 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 	// Handle approval: dispatch by suggestion type.
 	if body.Status == "approved" {
 		switch existing.SuggestionType {
+		case store.SuggestFeedbackCorrection:
+			if err := h.suggestions.UpdateSuggestionStatus(r.Context(), suggestionID, "approved", reviewedBy); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "feedback_correction_approved"})
+			return
+
 		case store.SuggestSkillAdd:
 			if err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})

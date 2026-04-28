@@ -1,4 +1,7 @@
-import { Bot, User } from "lucide-react";
+import { useState } from "react";
+import { Bot, MessageSquareWarning, ThumbsDown, ThumbsUp, User } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { MessageContent } from "./message-content";
 import { ThinkingBlock } from "./thinking-block";
 import { ToolCallCard } from "./tool-call-card";
@@ -10,10 +13,24 @@ import type { ChatMessage } from "@/types/chat";
 
 interface MessageBubbleProps {
   message: ChatMessage;
+  agentId?: string;
+  sessionKey?: string;
+  messageRef?: string;
+  onFeedback?: (input: {
+    feedback_type: "useful" | "not_useful" | "correction";
+    session_key: string;
+    message_ref: string;
+    message_content?: string;
+    correction?: string;
+  }) => Promise<void>;
 }
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, agentId, sessionKey, messageRef, onFeedback }: MessageBubbleProps) {
   const timezone = useUiStore((s) => s.timezone);
+  const [feedbackSent, setFeedbackSent] = useState<string | null>(null);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correction, setCorrection] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const isUser = message.role === "user";
   const isTool = message.role === "tool";
 
@@ -28,6 +45,33 @@ export function MessageBubble({ message }: MessageBubbleProps) {
   const hasContent = !!message.content?.trim();
 
   if (isAssistant && !hasContent && !hasToolCalls && !hasToolDetails) return null;
+
+  const canFeedback = isAssistant && !!agentId && !!sessionKey && !!messageRef && !!onFeedback && hasContent;
+
+  const submitFeedback = async (type: "useful" | "not_useful" | "correction") => {
+    if (!canFeedback || submitting) return;
+    if (type === "correction" && !correction.trim()) {
+      setCorrectionOpen(true);
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await onFeedback({
+        feedback_type: type,
+        session_key: sessionKey,
+        message_ref: messageRef,
+        message_content: message.content,
+        correction: type === "correction" ? correction.trim() : undefined,
+      });
+      setFeedbackSent(type);
+      if (type === "correction") {
+        setCorrection("");
+        setCorrectionOpen(false);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   // Tool-only message (no text content) — render compact without bubble wrapper
   const isToolOnly = isAssistant && !hasContent && !hasThinking && (hasToolDetails || hasToolCalls);
@@ -82,6 +126,64 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 hour: "numeric",
                 minute: "2-digit",
               }).format(new Date(message.timestamp))}
+            </div>
+          )}
+          {canFeedback && (
+            <div className="mt-2 border-t pt-2">
+              <div className="flex flex-wrap items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={feedbackSent === "useful" ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  disabled={submitting}
+                  onClick={() => submitFeedback("useful")}
+                >
+                  <ThumbsUp className="mr-1 h-3 w-3" />
+                  有用
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={feedbackSent === "not_useful" ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  disabled={submitting}
+                  onClick={() => submitFeedback("not_useful")}
+                >
+                  <ThumbsDown className="mr-1 h-3 w-3" />
+                  没用
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={correctionOpen || feedbackSent === "correction" ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  disabled={submitting}
+                  onClick={() => setCorrectionOpen((v) => !v)}
+                >
+                  <MessageSquareWarning className="mr-1 h-3 w-3" />
+                  纠错
+                </Button>
+                {feedbackSent && <span className="text-xs text-muted-foreground">已记录</span>}
+              </div>
+              {correctionOpen && (
+                <div className="mt-2 space-y-2">
+                  <Textarea
+                    value={correction}
+                    onChange={(event) => setCorrection(event.target.value)}
+                    placeholder="写下正确做法或这次回复的问题。管理员会在智能进化中心审核。"
+                    className="min-h-20 text-sm"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setCorrectionOpen(false)}>
+                      取消
+                    </Button>
+                    <Button type="button" size="sm" disabled={submitting || !correction.trim()} onClick={() => submitFeedback("correction")}>
+                      提交纠错
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -18,7 +18,7 @@ export interface RetrievalAggregate {
 export interface EvolutionSuggestion {
   id: string;
   agent_id: string;
-  suggestion_type: "threshold" | "tool_order" | "skill_add";
+  suggestion_type: "threshold" | "tool_order" | "skill_add" | "feedback_correction";
   suggestion: string;
   rationale: string;
   parameters: Record<string, unknown> | null;
@@ -32,6 +32,35 @@ export interface EvolutionSuggestion {
 export interface AggregatedMetrics {
   tool_aggregates: ToolAggregate[];
   retrieval_aggregates: RetrievalAggregate[];
+}
+
+export interface EvolutionFeedbackValue {
+  feedback_type: "useful" | "not_useful" | "correction";
+  message_ref: string;
+  message_content?: string;
+  correction?: string;
+  user_id?: string;
+  requires_approval: boolean;
+  status: string;
+}
+
+export interface EvolutionFeedback {
+  id: string;
+  tenant_id: string;
+  agent_id: string;
+  session_key: string;
+  metric_type: "feedback";
+  metric_key: string;
+  value: EvolutionFeedbackValue;
+  created_at: string;
+}
+
+export interface CreateEvolutionFeedbackInput {
+  feedback_type: "useful" | "not_useful" | "correction";
+  session_key: string;
+  message_ref: string;
+  message_content?: string;
+  correction?: string;
 }
 
 /** Adaptation guardrails stored in agent other_config. */

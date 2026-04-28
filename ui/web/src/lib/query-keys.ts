@@ -87,6 +87,7 @@ export const queryKeys = {
   evolution: {
     metrics: (agentId: string, params: Record<string, unknown>) => ["evolution", "metrics", agentId, params] as const,
     suggestions: (agentId: string, params: Record<string, unknown>) => ["evolution", "suggestions", agentId, params] as const,
+    feedback: (agentId: string, params: Record<string, unknown>) => ["evolution", "feedback", agentId, params] as const,
   },
   packages: {
     all: ["packages"] as const,

@@ -28,7 +28,7 @@ export interface SigmaGraphContainerProps {
   hiddenTypes?: Set<string>;
 }
 
-/** Theme-aware colors — derived from store value, not DOM class.
+/** Theme-aware colors: derived from store value, not DOM class.
  *  DOM class lags behind store update, causing stale reads on theme toggle. */
 function useThemeColors() {
   const theme = useUiStore((s) => s.theme);
@@ -53,19 +53,6 @@ function safeString(value: unknown, fallback: string): string {
 
 function graphNodeType(attrs: Record<string, unknown>) {
   return safeString(attrs.docType, safeString(attrs.entityType, "other"));
-}
-
-function canCreateWebGLContext(): boolean {
-  if (typeof document === "undefined") return false;
-  try {
-    const canvas = document.createElement("canvas");
-    const gl = canvas.getContext("webgl2") || canvas.getContext("webgl");
-    if (!gl) return false;
-    gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function sanitizeGraphForSigma(graph: Graph) {
@@ -125,7 +112,6 @@ interface SvgFallbackGraphProps {
   onNodeDoubleClick?: (nodeId: string) => void;
   hiddenTypes?: Set<string>;
   isDark: boolean;
-  message?: string | null;
 }
 
 function SvgFallbackGraph({
@@ -135,7 +121,6 @@ function SvgFallbackGraph({
   onNodeDoubleClick,
   hiddenTypes,
   isDark,
-  message,
 }: SvgFallbackGraphProps) {
   const nodes = graph.nodes()
     .map((id) => ({ id, attrs: graph.getNodeAttributes(id) as Record<string, unknown> }))
@@ -173,11 +158,6 @@ function SvgFallbackGraph({
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-background">
-      {message && (
-        <div className="absolute left-2 top-2 z-10 rounded-md border bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
-          {message}
-        </div>
-      )}
       <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img">
         <g>
           {edges.map((edge) => {
@@ -227,7 +207,7 @@ function SvgFallbackGraph({
                   stroke={selected ? (isDark ? "#f8fafc" : "#0f172a") : "transparent"}
                   strokeWidth="2"
                 />
-                {(selected || graph.degree(id) > 0) && (
+                {selected && (
                   <text
                     x={x + size + 4}
                     y={y + 4}
@@ -304,7 +284,7 @@ export function SigmaGraphContainer({
   const containerRef = useRef<HTMLDivElement>(null);
   const internalSigmaRef = useRef<Sigma | null>(null);
   const layoutRef = useRef<FA2Layout | null>(null);
-  // Incremented when sigma instance changes — used to trigger event handler registration.
+  // Incremented when sigma instance changes; used to trigger event handler registration.
   const [sigmaVersion, setSigmaVersion] = useState(0);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   // Pulse phase for animated highlighted edges (0..1, cycles)
@@ -330,7 +310,7 @@ export function SigmaGraphContainer({
     onLayoutStateChange?.(layoutRunning);
   }, [layoutRunning, onLayoutStateChange]);
 
-  /** Stop running layout worker — no post-processing to avoid visible flash.
+  /** Stop running layout worker; no post-processing to avoid visible flash.
    *  Noverlap + compactOrphans already ran after the sync pass (phase 1).
    *  The worker only does subtle refinement, so positions are already good. */
   const stopLayout = useCallback((_sigma: Sigma, _orphanRatio: number) => {
@@ -354,13 +334,8 @@ export function SigmaGraphContainer({
       return;
     }
 
-    if (!canCreateWebGLContext()) {
-      setRenderError("当前浏览器或远程桌面环境不可用 WebGL，已切换到兼容图谱视图。");
-      onSigmaReady?.(null);
-      return;
-    }
 
-    // Random disc init — scale spread with canvas diagonal for responsive layout
+    // Random disc init: scale spread with canvas diagonal for responsive layout.
     if (graph.order > 1) {
       const rect = containerRef.current.getBoundingClientRect();
       const canvasDiag = Math.sqrt(rect.width ** 2 + rect.height ** 2);
@@ -379,7 +354,7 @@ export function SigmaGraphContainer({
       curvedArrow: EdgeCurvedArrowProgram as unknown as typeof EdgeArrowProgram,
     };
 
-    // Create Sigma — shows nodes at random positions immediately
+    // Create Sigma and show nodes at random positions immediately.
     let sigma: Sigma;
     try {
       sigma = new Sigma(graph, containerRef.current, {
@@ -411,7 +386,7 @@ export function SigmaGraphContainer({
     setSigmaRef(sigma);
 
     // FA2 layout: sync rough pass first, then optional worker refinement.
-    // This gives a reasonable layout immediately — no random-scatter animation.
+    // This gives a reasonable layout immediately without random-scatter animation.
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (graph.order > 1) {
       let orphanCount = 0;
@@ -422,7 +397,7 @@ export function SigmaGraphContainer({
       const orphanRatio = orphanCount / graph.order;
       const { settings } = getFA2WorkerSettings(graph.order, orphanRatio);
 
-      // Phase 1: quick sync pass — rough but instant layout
+      // Phase 1: quick sync pass. Rough but instant layout.
       const syncIters = graph.order < 200 ? 300 : graph.order < 1000 ? 100 : 50;
       try {
         forceAtlas2.assign(graph, { iterations: syncIters, settings });
@@ -445,7 +420,7 @@ export function SigmaGraphContainer({
           }
         }
       } else {
-        // Phase 2: worker refinement — subtle position tweaks, short duration
+        // Phase 2: worker refinement. Subtle position tweaks, short duration.
         const refineDuration = graph.order < 500 ? 1500 : graph.order < 2000 ? 2500 : 4000;
         try {
           const layout = new FA2Layout(graph, { settings });
@@ -588,7 +563,7 @@ export function SigmaGraphContainer({
       const tgtDegree = graph.degree(graph.target(edge));
 
       if (cameraRatio > ZOOM_TIERS.FAR) {
-        // zoom ≤~170%: hide all edges
+        // Far zoom: hide all edges.
         return { ...data, hidden: true };
       }
       if (cameraRatio > ZOOM_TIERS.MID) {
@@ -614,7 +589,7 @@ export function SigmaGraphContainer({
   }, [selectedNodeId, hoveredNode, graph, highlightEdgeColor, edgeColor, hiddenTypes, cameraRatio, sigmaVersion, isDark]);
 
   // --- Pulse animation for highlighted edges (only runs when a node is active) ---
-  // Respects prefers-reduced-motion — skips animation entirely for accessibility
+  // Respects prefers-reduced-motion and skips animation entirely for accessibility.
   useEffect(() => {
     const active = selectedNodeId || hoveredNode;
     if (!active) return;
@@ -688,7 +663,7 @@ export function SigmaGraphContainer({
         rafId = requestAnimationFrame(() => {
           rafId = 0;
           setCameraRatio(pendingRatio);
-          // Adaptive label density per zoom tier — fewer labels when zoomed out
+          // Adaptive label density per zoom tier: fewer labels when zoomed out.
           if (pendingRatio > ZOOM_TIERS.FAR) {
             // Default view: only biggest hubs get labels
             sigma.setSetting("labelRenderedSizeThreshold", 18);
@@ -758,7 +733,6 @@ export function SigmaGraphContainer({
         onNodeDoubleClick={onNodeDoubleClick}
         hiddenTypes={hiddenTypes}
         isDark={isDark}
-        message={renderError}
       />
     );
   }
@@ -770,7 +744,7 @@ export function SigmaGraphContainer({
         <div className="absolute top-2 left-2 z-10 flex items-center gap-2">
           <div className="flex items-center gap-1.5 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm">
             <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-            Laying out…
+            Laying out...
           </div>
           <button
             onClick={handleStopLayout}

@@ -8,8 +8,8 @@ import {
   GitBranch,
   MessageSquareWarning,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
-  XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,46 +18,47 @@ import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { TableSkeleton } from "@/components/shared/loading-skeleton";
 import { useAgents } from "@/pages/agents/hooks/use-agents";
+import { useEvolutionFeedback } from "@/hooks/use-evolution-feedback";
 import { useEvolutionMetrics } from "@/hooks/use-evolution-metrics";
 import { useEvolutionSuggestions } from "@/hooks/use-evolution-suggestions";
-import type { EvolutionSuggestion } from "@/types/evolution";
+import type { EvolutionFeedback, EvolutionSuggestion } from "@/types/evolution";
 
 const pipeline = [
   {
-    title: "用户反馈入口",
-    description: "待开发：聊天消息下方接入有用、没用、需要纠正按钮，并记录纠错文本。",
+    title: "聊天反馈入口",
+    description: "助手回复下方已接入有用、没用、纠错按钮，反馈进入进化中心。",
     icon: MessageSquareWarning,
-    status: "待开发",
+    status: "已接入",
   },
   {
-    title: "纠错记忆",
-    description: "待开发：把有效纠错写入即时提示和相似问题召回层。",
+    title: "纠错暂存",
+    description: "纠错和负面反馈先进入待审批建议，不直接修改核心 skill 或配置。",
     icon: ClipboardList,
-    status: "待开发",
+    status: "已接入",
   },
   {
-    title: "演进建议",
-    description: "已接入：读取当前 Agent 的 evolution suggestions，可审批、拒绝和回滚。",
+    title: "演进建议审批",
+    description: "复用 GoClaw 原生 evolution suggestions，可批准、拒绝和回滚。",
     icon: GitBranch,
     status: "已接入",
   },
   {
-    title: "沙箱测试",
-    description: "待开发：对 skill 草案执行测试订单、历史失败案例和标准文件回归。",
+    title: "沙箱回归测试",
+    description: "后续要接入船务清单等标准测试订单，审批前自动跑回归。",
     icon: Beaker,
     status: "待开发",
   },
   {
     title: "审批发布",
-    description: "已接入：复用 GoClaw 当前 evolution suggestion 审批接口。",
-    icon: CheckCircle2,
+    description: "核心 skill、模型、工具、源码级变更必须管理员审批，不自动发布。",
+    icon: ShieldCheck,
     status: "已接入",
   },
   {
     title: "审计回滚",
-    description: "部分已有：建议状态包含 applied、rejected、rolled_back，后续补完整审计页面。",
+    description: "建议状态支持 pending、approved、rejected、applied、rolled_back。",
     icon: Activity,
-    status: "部分已有",
+    status: "部分完成",
   },
 ];
 
@@ -65,6 +66,12 @@ function statusVariant(status: string) {
   if (status === "pending") return "secondary";
   if (status === "applied" || status === "approved") return "outline";
   if (status === "rejected" || status === "rolled_back") return "destructive";
+  return "secondary";
+}
+
+function pipelineVariant(status: string) {
+  if (status === "已接入") return "outline";
+  if (status === "部分完成") return "secondary";
   return "secondary";
 }
 
@@ -116,6 +123,37 @@ function SuggestionCard({
   );
 }
 
+function FeedbackCard({ item }: { item: EvolutionFeedback }) {
+  const typeLabel = {
+    useful: "有用",
+    not_useful: "没用",
+    correction: "纠错",
+  }[item.value.feedback_type] ?? item.value.feedback_type;
+
+  return (
+    <div className="rounded-lg border p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={item.value.feedback_type === "useful" ? "outline" : "secondary"}>{typeLabel}</Badge>
+          {item.value.requires_approval && <Badge variant="secondary">待复核</Badge>}
+          {item.value.user_id && <span className="text-xs text-muted-foreground">用户：{item.value.user_id}</span>}
+        </div>
+        <span className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
+      </div>
+      <p className="mt-2 truncate text-xs text-muted-foreground">会话：{item.session_key}</p>
+      {item.value.message_content && (
+        <p className="mt-2 line-clamp-3 text-muted-foreground">{item.value.message_content}</p>
+      )}
+      {item.value.correction && (
+        <div className="mt-2 rounded-md bg-muted p-2">
+          <p className="text-xs font-medium">用户纠错</p>
+          <p className="mt-1 whitespace-pre-wrap">{item.value.correction}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EvolutionCenterPage() {
   const { agents, loading: agentsLoading, refresh } = useAgents();
   const [agentId, setAgentId] = useState("");
@@ -128,15 +166,17 @@ export function EvolutionCenterPage() {
 
   const { toolAggs, retrievalAggs, loading: metricsLoading } = useEvolutionMetrics(agentId, timeRange);
   const { suggestions, loading: suggestionsLoading, updateStatus } = useEvolutionSuggestions(agentId);
+  const { feedback, loading: feedbackLoading } = useEvolutionFeedback(agentId, timeRange);
 
   const pendingCount = suggestions.filter((item) => item.status === "pending").length;
   const appliedCount = suggestions.filter((item) => item.status === "applied" || item.status === "approved").length;
+  const correctionCount = feedback.filter((item) => item.value.feedback_type === "correction").length;
 
   return (
     <div className="p-4 sm:p-6 pb-10">
       <PageHeader
         title="智能进化中心"
-        description="管理员统一查看用户反馈闭环、演进指标、演进建议、审批发布和后续 capability-evolver 接入状态。"
+        description="管理员统一查看用户反馈、演进指标、待审批建议和安全发布状态。capability-evolver 只作为后台草稿生成能力，不直接改核心能力。"
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="secondary">管理员可见</Badge>
@@ -156,25 +196,27 @@ export function EvolutionCenterPage() {
               <CardTitle>目标闭环</CardTitle>
             </div>
             <CardDescription>
-              业务执行 → 用户反馈/系统指标 → 纠错暂存 → 记忆召回 → 演进建议 → 沙箱测试 → 审批发布 → 线上回归 → 审计回滚
+              业务执行到用户反馈，再到纠错暂存、建议生成、沙箱测试、人工审批、发布和回滚。当前版本已完成反馈采集和审批入口，沙箱自动回归仍需后续补齐。
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid gap-3 sm:grid-cols-3">
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">待审批建议</p>
-                <p className="mt-1 text-2xl font-semibold">{pendingCount}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">已应用建议</p>
-                <p className="mt-1 text-2xl font-semibold">{appliedCount}</p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">当前 Agent</p>
-                <p className="mt-1 truncate text-sm font-medium">
-                  {selectedAgent?.display_name || selectedAgent?.agent_key || "未选择"}
-                </p>
-              </div>
+          <CardContent className="grid gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">待审批建议</p>
+              <p className="mt-1 text-2xl font-semibold">{pendingCount}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">已批准/应用</p>
+              <p className="mt-1 text-2xl font-semibold">{appliedCount}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">纠错反馈</p>
+              <p className="mt-1 text-2xl font-semibold">{correctionCount}</p>
+            </div>
+            <div className="rounded-lg border p-3">
+              <p className="text-xs text-muted-foreground">当前 Agent</p>
+              <p className="mt-1 truncate text-sm font-medium">
+                {selectedAgent?.display_name || selectedAgent?.agent_key || "未选择"}
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -182,7 +224,7 @@ export function EvolutionCenterPage() {
         <Card>
           <CardHeader>
             <CardTitle>Agent 范围</CardTitle>
-            <CardDescription>当前接口按 Agent 查看演进指标和建议，后续再扩展为租户总览。</CardDescription>
+            <CardDescription>当前按 Agent 查看反馈、指标和建议，后续再扩展租户总览。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <select
@@ -218,7 +260,7 @@ export function EvolutionCenterPage() {
               <CardHeader className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
                   <Icon className="h-5 w-5 text-primary" />
-                  <Badge variant={item.status === "已接入" ? "outline" : "secondary"}>{item.status}</Badge>
+                  <Badge variant={pipelineVariant(item.status)}>{item.status}</Badge>
                 </div>
                 <div>
                   <CardTitle className="text-base">{item.title}</CardTitle>
@@ -230,14 +272,14 @@ export function EvolutionCenterPage() {
         })}
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <div className="mt-4 grid gap-4 xl:grid-cols-3">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
               <BarChart3 className="h-5 w-5 text-primary" />
               <CardTitle>演进指标</CardTitle>
             </div>
-            <CardDescription>来自当前 GoClaw evolution metrics：工具成功率和检索使用率。</CardDescription>
+            <CardDescription>来自 GoClaw evolution metrics，显示工具成功率和检索使用率。</CardDescription>
           </CardHeader>
           <CardContent>
             {!agentId ? (
@@ -288,10 +330,35 @@ export function EvolutionCenterPage() {
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
+              <MessageSquareWarning className="h-5 w-5 text-primary" />
+              <CardTitle>用户反馈记录</CardTitle>
+            </div>
+            <CardDescription>聊天中提交的有用、没用、纠错反馈。负面和纠错反馈会生成待审批建议。</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {!agentId ? (
+              <EmptyState icon={MessageSquareWarning} title="请选择 Agent" description="选择 Agent 后查看反馈。" />
+            ) : feedbackLoading ? (
+              <TableSkeleton rows={4} />
+            ) : feedback.length === 0 ? (
+              <EmptyState icon={CheckCircle2} title="暂无反馈" description="当前 Agent 暂无用户反馈。" />
+            ) : (
+              <div className="space-y-3">
+                {feedback.map((item) => (
+                  <FeedbackCard key={item.id} item={item} />
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
               <GitBranch className="h-5 w-5 text-primary" />
               <CardTitle>演进建议审批</CardTitle>
             </div>
-            <CardDescription>当前已接入 GoClaw 原生建议审批接口。核心 skill 和源码级变更后续必须继续走人工审核。</CardDescription>
+            <CardDescription>审批后才会进入下一步。核心 skill 和源码级改动仍必须人工复核。</CardDescription>
           </CardHeader>
           <CardContent>
             {!agentId ? (
@@ -310,30 +377,6 @@ export function EvolutionCenterPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="mt-4">
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <XCircle className="h-5 w-5 text-muted-foreground" />
-            <CardTitle>未完成但必须补齐的能力</CardTitle>
-          </div>
-          <CardDescription>这部分还没有完成，不能算完整智能进化中心。</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-3">
-          <div className="rounded-md border p-3 text-sm">
-            <p className="font-medium">聊天反馈按钮</p>
-            <p className="mt-1 text-muted-foreground">需要新增消息级反馈 API、反馈表和前端按钮。</p>
-          </div>
-          <div className="rounded-md border p-3 text-sm">
-            <p className="font-medium">沙箱回归测试</p>
-            <p className="mt-1 text-muted-foreground">需要把测试订单、标准文件和失败案例接入自动验证。</p>
-          </div>
-          <div className="rounded-md border p-3 text-sm">
-            <p className="font-medium">capability-evolver 执行链路</p>
-            <p className="mt-1 text-muted-foreground">需要作为后台 worker 接入，只生成草案，不直接改核心能力。</p>
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

@@ -13,6 +13,8 @@ import type { ChatMessage, ToolStreamEntry, RunActivity, ActiveTeamTask } from "
 import type { LightboxImage } from "@/components/shared/image-lightbox";
 
 interface ChatThreadProps {
+  agentId: string;
+  sessionKey: string;
   messages: ChatMessage[];
   streamText: string | null;
   thinkingText: string | null;
@@ -25,6 +27,13 @@ interface ChatThreadProps {
   loading?: boolean;
   scrollTrigger?: number;
   onToggleTaskPanel?: () => void;
+  onFeedback?: (input: {
+    feedback_type: "useful" | "not_useful" | "correction";
+    session_key: string;
+    message_ref: string;
+    message_content?: string;
+    correction?: string;
+  }) => Promise<void>;
 }
 
 /** Check if a message is tool-only (no user-visible text content) */
@@ -75,8 +84,9 @@ function buildDisplayItems(messages: ChatMessage[]): DisplayItem[] {
 }
 
 export const ChatThread = memo(function ChatThread({
-  messages, streamText, thinkingText, toolStream, blockReplies,
+  agentId, sessionKey, messages, streamText, thinkingText, toolStream, blockReplies,
   activity, teamTasks, isRunning, isBusy, loading, scrollTrigger = 0, onToggleTaskPanel,
+  onFeedback,
 }: ChatThreadProps) {
   const { t } = useTranslation("chat");
   const { ref, onScroll } = useAutoScroll<HTMLDivElement>(
@@ -156,7 +166,16 @@ export const ChatThread = memo(function ChatThread({
               case "notification":
                 return <SystemNotification key={`notif-${item.idx}`} message={item.msg} />;
               case "message":
-                return <MessageBubble key={`msg-${item.idx}`} message={item.msg} />;
+                return (
+                  <MessageBubble
+                    key={`msg-${item.idx}`}
+                    message={item.msg}
+                    agentId={agentId}
+                    sessionKey={sessionKey}
+                    messageRef={`${sessionKey}:${item.idx}:${item.msg.created_at ?? item.msg.timestamp ?? ""}`}
+                    onFeedback={onFeedback}
+                  />
+                );
               case "merged-tools":
                 return <MergedToolGroup key={`tools-${item.idx}`} msgs={item.msgs} />;
             }
