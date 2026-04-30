@@ -61,6 +61,9 @@ services:
       - type: bind
         source: D:\数据\产品包装重量表
         target: /mnt/source/product-package-weights
+      - type: bind
+        source: D:\数据\标签模板
+        target: /mnt/label-templates
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
