@@ -9,7 +9,7 @@ interface ThinkingBlockProps {
 
 export function ThinkingBlock({ text, isStreaming = false }: ThinkingBlockProps) {
   const { t } = useTranslation("common");
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
 
   // Auto-expand when streaming starts, keep user's choice when done
   useEffect(() => {

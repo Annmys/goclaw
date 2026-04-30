@@ -1,8 +1,9 @@
 import { useState, useCallback } from "react";
-import { Download, FileText, FileCode, Music, Film, File } from "lucide-react";
+import { Download, FileText, FileCode, Music, Film, File, Printer } from "lucide-react";
 import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { formatSize, toDownloadUrl } from "@/lib/file-helpers";
 import { useMediaUrl } from "@/hooks/use-media-url";
+import { useHttp } from "@/hooks/use-ws";
 import { useChatImageGallery } from "./chat-image-gallery-context";
 import {
   Dialog,
@@ -64,6 +65,18 @@ function isMediaKind(kind: string): "image" | "audio" | "video" | null {
   return null;
 }
 
+function isLabelPreview(item: MediaItem): boolean {
+  if (item.kind !== "image") return false;
+  const name = (item.fileName ?? item.path).toLowerCase();
+  const path = item.path.toLowerCase();
+  return (
+    name === "preview.png" ||
+    name === "label_preview.png" ||
+    path.includes("/标签作业/") ||
+    path.includes("%e6%a0%87%e7%ad%be%e4%bd%9c%e4%b8%9a")
+  );
+}
+
 /** Image with blob-cached src to prevent flickering on session switch. */
 function CachedImage({ src, alt, className, loading, onClick }: {
   src: string; alt: string; className?: string; loading?: "lazy" | "eager";
@@ -75,6 +88,7 @@ function CachedImage({ src, alt, className, loading, onClick }: {
 
 export function MediaGallery({ items }: MediaGalleryProps) {
   const { openImage } = useChatImageGallery();
+  const http = useHttp();
   const [preview, setPreview] = useState<{
     name: string;
     href: string;
@@ -82,6 +96,8 @@ export function MediaGallery({ items }: MediaGalleryProps) {
     mediaType?: "image" | "audio" | "video";
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [printState, setPrintState] = useState<Record<string, "idle" | "printing" | "ok" | "error">>({});
+  const [printError, setPrintError] = useState<Record<string, string>>({});
 
   const handleFileClick = useCallback((item: MediaItem) => {
     const media = isMediaKind(item.kind);
@@ -100,6 +116,22 @@ export function MediaGallery({ items }: MediaGalleryProps) {
       .catch(() => { /* fetch failed — file may not exist yet, ignore */ })
       .finally(() => setLoading(false));
   }, []);
+
+  const handlePrintLabel = useCallback(async (item: MediaItem) => {
+    setPrintState((prev) => ({ ...prev, [item.path]: "printing" }));
+    setPrintError((prev) => ({ ...prev, [item.path]: "" }));
+    try {
+      await http.post<{ ok: boolean }>("/v1/labels/print", {
+        preview_path: item.path,
+        copies: 1,
+      });
+      setPrintState((prev) => ({ ...prev, [item.path]: "ok" }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "打印失败";
+      setPrintState((prev) => ({ ...prev, [item.path]: "error" }));
+      setPrintError((prev) => ({ ...prev, [item.path]: message }));
+    }
+  }, [http]);
 
   if (items.length === 0) return null;
 
@@ -150,6 +182,27 @@ export function MediaGallery({ items }: MediaGalleryProps) {
                   title={item.prompt}
                 >
                   {item.prompt}
+                </div>
+              )}
+              {isLabelPreview(item) && (
+                <div className="flex flex-col gap-1 border-t bg-muted/30 px-2 py-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintLabel(item)}
+                    disabled={printState[item.path] === "printing"}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                    {printState[item.path] === "printing" ? "打印中..." : "打印"}
+                  </button>
+                  {printState[item.path] === "ok" && (
+                    <div className="text-xs text-green-600">打印任务已提交</div>
+                  )}
+                  {printState[item.path] === "error" && (
+                    <div className="text-xs text-destructive" title={printError[item.path]}>
+                      {printError[item.path] || "打印失败"}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

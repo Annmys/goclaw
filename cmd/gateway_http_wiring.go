@@ -218,6 +218,9 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 	// Storage file management — browse/delete files under the resolved workspace directory.
 	d.server.SetStorageHandler(httpapi.NewStorageHandler(d.workspace))
 
+	// BarTender label print proxy. The actual BarTender process runs on the Windows host.
+	d.server.SetLabelPrintHandler(httpapi.NewLabelPrintHandler(d.workspace))
+
 	// Media upload endpoint — accepts multipart file uploads, returns temp path + MIME type.
 	d.server.SetMediaUploadHandler(httpapi.NewMediaUploadHandler())
 

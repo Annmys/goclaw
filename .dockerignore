@@ -21,6 +21,15 @@ ui/simple-saas/
 !ui/web/
 ui/web/node_modules/
 ui/web/.pnpm-store/
+ui/web/.vite/
 ui/web/dist/
+ui/web/*.tsbuildinfo
+node_modules/
+dist/
 plans/
 skills-store/
+tmp_*
+_tmp_*
+tmp_shiptest/
+*.test
+hooks.test

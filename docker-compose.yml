@@ -63,6 +63,10 @@ services:
         target: /mnt/source/product-package-weights
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    dns:
+      - 223.5.5.5
+      - 119.29.29.29
+      - 8.8.8.8
     security_opt:
       - no-new-privileges:true
     init: true
