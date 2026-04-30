@@ -69,11 +69,18 @@ function isLabelPreview(item: MediaItem): boolean {
   if (item.kind !== "image") return false;
   const name = (item.fileName ?? item.path).toLowerCase();
   const path = item.path.toLowerCase();
+  let decodedPath = path;
+  try {
+    decodedPath = decodeURIComponent(path);
+  } catch {
+    decodedPath = path;
+  }
   return (
     name === "preview.png" ||
     name === "label_preview.png" ||
     path.includes("/标签作业/") ||
-    path.includes("%e6%a0%87%e7%ad%be%e4%bd%9c%e4%b8%9a")
+    path.includes("%e6%a0%87%e7%ad%be%e4%bd%9c%e4%b8%9a") ||
+    decodedPath.includes("/标签作业/")
   );
 }
 
