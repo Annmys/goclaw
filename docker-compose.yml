@@ -64,6 +64,12 @@ services:
       - type: bind
         source: D:\数据\标签模板
         target: /mnt/label-templates
+      - type: bind
+        source: D:\数据\包装资料
+        target: /mnt/package-materials
+      - type: bind
+        source: D:\数据\测试数据\包装计算
+        target: /mnt/package-calc-tests
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:
