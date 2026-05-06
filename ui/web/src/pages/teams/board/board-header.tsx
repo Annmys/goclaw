@@ -14,7 +14,7 @@ interface BoardHeaderProps {
   team: TeamData;
   members: TeamMemberData[];
   onBack: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
   onSettings: () => void;
   onMembers: () => void;
   onRenameTeam?: (newName: string) => Promise<void>;
@@ -90,15 +90,17 @@ export function BoardHeader({ team, members, onBack, onDelete, onSettings, onMem
         <Settings className="h-4 w-4" />
         <span className="hidden sm:inline">{t("detail.tabs.settings")}</span>
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
-        onClick={onDelete}
-      >
-        <Trash2 className="h-4 w-4" />
-        <span className="hidden sm:inline">{t("delete.title")}</span>
-      </Button>
+      {onDelete && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 gap-1.5 text-muted-foreground hover:text-destructive"
+          onClick={onDelete}
+        >
+          <Trash2 className="h-4 w-4" />
+          <span className="hidden sm:inline">{t("delete.title")}</span>
+        </Button>
+      )}
 
       <TeamFeaturesModal open={featuresOpen} onOpenChange={setFeaturesOpen} />
       <TeamAuditLogsModal open={auditLogsOpen} onOpenChange={setAuditLogsOpen} teamId={team.id} />

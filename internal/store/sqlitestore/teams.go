@@ -91,16 +91,37 @@ func (s *SQLiteTeamStore) UpdateTeam(ctx context.Context, teamID uuid.UUID, upda
 }
 
 func (s *SQLiteTeamStore) DeleteTeam(ctx context.Context, teamID uuid.UUID) error {
-	if store.IsCrossTenant(ctx) {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ?`, teamID)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	tid := store.TenantIDFromContext(ctx)
-	if tid == uuid.Nil {
-		return fmt.Errorf("tenant_id required for delete")
+	defer tx.Rollback()
+
+	// Team Vault documents have agent_id NULL. If SQLite's FK action only sets
+	// team_id to NULL, scope='team' would violate the scope consistency rules.
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE vault_documents SET scope = 'shared', team_id = NULL WHERE team_id = ? AND scope = 'team'`,
+		teamID); err != nil {
+		return err
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ? AND tenant_id = ?`, teamID, tid)
-	return err
+
+	var res sql.Result
+	if store.IsCrossTenant(ctx) {
+		res, err = tx.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ?`, teamID)
+	} else {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return fmt.Errorf("tenant_id required for delete")
+		}
+		res, err = tx.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ? AND tenant_id = ?`, teamID, tid)
+	}
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("team not found: %s", teamID)
+	}
+	return tx.Commit()
 }
 
 func (s *SQLiteTeamStore) ListTeams(ctx context.Context) ([]store.TeamData, error) {

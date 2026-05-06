@@ -8,6 +8,7 @@ import { BoardContainer } from "./board/board-container";
 import { TeamInfoDialog } from "./board/team-info-dialog";
 import { TeamMembersDialog } from "./board/team-members-dialog";
 import type { TeamData, TeamMemberData, TeamAccessSettings, ScopeEntry } from "@/types/team";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 const TeamWorkspaceDialog = lazy(() =>
   import("./board/team-workspace-dialog").then((m) => ({ default: m.TeamWorkspaceDialog }))
@@ -20,6 +21,8 @@ interface TeamDetailPageProps {
 
 export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
   const { t } = useTranslation("teams");
+  const role = useAuthStore((s) => s.role);
+  const canManageTeams = role === "admin" || role === "owner";
   const {
     getTeam, getTeamTasks, getTeamScopes, addMember, removeMember, deleteTeam,
     getTaskDetail, getTaskLight, deleteTask, deleteTasksBulk, addTaskComment, updateTeam,
@@ -105,10 +108,10 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
         team={team}
         members={members}
         onBack={onBack}
-        onDelete={() => setDeleteOpen(true)}
+        onDelete={canManageTeams ? () => setDeleteOpen(true) : undefined}
         onSettings={() => setInfoOpen(true)}
         onMembers={() => setMembersOpen(true)}
-        onRenameTeam={handleRenameTeam}
+        onRenameTeam={canManageTeams ? handleRenameTeam : undefined}
       />
 
       <BoardContainer

@@ -630,7 +630,7 @@ CREATE TABLE IF NOT EXISTS tenant_hook_budget (
 
 // backfillV16 populates base_name / path_basename for rows that existed
 // before the v15 → v16 migration. Idempotent — re-running on already-filled
-// rows is a no-op thanks to the WHERE base_name = '' filter.
+// rows is a no-op thanks to the WHERE base_name = ” filter.
 func backfillV16(ctx context.Context, db *sql.DB) error {
 	type row struct{ id, path string }
 

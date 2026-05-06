@@ -90,16 +90,26 @@ func (s *PGTeamStore) UpdateTeam(ctx context.Context, teamID uuid.UUID, updates 
 }
 
 func (s *PGTeamStore) DeleteTeam(ctx context.Context, teamID uuid.UUID) error {
+	var (
+		res sql.Result
+		err error
+	)
 	if store.IsCrossTenant(ctx) {
-		_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = $1`, teamID)
+		res, err = s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = $1`, teamID)
+	} else {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return fmt.Errorf("tenant_id required for delete")
+		}
+		res, err = s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = $1 AND tenant_id = $2`, teamID, tid)
+	}
+	if err != nil {
 		return err
 	}
-	tid := store.TenantIDFromContext(ctx)
-	if tid == uuid.Nil {
-		return fmt.Errorf("tenant_id required for delete")
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("team not found: %s", teamID)
 	}
-	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = $1 AND tenant_id = $2`, teamID, tid)
-	return err
+	return nil
 }
 
 func (s *PGTeamStore) ListTeams(ctx context.Context) ([]store.TeamData, error) {
