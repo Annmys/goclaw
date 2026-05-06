@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useLayoutEffect, useEffect, type KeyboardEvent } from "react";
+import { useState, useRef, useCallback, useLayoutEffect, useEffect, type KeyboardEvent, type ClipboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Square, Paperclip, X, Mic, ImagePlus } from "lucide-react";
+import { Send, Square, Paperclip, X, Mic } from "lucide-react";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 
 export interface AttachedFile {
@@ -44,7 +44,6 @@ export function ChatInput({
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
   const voiceRecorder = useVoiceRecorder();
 
   const formatDuration = (seconds: number) => {
@@ -106,10 +105,6 @@ export function ChatInput({
     fileInputRef.current?.click();
   }, []);
 
-  const handleImageSelect = useCallback(() => {
-    imageInputRef.current?.click();
-  }, []);
-
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files;
     if (!selected) return;
@@ -118,15 +113,30 @@ export function ChatInput({
     e.target.value = "";
   }, [files, onFilesChange]);
 
-  const handleImageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected) return;
-    const newFiles: AttachedFile[] = Array.from(selected)
-      .filter((f) => f.type.startsWith("image/"))
-      .map((f) => ({ file: f }));
+  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (disabled || isBusy || voiceRecorder.isRecording) return;
+
+    const items = Array.from(e.clipboardData.items ?? []);
+    const pastedImages = items
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file));
+
+    if (pastedImages.length === 0) return;
+
+    e.preventDefault();
+    const timestamp = Date.now();
+    const newFiles: AttachedFile[] = pastedImages.map((file, index) => {
+      if (file.name) return { file };
+      const ext = file.type.split("/")[1] || "png";
+      return {
+        file: new File([file], `pasted-image-${timestamp}-${index + 1}.${ext}`, {
+          type: file.type || "image/png",
+        }),
+      };
+    });
     onFilesChange([...files, ...newFiles]);
-    e.target.value = "";
-  }, [files, onFilesChange]);
+  }, [disabled, isBusy, voiceRecorder.isRecording, files, onFilesChange]);
 
   const removeFile = useCallback((index: number) => {
     onFilesChange(files.filter((_, i) => i !== index));
@@ -169,15 +179,6 @@ export function ChatInput({
         className="hidden"
       />
 
-      <input
-        ref={imageInputRef}
-        type="file"
-        multiple
-        accept="image/*"
-        onChange={handleImageChange}
-        className="hidden"
-      />
-
       {/* Input container — attach + textarea + send/stop inside one rounded box.
           items-end aligns icons with bottom of textarea when multi-line; single-line stays tight because textarea auto-sizes via useLayoutEffect above. */}
       <div className="flex items-end rounded-xl border bg-background/95 backdrop-blur-sm shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring">
@@ -190,16 +191,6 @@ export function ChatInput({
           className="shrink-0 py-3 pl-3 pr-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 cursor-pointer"
         >
           <Paperclip className="h-4 w-4" />
-        </button>
-
-        <button
-          type="button"
-          onClick={handleImageSelect}
-          disabled={disabled || isBusy || voiceRecorder.isRecording}
-          title={t("attachImage", "发送图片")}
-          className="shrink-0 py-3 pl-1 pr-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 cursor-pointer"
-        >
-          <ImagePlus className="h-4 w-4" />
         </button>
 
         {/* Voice record button - hidden when recording */}
@@ -241,6 +232,7 @@ export function ChatInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             onInput={handleInput}
             placeholder={t("sendMessage")}
             disabled={disabled}
