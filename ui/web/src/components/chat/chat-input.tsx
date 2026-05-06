@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useLayoutEffect, useEffect, type KeyboardEvent, type ClipboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Square, Paperclip, X, Mic } from "lucide-react";
+import { Download, Send, Square, Paperclip, X, Mic } from "lucide-react";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 
 export interface AttachedFile {
@@ -17,6 +17,8 @@ interface ChatInputProps {
   disabled?: boolean;
   files: AttachedFile[];
   onFilesChange: (files: AttachedFile[]) => void;
+  onExport?: () => void;
+  canExport?: boolean;
 }
 
 function ImageAttachmentPreview({ file }: { file: File }) {
@@ -39,6 +41,8 @@ export function ChatInput({
   disabled,
   files,
   onFilesChange,
+  onExport,
+  canExport = false,
 }: ChatInputProps) {
   const { t } = useTranslation("common");
   const [value, setValue] = useState("");
@@ -266,6 +270,15 @@ export function ChatInput({
             <>
               <button
                 type="button"
+                onClick={onExport}
+                disabled={!canExport}
+                title="Export chat history"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
                 onClick={handleSend}
                 disabled={!value.trim() || disabled}
                 title={t("sendFollowUp")}
@@ -283,15 +296,26 @@ export function ChatInput({
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              onClick={handleSend}
-              disabled={!hasContent || disabled}
-              title={t("sendMessageTitle")}
-              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-            >
-              <Send className="h-4 w-4" />
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onExport}
+                disabled={!canExport}
+                title="Export chat history"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Download className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleSend}
+                disabled={!hasContent || disabled}
+                title={t("sendMessageTitle")}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </>
           )}
         </div>
       </div>

@@ -454,8 +454,6 @@ export function ChatPage() {
             onToggleTaskPanel={() => setTaskPanelOpen((v) => !v)}
             taskPanelOpen={taskPanelOpen}
             session={sessions.find((s) => s.key === sessionKey) ?? null}
-            onExport={handleExportChat}
-            canExport={messages.length > 0}
           />
         </div>
 
@@ -499,6 +497,8 @@ export function ChatPage() {
               disabled={!connected}
               files={files}
               onFilesChange={setFiles}
+              onExport={handleExportChat}
+              canExport={messages.length > 0}
             />
           )}
         </DropZone>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Loader2, Bot, Users, PanelRightOpen, PanelRightClose } from "lucide-react";
+import { Loader2, Bot, Users, PanelRightOpen, PanelRightClose } from "lucide-react";
 import { useHttp } from "@/hooks/use-ws";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { RunActivity, ActiveTeamTask } from "@/types/chat";
@@ -17,8 +17,6 @@ interface ChatTopBarProps {
   taskPanelOpen?: boolean;
   /** Current session — when provided, the bar renders a context-usage badge. */
   session?: SessionInfo | null;
-  onExport?: () => void;
-  canExport?: boolean;
 }
 
 const phaseLabels: Record<RunActivity["phase"], string> = {
@@ -30,7 +28,7 @@ const phaseLabels: Record<RunActivity["phase"], string> = {
   leader_processing: "Processing team results…",
 };
 
-export function ChatTopBar({ agentId, isRunning, isBusy, activity, teamTasks, onToggleTaskPanel, taskPanelOpen, session, onExport, canExport = false }: ChatTopBarProps) {
+export function ChatTopBar({ agentId, isRunning, isBusy, activity, teamTasks, onToggleTaskPanel, taskPanelOpen, session }: ChatTopBarProps) {
   const http = useHttp();
   const { t } = useTranslation("chat");
   const connected = useAuthStore((s) => s.connected);
@@ -95,17 +93,6 @@ export function ChatTopBar({ agentId, isRunning, isBusy, activity, teamTasks, on
       </div>
 
       <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={onExport}
-          disabled={!canExport}
-          className="flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
-          title="Export chat history"
-        >
-          <Download className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Export</span>
-        </button>
-
         {usage && (
           <div
             className={`hidden sm:flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[11px] ${usage.color}`}
