@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useLayoutEffect, type KeyboardEvent } from "react";
+import { useState, useRef, useCallback, useLayoutEffect, useEffect, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Send, Square, Paperclip, X, Mic } from "lucide-react";
+import { Send, Square, Paperclip, X, Mic, ImagePlus } from "lucide-react";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 
 export interface AttachedFile {
@@ -19,6 +19,19 @@ interface ChatInputProps {
   onFilesChange: (files: AttachedFile[]) => void;
 }
 
+function ImageAttachmentPreview({ file }: { file: File }) {
+  const [url, setUrl] = useState("");
+
+  useEffect(() => {
+    const nextUrl = URL.createObjectURL(file);
+    setUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [file]);
+
+  if (!url) return null;
+  return <img src={url} alt="" className="h-8 w-8 rounded object-cover" />;
+}
+
 export function ChatInput({
   onSend,
   onAbort,
@@ -31,6 +44,7 @@ export function ChatInput({
   const [value, setValue] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const voiceRecorder = useVoiceRecorder();
 
   const formatDuration = (seconds: number) => {
@@ -92,10 +106,24 @@ export function ChatInput({
     fileInputRef.current?.click();
   }, []);
 
+  const handleImageSelect = useCallback(() => {
+    imageInputRef.current?.click();
+  }, []);
+
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = e.target.files;
     if (!selected) return;
     const newFiles: AttachedFile[] = Array.from(selected).map((f) => ({ file: f }));
+    onFilesChange([...files, ...newFiles]);
+    e.target.value = "";
+  }, [files, onFilesChange]);
+
+  const handleImageChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files;
+    if (!selected) return;
+    const newFiles: AttachedFile[] = Array.from(selected)
+      .filter((f) => f.type.startsWith("image/"))
+      .map((f) => ({ file: f }));
     onFilesChange([...files, ...newFiles]);
     e.target.value = "";
   }, [files, onFilesChange]);
@@ -119,6 +147,7 @@ export function ChatInput({
               key={i}
               className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
             >
+              {af.file.type.startsWith("image/") && <ImageAttachmentPreview file={af.file} />}
               <span className="max-w-[150px] truncate">{af.file.name}</span>
               <button
                 type="button"
@@ -140,6 +169,15 @@ export function ChatInput({
         className="hidden"
       />
 
+      <input
+        ref={imageInputRef}
+        type="file"
+        multiple
+        accept="image/*"
+        onChange={handleImageChange}
+        className="hidden"
+      />
+
       {/* Input container — attach + textarea + send/stop inside one rounded box.
           items-end aligns icons with bottom of textarea when multi-line; single-line stays tight because textarea auto-sizes via useLayoutEffect above. */}
       <div className="flex items-end rounded-xl border bg-background/95 backdrop-blur-sm shadow-sm transition-colors focus-within:ring-1 focus-within:ring-ring">
@@ -152,6 +190,16 @@ export function ChatInput({
           className="shrink-0 py-3 pl-3 pr-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 cursor-pointer"
         >
           <Paperclip className="h-4 w-4" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleImageSelect}
+          disabled={disabled || isBusy || voiceRecorder.isRecording}
+          title={t("attachImage", "发送图片")}
+          className="shrink-0 py-3 pl-1 pr-1 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 cursor-pointer"
+        >
+          <ImagePlus className="h-4 w-4" />
         </button>
 
         {/* Voice record button - hidden when recording */}

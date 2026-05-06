@@ -19,7 +19,7 @@ export function TenantSelectorPage() {
     localStorage.setItem(LOCAL_STORAGE_KEYS.TENANT_ID, slug);
     useAuthStore.getState().setTenantSelected(true);
     // Reload to reconnect WS with the new tenant_scope
-    window.location.replace(from || ROUTES.OVERVIEW);
+    window.location.replace(from || ROUTES.CHAT);
   };
 
   const handleLogout = () => {
