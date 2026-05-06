@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronRight, Brain } from "lucide-react";
 
@@ -9,12 +9,7 @@ interface ThinkingBlockProps {
 
 export function ThinkingBlock({ text, isStreaming = false }: ThinkingBlockProps) {
   const { t } = useTranslation("common");
-  const [expanded, setExpanded] = useState(true);
-
-  // Auto-expand when streaming starts, keep user's choice when done
-  useEffect(() => {
-    if (isStreaming) setExpanded(true);
-  }, [isStreaming]);
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="rounded-lg border border-muted bg-muted/50 text-sm overflow-hidden">

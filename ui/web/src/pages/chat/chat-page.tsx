@@ -19,6 +19,7 @@ import { useVirtualKeyboard } from "@/hooks/use-virtual-keyboard";
 import { useEvolutionFeedback } from "@/hooks/use-evolution-feedback";
 import { TaskPanel } from "@/components/chat/task-panel";
 import { LOCAL_STORAGE_KEYS } from "@/lib/constants";
+import type { ChatMessage } from "@/types/chat";
 
 type StoredChatSelection = {
   agentId: string;
@@ -48,6 +49,105 @@ function readStoredSelections(): StoredChatSelectionMap {
 function writeStoredSelections(map: StoredChatSelectionMap) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CHAT_SELECTION, JSON.stringify(map));
+}
+
+function safeFilenamePart(value: string) {
+  return value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, "-")
+    .replace(/\s+/g, "-")
+    .slice(0, 80) || "chat";
+}
+
+function formatExportTime(value?: string | number) {
+  if (!value) return "";
+  const date = typeof value === "number" ? new Date(value) : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString();
+}
+
+function formatChatExport(params: {
+  agentId: string;
+  sessionKey: string;
+  userId: string;
+  tenantSlug: string;
+  tenantId: string;
+  messages: ChatMessage[];
+}) {
+  const { agentId, sessionKey, userId, tenantSlug, tenantId, messages } = params;
+  const lines: string[] = [
+    "# GoClaw Chat Export",
+    "",
+    `- Agent: ${agentId || "unknown"}`,
+    `- Session: ${sessionKey || "unsaved"}`,
+    `- User: ${userId || "unknown"}`,
+    `- Tenant: ${tenantSlug || tenantId || "unknown"}`,
+    `- Exported At: ${new Date().toLocaleString()}`,
+    `- Messages: ${messages.length}`,
+    "",
+    "---",
+    "",
+  ];
+
+  messages.forEach((message, index) => {
+    if (message.isNotification) return;
+    const role = message.role === "assistant" ? "Assistant" : message.role === "user" ? "User" : "Tool";
+    const time = formatExportTime(message.created_at || message.timestamp);
+    lines.push(`## ${index + 1}. ${role}${time ? ` - ${time}` : ""}`, "");
+
+    if (message.thinking?.trim()) {
+      lines.push("<details>", "<summary>Thinking</summary>", "", "```text", message.thinking.trim(), "```", "", "</details>", "");
+    }
+
+    if (message.toolDetails?.length) {
+      lines.push("### Tools", "");
+      message.toolDetails.forEach((tool) => {
+        lines.push(`- ${tool.name}: ${tool.phase}`);
+        if (tool.arguments) lines.push(`  - Arguments: \`${JSON.stringify(tool.arguments)}\``);
+        if (tool.result) lines.push(`  - Result: ${tool.result}`);
+        if (tool.errorContent) lines.push(`  - Error: ${tool.errorContent}`);
+      });
+      lines.push("");
+    }
+
+    if (message.tool_calls?.length) {
+      lines.push("### Tool Calls", "");
+      message.tool_calls.forEach((tool) => {
+        lines.push(`- ${tool.name} (${tool.id})`);
+        lines.push(`  - Arguments: \`${JSON.stringify(tool.arguments)}\``);
+      });
+      lines.push("");
+    }
+
+    if (message.content?.trim()) {
+      lines.push(message.content.trim(), "");
+    }
+
+    const media = message.mediaItems ?? [];
+    if (media.length > 0) {
+      lines.push("### Attachments", "");
+      media.forEach((item) => {
+        lines.push(`- ${item.fileName || item.path}: ${item.path}`);
+      });
+      lines.push("");
+    }
+
+    lines.push("---", "");
+  });
+
+  return lines.join("\n");
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function ChatPage() {
@@ -245,6 +345,21 @@ export function ChatPage() {
     abort(sessionKey);
   }, [abort, sessionKey]);
 
+  const handleExportChat = useCallback(() => {
+    if (messages.length === 0) return;
+    const content = formatChatExport({
+      agentId,
+      sessionKey,
+      userId,
+      tenantSlug,
+      tenantId,
+      messages,
+    });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `goclaw-${safeFilenamePart(agentId)}-${safeFilenamePart(sessionKey || "chat")}-${timestamp}.md`;
+    downloadTextFile(filename, content);
+  }, [agentId, sessionKey, userId, tenantSlug, tenantId, messages]);
+
   const isMobile = useIsMobile();
   useVirtualKeyboard();
   const [chatSidebarOpen, setChatSidebarOpen] = useState(false);
@@ -339,6 +454,8 @@ export function ChatPage() {
             onToggleTaskPanel={() => setTaskPanelOpen((v) => !v)}
             taskPanelOpen={taskPanelOpen}
             session={sessions.find((s) => s.key === sessionKey) ?? null}
+            onExport={handleExportChat}
+            canExport={messages.length > 0}
           />
         </div>
 
