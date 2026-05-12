@@ -57,6 +57,9 @@
   "edit": {
     "title": "编辑Skill",
     "name": "名称",
+    "displayName": "中文显示名称",
+    "internalName": "英文内部名称",
+    "internalNameHint": "用于执行和工具调用。为避免已有 Skill 引用失效，此字段只读。",
     "description": "描述",
     "content": "完整 SKILL.md 内容",
     "contentLoading": "正在加载 SKILL.md...",

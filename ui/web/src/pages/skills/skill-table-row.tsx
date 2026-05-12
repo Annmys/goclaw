@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { SkillTenantOverride } from "./skill-tenant-override";
+import { formatSkillLabel } from "./skill-label";
 import type { SkillInfo } from "./hooks/use-skills";
 
 const visibilityColor: Record<string, string> = {
@@ -18,7 +19,7 @@ interface SkillTableRowProps {
   tab: "core" | "custom";
   hasTenantScope: boolean;
   toggling: string | null;
-  onView: (name: string) => void;
+  onView: (skill: SkillInfo) => void;
   onEdit: (skill: SkillInfo) => void;
   onDelete: (skill: SkillInfo) => void;
   onToggle: (skill: SkillInfo, enabled: boolean) => void;
@@ -46,16 +47,15 @@ export function SkillTableRow({
           <button
             type="button"
             className="font-medium text-left hover:underline cursor-pointer"
-            onClick={() => onView(skill.name)}
+            onClick={() => onView(skill)}
           >
-            {skill.name}
+            {formatSkillLabel(skill)}
           </button>
           {skill.is_system && (
             <Badge variant="outline" className="border-blue-500 text-blue-600 text-2xs">
               {t("system")}
             </Badge>
           )}
-          {skill.version && <span className="text-xs text-muted-foreground">v{skill.version}</span>}
         </div>
       </td>
       <td className="max-w-xs truncate px-4 py-3 text-muted-foreground">

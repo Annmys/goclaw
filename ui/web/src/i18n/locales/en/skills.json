@@ -57,6 +57,9 @@
   "edit": {
     "title": "Edit Skill",
     "name": "Name",
+    "displayName": "Chinese display name",
+    "internalName": "English internal name",
+    "internalNameHint": "Used for execution and tool calls. It is read-only to keep existing skill references stable.",
     "description": "Description",
     "content": "Full SKILL.md content",
     "contentLoading": "Loading SKILL.md...",

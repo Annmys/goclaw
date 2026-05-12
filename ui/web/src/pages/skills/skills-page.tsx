@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { useSkills, type SkillInfo } from "./hooks/use-skills";
 import { SkillDetailDialog } from "./skill-detail-dialog";
 import { SkillEditDialog } from "./skill-edit-dialog";
+import { formatSkillLabel } from "./skill-label";
 
 const SkillUploadDialog = lazy(() =>
   import("./skill-upload-dialog").then((m) => ({ default: m.SkillUploadDialog }))
@@ -57,14 +58,15 @@ export function SkillsPage() {
   const filtered = tabSkills.filter(
     (s: SkillInfo) =>
       s.name.toLowerCase().includes(search.toLowerCase()) ||
+      (s.slug ?? "").toLowerCase().includes(search.toLowerCase()) ||
       s.description.toLowerCase().includes(search.toLowerCase()),
   );
   const { pageItems, pagination, setPage, setPageSize, resetPage } = usePagination(filtered);
 
   useEffect(() => { resetPage(); }, [search, tab, resetPage]);
 
-  const handleViewSkill = async (name: string) => {
-    const detail = await getSkill(name);
+  const handleViewSkill = async (skill: SkillInfo) => {
+    const detail = await getSkill(skill.slug || skill.name);
     if (detail) setSelectedSkill(detail);
   };
 
@@ -173,7 +175,7 @@ export function SkillsPage() {
               <tbody>
                 {pageItems.map((skill: SkillInfo) => (
                   <SkillTableRow
-                    key={skill.name}
+                    key={skill.slug || skill.name}
                     skill={skill}
                     tab={tab}
                     hasTenantScope={hasTenantScope}
@@ -228,8 +230,8 @@ export function SkillsPage() {
         open={!!deleteTarget}
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         title={t("delete.title")}
-        description={t("delete.description", { name: deleteTarget?.name })}
-        confirmValue={deleteTarget?.name || ""}
+        description={t("delete.description", { name: deleteTarget ? formatSkillLabel(deleteTarget) : "" })}
+        confirmValue={deleteTarget ? formatSkillLabel(deleteTarget) : ""}
         confirmLabel={t("delete.confirmLabel")}
         onConfirm={handleDelete}
         loading={deleteLoading}

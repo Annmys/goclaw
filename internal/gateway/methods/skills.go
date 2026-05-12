@@ -116,7 +116,7 @@ func (m *SkillsMethods) handleGet(ctx context.Context, client *gateway.Client, r
 		return
 	}
 
-	content, _ := m.store.LoadSkill(ctx, params.Name)
+	content, _ := m.store.LoadSkill(ctx, info.Slug)
 
 	resp := map[string]any{
 		"name":        info.Name,

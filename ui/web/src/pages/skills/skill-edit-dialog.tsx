@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { SkillInfo } from "@/types/skill";
+import { formatSkillLabel } from "./skill-label";
 
 interface SkillEditDialogProps {
   skill: SkillInfo;
@@ -106,12 +107,23 @@ export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }:
     <Dialog open onOpenChange={() => onClose()}>
       <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{t("edit.title")}</DialogTitle>
+          <DialogTitle>{t("edit.title")}: {formatSkillLabel(skill)}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="skill-name">{t("edit.name")}</Label>
+            <Label htmlFor="skill-slug">{t("edit.internalName")}</Label>
+            <Input
+              id="skill-slug"
+              value={skill.slug || ""}
+              readOnly
+              className="font-mono text-xs"
+            />
+            <p className="text-xs text-muted-foreground">{t("edit.internalNameHint")}</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="skill-name">{t("edit.displayName")}</Label>
             <Input
               id="skill-name"
               value={name}

@@ -19,6 +19,7 @@ import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import type { SkillInfo, SkillFile, SkillVersions } from "@/types/skill";
 import { buildTree } from "./skill-file-helpers";
 import { FileBrowser } from "./skill-file-browser";
+import { formatSkillLabel } from "./skill-label";
 
 interface SkillDetailDialogProps {
   skill: SkillInfo & { content: string };
@@ -105,14 +106,11 @@ export function SkillDetailDialog({
       <DialogContent className="max-h-[85vh] md:min-h-[60vh] overflow-hidden flex flex-col sm:max-w-2xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl 2xl:max-w-7xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 flex-wrap">
-            {skill.name}
+            {formatSkillLabel(skill)}
             <Badge variant="outline">{skill.source || "file"}</Badge>
             {skill.visibility && (
               <Badge variant="secondary">{skill.visibility}</Badge>
             )}
-            {skill.version ? (
-              <span className="text-xs font-normal text-muted-foreground">v{skill.version}</span>
-            ) : null}
           </DialogTitle>
           {skill.description && (
             <p className="text-sm text-muted-foreground">{skill.description}</p>

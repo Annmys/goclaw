@@ -84,8 +84,8 @@ func (idx *Index) Build(skills []Info) {
 	totalTokens := 0
 
 	for _, s := range skills {
-		// Build searchable text from name + description
-		searchText := s.Name + " " + s.Description
+		// Build searchable text from internal slug, display name, and description.
+		searchText := s.Slug + " " + s.Name + " " + s.Description
 		tokens := tokenize(searchText)
 
 		idx.docs = append(idx.docs, skillDoc{

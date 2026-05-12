@@ -17,8 +17,9 @@ func (s *SQLiteSkillStore) LoadSkill(ctx context.Context, name string) (string, 
 	var slug string
 	var version int
 	var filePath *string
-	q := "SELECT slug, version, file_path FROM skills WHERE slug = ? AND status = 'active'"
-	args := []any{name}
+	q := `SELECT slug, version, file_path FROM skills
+		WHERE (slug = ? OR lower(slug) = lower(?) OR name = ?) AND status = 'active'`
+	args := []any{name, name, name}
 	if !store.IsCrossTenant(ctx) {
 		tid := store.TenantIDFromContext(ctx)
 		if tid == uuid.Nil {
@@ -27,6 +28,8 @@ func (s *SQLiteSkillStore) LoadSkill(ctx context.Context, name string) (string, 
 		q += " AND (is_system = 1 OR tenant_id = ?)"
 		args = append(args, tid)
 	}
+	q += " ORDER BY CASE WHEN slug = ? THEN 0 WHEN lower(slug) = lower(?) THEN 1 WHEN name = ? THEN 2 ELSE 3 END LIMIT 1"
+	args = append(args, name, name, name)
 	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&slug, &version, &filePath); err != nil {
 		return "", false
 	}
@@ -45,11 +48,11 @@ func (s *SQLiteSkillStore) LoadForContext(ctx context.Context, allowList []strin
 	}
 	var parts []string
 	for _, sk := range skills {
-		content, ok := s.LoadSkill(ctx, sk.Name)
+		content, ok := s.LoadSkill(ctx, sk.Slug)
 		if !ok {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("### Skill: %s\n\n%s", sk.Name, content))
+		parts = append(parts, fmt.Sprintf("### Skill: %s（%s）V%d\n\n%s", sk.Slug, sk.Name, sk.Version, content))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -74,7 +77,9 @@ func (s *SQLiteSkillStore) BuildSummary(ctx context.Context, allowList []string)
 	result.WriteString("<available_skills>\n")
 	for _, sk := range skills {
 		result.WriteString("  <skill>\n")
+		result.WriteString(fmt.Sprintf("    <slug>%s</slug>\n", sk.Slug))
 		result.WriteString(fmt.Sprintf("    <name>%s</name>\n", sk.Name))
+		result.WriteString(fmt.Sprintf("    <display>%s（%s）V%d</display>\n", sk.Slug, sk.Name, sk.Version))
 		result.WriteString(fmt.Sprintf("    <description>%s</description>\n", sk.Description))
 		result.WriteString(fmt.Sprintf("    <location>%s</location>\n", sk.Path))
 		result.WriteString("  </skill>\n")
@@ -91,8 +96,9 @@ func (s *SQLiteSkillStore) GetSkill(ctx context.Context, name string) (*store.Sk
 	var version int
 	var isSystem bool
 	var filePath *string
-	q := "SELECT id, name, slug, description, visibility, tags, version, is_system, file_path FROM skills WHERE slug = ? AND status = 'active'"
-	args := []any{name}
+	q := `SELECT id, name, slug, description, visibility, tags, version, is_system, file_path FROM skills
+		WHERE (slug = ? OR lower(slug) = lower(?) OR name = ?) AND status = 'active'`
+	args := []any{name, name, name}
 	if !store.IsCrossTenant(ctx) {
 		tid := store.TenantIDFromContext(ctx)
 		if tid == uuid.Nil {
@@ -101,6 +107,8 @@ func (s *SQLiteSkillStore) GetSkill(ctx context.Context, name string) (*store.Sk
 		q += " AND (is_system = 1 OR tenant_id = ?)"
 		args = append(args, tid)
 	}
+	q += " ORDER BY CASE WHEN slug = ? THEN 0 WHEN lower(slug) = lower(?) THEN 1 WHEN name = ? THEN 2 ELSE 3 END LIMIT 1"
+	args = append(args, name, name, name)
 	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&id, &skillName, &slug, &desc, &visibility, &tagsJSON, &version, &isSystem, &filePath); err != nil {
 		return nil, false
 	}
