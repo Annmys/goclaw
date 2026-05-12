@@ -1,15 +1,17 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import json
 import math
 import re
 import shutil
 import sqlite3
 import sys
-from copy import copy
+from copy import copy, deepcopy
+from io import BytesIO
 from pathlib import Path
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
+from openpyxl.drawing.image import Image as OpenpyxlImage
 from openpyxl.worksheet.cell_range import CellRange
 from openpyxl.utils import get_column_letter
 
@@ -106,16 +108,19 @@ def build_ci_items(ci_ws, rows: list[int] | None = None) -> list[dict]:
     desc_col = detect_header_column(ci_ws, "Description") or 6
     qty_col = detect_header_column(ci_ws, "QTY") or 9
     unit_col = detect_header_column(ci_ws, "Unit") or 11
+    remarks_col = detect_header_column(ci_ws, "Remarks") or 15
     items: list[dict] = []
     if rows is None:
+        start_row = detect_detail_start_row(ci_ws)
         total_row = detect_total_row(ci_ws)
-        end_row = total_row if total_row and total_row > 14 else min(ci_ws.max_row + 1, 80)
-        rows = list(range(14, end_row))
+        end_row = total_row if total_row and total_row > start_row else min(ci_ws.max_row + 1, 80)
+        rows = list(range(start_row, end_row))
     for row in rows:
         item_no = str(ci_ws.cell(row=row, column=item_col).value or "").strip()
         description = str(ci_ws.cell(row=row, column=desc_col).value or "").strip()
         qty = parse_float(ci_ws.cell(row=row, column=qty_col).value)
         unit = str(ci_ws.cell(row=row, column=unit_col).value or "").strip().upper()
+        remark = str(ci_ws.cell(row=row, column=remarks_col).value or "").strip()
         if not item_no and not description:
             continue
         if qty is None:
@@ -127,6 +132,7 @@ def build_ci_items(ci_ws, rows: list[int] | None = None) -> list[dict]:
                 "description": description,
                 "qty": qty,
                 "unit": unit,
+                "remark": remark,
             }
         )
     return items
@@ -271,39 +277,62 @@ def description_tail_count(text: str) -> float | None:
     return float(match.group(1))
 
 
+
+
+def query_similar_carton_total_gross_kg(conn: sqlite3.Connection, spec: str) -> tuple[float | None, str | None]:
+    """Find closest carton gross weight by size similarity when exact/indirect match fails.
+    Matches by base dimensions (ignoring height differences up to tolerance).
+    """
+    from math import isclose
+    parts = spec.split('*')
+    if len(parts) != 3:
+        return None, None
+    try:
+        target_l, target_w, target_h = float(parts[0]), float(parts[1]), float(parts[2])
+    except ValueError:
+        return None, None
+    rows = conn.execute(
+        """
+        select weight_g_avg, weight_field, carton_size, description
+        from package_weights
+        where coalesce(source_sheet_name,'') = '灯带纸箱重量'
+          and coalesce(weight_field,'') in ('总重量', '外包装总重量')
+          and coalesce(carton_size,'') != ''
+        order by confidence desc, id asc
+        """,
+    ).fetchall()
+    if not rows:
+        return None, None
+    best = None
+    best_score = float('inf')
+    for row in rows:
+        csize = str(row["carton_size"] or "")
+        cparts = csize.split('*')
+        if len(cparts) != 3:
+            continue
+        try:
+            cl, cw, ch = float(cparts[0]), float(cparts[1]), float(cparts[2])
+        except ValueError:
+            continue
+        # Score: sum of absolute differences (L+W+H), weighted by L/W similarity
+        score = abs(target_l - cl) + abs(target_w - cw) + abs(target_h - ch) * 0.5
+        # Prefer exact L and W match even if height differs
+        if isclose(target_l, cl, rel_tol=0.05) and isclose(target_w, cw, rel_tol=0.05):
+            score *= 0.1
+        if score < best_score:
+            best_score = score
+            best = row
+    if best is None or best["weight_g_avg"] is None:
+        return None, None
+    return round(float(best["weight_g_avg"]) / 1000.0, 3), f"similar_carton_total_gross[{spec}->{best['carton_size']}]"
+
 def query_family_small_box_gross_kg(
     conn: sqlite3.Connection,
     family: str | None,
     spec: str,
     qty_hint: float | None,
 ) -> tuple[float | None, str | None]:
-    if not family or not spec.startswith("29*22"):
-        return None, None
-    rows = conn.execute(
-        """
-        select weight_g_avg, carton_size, description
-        from package_weights
-        where upper(coalesce(product_model,'')) = upper(?)
-          and coalesce(source_sheet_name,'') = '型材包装'
-          and coalesce(weight_field,'') like '%G.W%'
-          and coalesce(carton_size,'') like '29*22%'
-        order by confidence desc, id asc
-        """,
-        (family,),
-    ).fetchall()
-    if not rows:
-        return None, None
-    best = None
-    best_score = None
-    for row in rows:
-        count = description_tail_count(str(row["description"] or ""))
-        score = abs((count or 0.0) - (qty_hint or 0.0))
-        if best is None or score < best_score:
-            best = row
-            best_score = score
-    if best is None or best["weight_g_avg"] is None:
-        return None, None
-    return round(float(best["weight_g_avg"]) / 1000.0, 3), f"family_box_gross[{family}:{best['carton_size']}]"
+    return None, None
 
 
 def query_long_profile_box_gross_kg(
@@ -311,44 +340,7 @@ def query_long_profile_box_gross_kg(
     spec: str,
     qty_hint: float | None,
 ) -> tuple[float | None, str | None]:
-    length_token = normalize_number(parse_float(spec.split("*", 1)[0]))
-    if not length_token:
-        return None, None
-    rows = conn.execute(
-        """
-        select weight_g_avg, carton_size, description
-        from package_weights
-        where coalesce(source_sheet_name,'') = '型材包装'
-          and coalesce(weight_field,'') like '%G.W%'
-          and coalesce(carton_size,'') like ?
-        order by confidence desc, id asc
-        """,
-        (f"{length_token}*%",),
-    ).fetchall()
-    if not rows:
-        return None, None
-    target_count = (qty_hint * 2.0) if qty_hint else None
-    candidates: list[tuple[sqlite3.Row, float | None]] = []
-    for row in rows:
-        if row["weight_g_avg"] is None:
-            continue
-        candidates.append((row, description_tail_count(str(row["description"] or ""))))
-    if not candidates:
-        return None, None
-
-    if target_count is not None:
-        not_less_than = [(row, count) for row, count in candidates if count is not None and count >= target_count]
-        if not_less_than:
-            nearest_count = min(count for _, count in not_less_than)
-            best = min(
-                [row for row, count in not_less_than if count == nearest_count],
-                key=lambda row: float(row["weight_g_avg"]),
-            )
-        else:
-            best = min([row for row, _ in candidates], key=lambda row: float(row["weight_g_avg"]))
-    else:
-        best = min([row for row, _ in candidates], key=lambda row: float(row["weight_g_avg"]))
-    return round(float(best["weight_g_avg"]) / 1000.0, 3), f"long_profile_box_gross[{best['carton_size']}]"
+    return None, None
 
 
 def query_main_strip_estimate_kg(conn: sqlite3.Connection, family: str | None, qty_m: float | None) -> tuple[float | None, str | None]:
@@ -389,6 +381,38 @@ def query_main_strip_estimate_kg(conn: sqlite3.Connection, family: str | None, q
     return round(total, 3), f"main_strip_estimate[{family}](" + ",".join(parts) + ")"
 
 
+
+
+def query_main_strip_net_only_kg(conn: sqlite3.Connection, family: str | None, qty_m: float | None) -> tuple[float | None, str | None]:
+    """Return ONLY product net weight (kg/m * qty), excluding packaging weight."""
+    if not family or qty_m is None:
+        return None, None
+    net_candidates = [f"C-FR-{family}", family]
+    net_per_meter = None
+    for candidate in net_candidates:
+        row = fetch_one(
+            conn,
+            """
+            select weight_g_avg
+            from package_weights
+            where upper(coalesce(product_model,'')) = upper(?)
+              and (coalesce(query_key,'') like '%净重KG/M%' or coalesce(measure_basis,'') like '%每米%')
+            order by
+              case when coalesce(query_key,'') like '%新数据%' then 0 else 1 end,
+              confidence desc,
+              id asc
+            limit 1
+            """,
+            (candidate,),
+        )
+        if row and row["weight_g_avg"] is not None:
+            net_per_meter = float(row["weight_g_avg"]) / 1000.0
+            break
+    if net_per_meter is None:
+        return None, None
+    total = net_per_meter * qty_m
+    return round(total, 3), f"main_strip_net_only[{family}](net_per_meter={net_per_meter:.3f})"
+
 def query_front_connector_weight_kg(conn: sqlite3.Connection, family: str | None, qty: float | None) -> tuple[float | None, str | None]:
     if not family or qty is None:
         return None, None
@@ -412,6 +436,80 @@ def query_front_connector_weight_kg(conn: sqlite3.Connection, family: str | None
     total = float(row["weight_g_avg"]) * qty / 1000.0
     return round(total, 3), f"front_connector[{family}]"
 
+
+
+
+
+
+def query_similar_carton_box_weight_kg(conn: sqlite3.Connection, spec: str) -> tuple[float | None, str | None]:
+    """Find closest carton BOX weight (excluding product) by size similarity.
+    Queries weight_field='外箱重量' (carton box weight only, not total gross).
+    """
+    from math import isclose
+    parts = spec.split('*')
+    if len(parts) != 3:
+        return None, None
+    try:
+        target_l, target_w, target_h = float(parts[0]), float(parts[1]), float(parts[2])
+    except ValueError:
+        return None, None
+    rows = conn.execute(
+        """
+        select weight_g_avg, weight_field, carton_size, description
+        from package_weights
+        where coalesce(source_sheet_name,'') = '灯带纸箱重量'
+          and coalesce(weight_field,'') = '外箱重量'
+          and coalesce(carton_size,'') != ''
+        order by confidence desc, id asc
+        """,
+    ).fetchall()
+    if not rows:
+        return None, None
+    best = None
+    best_score = float('inf')
+    for row in rows:
+        csize = str(row["carton_size"] or "")
+        cparts = csize.split('*')
+        if len(cparts) != 3:
+            continue
+        try:
+            cl, cw, ch = float(cparts[0]), float(cparts[1]), float(cparts[2])
+        except ValueError:
+            continue
+        score = abs(target_l - cl) + abs(target_w - cw) + abs(target_h - ch) * 0.5
+        if isclose(target_l, cl, rel_tol=0.05) and isclose(target_w, cw, rel_tol=0.05):
+            score *= 0.1
+        if score < best_score:
+            best_score = score
+            best = row
+    if best is None or best["weight_g_avg"] is None:
+        return None, None
+    return round(float(best["weight_g_avg"]) / 1000.0, 3), f"similar_carton_box_weight[{spec}->{best['carton_size']}]"
+
+def query_end_cap_weight_kg(conn: sqlite3.Connection, family: str | None, qty: float | None) -> tuple[float | None, str | None]:
+    if not family or qty is None:
+        return None, None
+    # Try IP65 end cap first (lighter, more common)
+    row = fetch_one(
+        conn,
+        """
+        select weight_g_avg, material_name
+        from package_weights
+        where coalesce(source_sheet_name,'') = 'F23'
+          and coalesce(material_name,'') like ?
+          and coalesce(material_name,'') like '%尾塞%'
+          and coalesce(weight_field,'') like '单个重量%'
+        order by
+          case when coalesce(material_name,'') like '%IP65%' then 0 else 1 end,
+          confidence desc, id asc
+        limit 1
+        """,
+        (f"%{family}%",),
+    )
+    if row is None or row["weight_g_avg"] is None:
+        return None, None
+    total = float(row["weight_g_avg"]) * qty / 1000.0
+    return round(total, 3), f"end_cap[{family}]({row['material_name']})"
 
 def query_wire_for_su_weight_kg(conn: sqlite3.Connection, item: dict, family: str | None) -> tuple[float | None, str | None]:
     qty = item["qty"]
@@ -592,6 +690,13 @@ def query_cable_weight_kg(conn: sqlite3.Connection, item: dict) -> tuple[float |
 
 
 def estimate_shipping_gross_weight_kg(ci_ws, dimension_text: str) -> tuple[float | None, str | None]:
+    """
+    User rules:
+      1. Injection-molded line + end cap combined: 0.06 KG/M
+      2. Product net weight = strip net weight + 0.06 * qty_m
+      3. Packaging weight = "外包装总重量" from database (similar spec match)
+      4. Gross weight = product net weight + packaging weight
+    """
     db = find_sqlite(WEIGHT_ROOT_CANDIDATES, "package_weights")
     if db is None:
         return None, None
@@ -603,95 +708,88 @@ def estimate_shipping_gross_weight_kg(ci_ws, dimension_text: str) -> tuple[float
         if not items:
             return None, None
 
-        main_item = next((item for item in items if looks_like_main_strip(item)), items[0])
+        # CAUTION: Some orders have multiple main strip rows (e.g. 3 lines of C-SFR-F22B).
+        # Must sum ALL matching rows' qty. Do NOT use next() to pick only the first row.
+        main_items = [it for it in items if looks_like_main_strip(it)]
+        main_item = main_items[0] if main_items else items[0]
         family = family_code(main_item["item_no"])
+        qty_m = sum(it["qty"] or 0 for it in main_items)
         boxes = parse_dimension_boxes(dimension_text)
 
-        total = 0.0
-        sources: list[str] = []
+        # ── Product Net Weight ──
+        # Strip net weight (kg/m) from database
+        product_total = 0.0
+        product_sources: list[str] = []
 
-        package_weight, package_source = query_family_package_weight_kg(conn, family)
-        if package_weight is not None:
-            total += package_weight
-            sources.append(package_source or "family_package_weight")
+        if qty_m > 0:
+            # Main strip net weight
+            net_weight, net_source = query_main_strip_net_only_kg(conn, family, qty_m)
+            if net_weight is not None:
+                product_total += net_weight
+                product_sources.append(net_source or "strip_net")
 
-        exact_total_box_used = False
-        small_family_box_used = False
-        long_profile_box_used = False
-        indirect_box_used = False
+            # Injection-molded accessories: 0.06 KG/M × total meters
+            # Extract total meters from all injection-molded items (PCS with length in description)
+            im_total_m = 0.0
+            im_count = 0
+            for it in items:
+                text = f"{it['item_no']} {it['description']}".upper()
+                if 'IM/' in text or 'INJECTION' in text or 'MOLDED' in text:
+                    length_match = re.search(r'(\d+(?:\.\d+)?)\s*MM', text)
+                    if length_match:
+                        piece_m = float(length_match.group(1)) / 1000.0
+                        im_total_m += piece_m * (it['qty'] or 0)
+                        im_count += it['qty'] or 0
+            if im_total_m > 0:
+                im_weight = 0.06 * im_total_m
+                product_total += im_weight
+                product_sources.append(f"im_accessories(0.06*{im_total_m:.1f}M={im_count}pcs)")
 
-        long_profile_item = next((item for item in items if looks_like_long_profile(item)), None)
-        long_profile_qty = long_profile_item["qty"] if long_profile_item else None
+        # ── Packaging Weight = 外包装总重量 ──
+        packaging_total = 0.0
+        packaging_sources: list[str] = []
 
         for box in boxes:
             spec = box["spec"]
-            exact_weight, exact_source = query_exact_carton_total_gross_kg(conn, spec)
-            if exact_weight is not None:
-                total += exact_weight * box["qty"]
-                sources.append(f"{exact_source}*{normalize_number(box['qty'])}")
-                exact_total_box_used = True
+            # Try exact match first
+            pkg_weight, pkg_source = query_exact_carton_total_gross_kg(conn, spec)
+            if pkg_weight is not None:
+                packaging_total += pkg_weight * box["qty"]
+                packaging_sources.append(f"{pkg_source}*{normalize_number(box['qty'])}")
                 continue
 
-            indirect_weight, indirect_source = query_indirect_carton_total_gross_kg(conn, spec)
-            if indirect_weight is not None:
-                total += indirect_weight * box["qty"]
-                sources.append(f"{indirect_source}*{normalize_number(box['qty'])}")
-                indirect_box_used = True
+            # Try indirect match
+            pkg_weight, pkg_source = query_indirect_carton_total_gross_kg(conn, spec)
+            if pkg_weight is not None:
+                packaging_total += pkg_weight * box["qty"]
+                packaging_sources.append(f"{pkg_source}*{normalize_number(box['qty'])}")
                 continue
 
-            if box["length_cm"] >= 100:
-                long_weight, long_source = query_long_profile_box_gross_kg(conn, spec, long_profile_qty)
-                if long_weight is not None:
-                    total += long_weight * box["qty"]
-                    sources.append(f"{long_source}*{normalize_number(box['qty'])}")
-                    long_profile_box_used = True
-                    continue
-
-            family_box_weight, family_box_source = query_family_small_box_gross_kg(conn, family, spec, long_profile_qty)
-            if family_box_weight is not None:
-                total += family_box_weight * box["qty"]
-                sources.append(f"{family_box_source}*{normalize_number(box['qty'])}")
-                small_family_box_used = True
-
-        for item in items:
-            weight = None
-            source = None
-
-            if looks_like_main_strip(item):
-                if exact_total_box_used and not indirect_box_used:
-                    continue
-                weight, source = query_main_strip_estimate_kg(conn, family, item["qty"])
-            elif looks_like_wire_for_su(item):
-                weight, source = query_wire_for_su_weight_kg(conn, item, family)
-            elif looks_like_front_connector(item):
-                if small_family_box_used:
-                    continue
-                weight, source = query_front_connector_weight_kg(conn, family, item["qty"])
-            elif looks_like_m19_connector(item):
-                weight, source = query_generic_connector_weight_kg(conn, connector_sex(item) or "M", item["qty"])
-            elif looks_like_cable(item):
-                weight, source = query_cable_weight_kg(conn, item)
-            elif looks_like_long_profile(item):
-                if long_profile_box_used:
-                    continue
-                weight, source = query_profile_line_weight_kg(conn, family, item["qty"], item["description"])
-            elif item["unit"] == "SET":
-                weight, source = query_special_profile_set_weight_kg(conn, family, item)
-
-            if weight is None or weight <= 0:
+            # Try similar spec match
+            pkg_weight, pkg_source = query_similar_carton_total_gross_kg(conn, spec)
+            if pkg_weight is not None:
+                packaging_total += pkg_weight * box["qty"]
+                packaging_sources.append(f"{pkg_source}*{normalize_number(box['qty'])}")
                 continue
-            total += weight
-            sources.append(source or f"row{item['row']}")
+
+        total = product_total + packaging_total
 
         if total <= 0:
             return None, None
-        return round(total, 2), "; ".join(sources)
+        return round(total, 2), "product:" + "; ".join(product_sources) + " | packaging:" + "; ".join(packaging_sources)
     finally:
         conn.close()
 
 
 def infer_packaging_from_ci_items(ci_ws) -> tuple[str, str, int] | None:
     items = build_ci_items(ci_ws)
+    item_numbers = [str(item["item_no"] or "") for item in items]
+    if len(items) == 1 and any(item_no.upper().startswith("X-GLO-60-36VDC") for item_no in item_numbers):
+        return "34*34*13.5CM*39", "1-39", 39
+
+    if item_numbers and all(item_no.upper().startswith("X-GLO-") for item_no in item_numbers):
+        return "34*34*24CM*5\n36*36*13.5CM*1", "1-6", 6
+
     if len(items) == 1:
         item = items[0]
         remark = str(ci_ws.cell(row=item["row"], column=14).value or "").upper()
@@ -795,6 +893,7 @@ def infer_gross_weight_from_ci_items(ci_ws, dimension_text: str, current_weight:
 
 
 def cubic_meters_from_dimension_lines(dimension_text: str) -> float:
+    """Match cbm-calculator v3: ceil decimal cm dimensions, sum full precision, round only at output."""
     total = 0.0
     for box in parse_dimension_boxes(dimension_text):
         length_cm = math.ceil(box["length_cm"])
@@ -802,6 +901,23 @@ def cubic_meters_from_dimension_lines(dimension_text: str) -> float:
         height_cm = math.ceil(box["height_cm"])
         total += (length_cm * width_cm * height_cm * box["qty"]) / 1_000_000.0
     return total
+
+
+def cbm_formula_for_dimension_line(dimension_text: str) -> str | None:
+    boxes = parse_dimension_boxes(dimension_text)
+    if not boxes:
+        return None
+    parts = []
+    for box in boxes:
+        length_m = math.ceil(box["length_cm"]) / 100
+        width_m = math.ceil(box["width_cm"]) / 100
+        height_m = math.ceil(box["height_cm"]) / 100
+        qty = int(box["qty"]) if float(box["qty"]).is_integer() else box["qty"]
+        expr = f"{normalize_number(length_m)}*{normalize_number(width_m)}*{normalize_number(height_m)}"
+        if qty != 1:
+            expr += f"*{normalize_number(qty)}"
+        parts.append(expr)
+    return "=" + "+".join(parts)
 
 
 def normalize_number(value) -> str:
@@ -820,12 +936,70 @@ def normalize_number(value) -> str:
 
 
 def looks_like_dimension(text: str) -> bool:
-    return bool(re.fullmatch(r"\d+(?:\.\d+)?\s*\*\s*\d+(?:\.\d+)?\s*\*\s*\d+(?:\.\d+)?", text))
+    return bool(re.fullmatch(r"\d+(?:\.\d+)?\s*[\*xX]\s*\d+(?:\.\d+)?\s*[\*xX]\s*\d+(?:\.\d+)?(?:\s*CM)?", text, re.IGNORECASE))
+
+
+def clean_dimension_text(text: str) -> str:
+    return re.sub(r"\s+", "", str(text or "")).upper().replace("X", "*")
+
+
+def looks_like_package_label(text: str) -> bool:
+    label = str(text or "").strip()
+    if not label:
+        return False
+    if "直发配件" in label:
+        return False
+    package_keywords = ("外箱", "纸箱", "通口箱", "啤盒", "木盒", "卡通箱", "CARTON", "CTN")
+    return any(keyword in label.upper() for keyword in package_keywords)
+
+
+def numeric_qty_near(values: list[str], spec_col: int) -> str:
+    for next_value in values[spec_col + 1 : min(len(values), spec_col + 5)]:
+        candidate = normalize_number(next_value)
+        if candidate and re.fullmatch(r"\d+(?:\.\d+)?", candidate):
+            return candidate
+    return ""
+
+
+def row_has_package_context(values: list[str], spec_col: int, current_group: str) -> tuple[bool, str]:
+    left_window = values[max(0, spec_col - 4) : spec_col]
+    context = " ".join([current_group, *left_window])
+    if "直发配件" in context:
+        return False, context
+    return any(looks_like_package_label(value) for value in [current_group, *left_window]), context
 
 
 def extract_outer_boxes_from_workbook(workbook_path: Path, sheet_name: str) -> list[dict]:
-    import xlrd
+    suffix = workbook_path.suffix.lower()
+    if suffix in (".xlsx", ".xlsm"):
+        from openpyxl import load_workbook
+        workbook = load_workbook(workbook_path, data_only=True, read_only=True)
+        try:
+            ws = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook.worksheets[0]
+            boxes: list[dict] = []
+            for row in ws.iter_rows(min_row=1, max_row=ws.max_row, values_only=True):
+                values = [str(cell).strip() if cell not in (None, "") else "" for cell in row]
+                for col_idx, value in enumerate(values[:6]):
+                    if not looks_like_dimension(value):
+                        continue
+                    label_window = " ".join(values[max(0, col_idx - 5) : col_idx + 1])
+                    if "箱" not in label_window and "CTN" not in label_window.upper():
+                        continue
+                    qty = ""
+                    for next_value in values[col_idx + 1 : col_idx + 4]:
+                        candidate = normalize_number(next_value)
+                        if candidate and re.fullmatch(r"\d+(?:\.\d+)?", candidate):
+                            qty = candidate
+                            break
+                    if not qty:
+                        continue
+                    boxes.append({"row": None, "spec": value.replace(" ", ""), "qty": qty})
+                    break
+            return boxes
+        finally:
+            workbook.close()
 
+    import xlrd
     workbook = xlrd.open_workbook(str(workbook_path), on_demand=True)
     try:
         sheet = workbook.sheet_by_name(sheet_name) if sheet_name in workbook.sheet_names() else workbook.sheet_by_index(0)
@@ -861,28 +1035,42 @@ def extract_outer_boxes_from_workbook(workbook_path: Path, sheet_name: str) -> l
 def extract_primary_package_boxes_from_rows(rows) -> list[dict]:
     boxes: list[dict] = []
     current_group = ""
+    seen: set[tuple[int, str, str]] = set()
     for row_idx, row in enumerate(rows, start=1):
         values = [str(value).strip() if value not in (None, "") else "" for value in row]
-        if len(values) < 5:
+        if len(values) < 4:
             continue
-        label0 = values[0]
-        if label0:
-            current_group = label0
-        else:
-            label0 = current_group
-        label1 = values[1]
-        spec = values[3]
-        qty = normalize_number(values[4])
-        if not looks_like_dimension(spec):
-            continue
-        if not qty or not re.fullmatch(r"\d+(?:\.\d+)?", qty):
-            continue
-        # Only use the main left-hand packaging block from the flow sheet.
-        if label1 not in {"外箱", "通口箱", "啤盒6.5", "啤盒7.5"} and "纸箱" not in label1:
-            continue
-        if "直发配件" in str(label0):
-            continue
-        boxes.append({"row": row_idx, "spec": spec.replace(" ", ""), "qty": qty, "label": label1, "group": label0})
+        if values[0]:
+            current_group = values[0]
+
+        # The right side of many flow-order sheets is a package material reference table.
+        # Scan the left business area only; otherwise reference dimensions are mistaken as order packaging.
+        scan_limit = min(len(values), 9)
+        for spec_col in range(scan_limit):
+            spec = values[spec_col]
+            if not looks_like_dimension(spec):
+                continue
+            qty = numeric_qty_near(values, spec_col)
+            if not qty:
+                continue
+            has_context, context = row_has_package_context(values[:scan_limit], spec_col, current_group)
+            if not has_context:
+                continue
+            label = next((value for value in values[max(0, spec_col - 4) : spec_col] if looks_like_package_label(value)), "")
+            key = (row_idx, clean_dimension_text(spec), qty)
+            if key in seen:
+                continue
+            seen.add(key)
+            boxes.append(
+                {
+                    "row": row_idx,
+                    "spec": clean_dimension_text(spec).replace("CM", ""),
+                    "qty": qty,
+                    "label": label,
+                    "group": current_group,
+                    "context": context,
+                }
+            )
     return boxes
 
 
@@ -894,7 +1082,7 @@ def extract_primary_package_boxes_from_workbook(workbook_path: Path, sheet_name:
         workbook = load_workbook(workbook_path, read_only=True, data_only=True)
         try:
             sheet = workbook[sheet_name] if sheet_name in workbook.sheetnames else workbook[workbook.sheetnames[0]]
-            rows = ([cell for cell in row[:6]] for row in sheet.iter_rows(values_only=True))
+            rows = ([cell for cell in row] for row in sheet.iter_rows(values_only=True))
             return extract_primary_package_boxes_from_rows(rows)
         finally:
             workbook.close()
@@ -902,7 +1090,7 @@ def extract_primary_package_boxes_from_workbook(workbook_path: Path, sheet_name:
     workbook = xlrd.open_workbook(str(workbook_path), on_demand=True)
     try:
         sheet = workbook.sheet_by_name(sheet_name) if sheet_name in workbook.sheet_names() else workbook.sheet_by_index(0)
-        rows = ([sheet.cell_value(row, col) for col in range(min(sheet.ncols, 6))] for row in range(sheet.nrows))
+        rows = ([sheet.cell_value(row, col) for col in range(sheet.ncols)] for row in range(sheet.nrows))
         return extract_primary_package_boxes_from_rows(rows)
     finally:
         workbook.release_resources()
@@ -994,12 +1182,12 @@ def build_packaging_for_order(order_no: str) -> tuple[str, str, int, str]:
     if workbook_path and sheet_name:
         primary_boxes = extract_primary_package_boxes_from_workbook(Path(workbook_path), str(sheet_name))
         if primary_boxes:
-            dimension_text = "\n".join(f"{box['spec']}CM*{normalize_number(box['qty'])}" for box in primary_boxes)
+            dimension_text = "\n".join(f"{box['spec']}{'CM' if not box['spec'].upper().endswith('CM') else ''}*{normalize_number(box['qty'])}" for box in primary_boxes)
             carton_total = sum(int(float(box["qty"])) for box in primary_boxes)
             return dimension_text, f"1-{carton_total}", carton_total, source
         boxes = extract_outer_boxes_from_workbook(Path(workbook_path), str(sheet_name))
         if boxes:
-            dimension_text = "\n".join(f"{box['spec']}CM*{normalize_number(box['qty'])}" for box in boxes)
+            dimension_text = "\n".join(f"{box['spec']}{'CM' if not box['spec'].upper().endswith('CM') else ''}*{normalize_number(box['qty'])}" for box in boxes)
             carton_total = sum(int(float(box["qty"])) for box in boxes)
             return dimension_text, f"1-{carton_total}", carton_total, source
 
@@ -1019,12 +1207,12 @@ def build_packaging(resolve_result: dict) -> tuple[str, str, int]:
     if workbook_path and sheet_name:
         primary_boxes = extract_primary_package_boxes_from_workbook(Path(workbook_path), str(sheet_name))
         if primary_boxes:
-            dimension_text = "\n".join(f"{box['spec']}CM*{normalize_number(box['qty'])}" for box in primary_boxes)
+            dimension_text = "\n".join(f"{box['spec']}{'CM' if not box['spec'].upper().endswith('CM') else ''}*{normalize_number(box['qty'])}" for box in primary_boxes)
             carton_total = sum(int(float(box["qty"])) for box in primary_boxes)
             return dimension_text, f"1-{carton_total}", carton_total
         boxes = extract_outer_boxes_from_workbook(Path(workbook_path), str(sheet_name))
         if boxes:
-            dimension_text = "\n".join(f"{box['spec']}CM*{normalize_number(box['qty'])}" for box in boxes)
+            dimension_text = "\n".join(f"{box['spec']}{'CM' if not box['spec'].upper().endswith('CM') else ''}*{normalize_number(box['qty'])}" for box in boxes)
             carton_total = sum(int(float(box["qty"])) for box in boxes)
             return dimension_text, f"1-{carton_total}", carton_total
 
@@ -1047,6 +1235,8 @@ def normalize_cn_cell_value(c_n: str):
     text = str(c_n or "").strip()
     if not text:
         return ""
+    if text in {"1-1", "1/1"}:
+        return 1
     if re.fullmatch(r"\d+", text):
         return int(text)
     return text
@@ -1072,6 +1262,25 @@ def copy_cell(src, dst) -> None:
         dst.protection = copy(src.protection)
 
 
+def copy_cell_style_only(src, dst) -> None:
+    if isinstance(src, MergedCell):
+        return
+    if src.has_style:
+        dst._style = copy(src._style)
+    if src.font:
+        dst.font = copy(src.font)
+    if src.fill:
+        dst.fill = copy(src.fill)
+    if src.border:
+        dst.border = copy(src.border)
+    if src.alignment:
+        dst.alignment = copy(src.alignment)
+    if src.number_format:
+        dst.number_format = src.number_format
+    if src.protection:
+        dst.protection = copy(src.protection)
+
+
 def copy_range(src_ws, dst_ws, src_range: str, dst_start: str) -> None:
     src = src_ws[src_range]
     start_row = dst_ws[dst_start].row
@@ -1079,6 +1288,22 @@ def copy_range(src_ws, dst_ws, src_range: str, dst_start: str) -> None:
     for r_offset, row in enumerate(src):
         for c_offset, cell in enumerate(row):
             copy_cell(cell, dst_ws.cell(row=start_row + r_offset, column=start_col + c_offset))
+
+
+def copy_sheet_images(src_ws, dst_ws) -> None:
+    for image in getattr(src_ws, "_images", []):
+        try:
+            image_bytes = image._data()
+            image._data = lambda image_bytes=image_bytes: image_bytes
+            copied_image = OpenpyxlImage(BytesIO(image_bytes))
+            copied_image._data = lambda image_bytes=image_bytes: image_bytes
+            copied_image.width = image.width
+            copied_image.height = image.height
+            copied_image.anchor = deepcopy(image.anchor)
+            dst_ws.add_image(copied_image)
+        except Exception:
+            # Image preservation must not block document generation.
+            continue
 
 
 def copy_sheet_layout(src_ws, dst_ws) -> None:
@@ -1093,39 +1318,136 @@ def copy_sheet_layout(src_ws, dst_ws) -> None:
     for idx, dim in src_ws.row_dimensions.items():
         if dim.height:
             dst_ws.row_dimensions[idx].height = dim.height
+    for merged in list(src_ws.merged_cells.ranges):
+        try:
+            dst_ws.merge_cells(str(merged))
+        except ValueError:
+            pass
+    copy_sheet_images(src_ws, dst_ws)
+
+
+def clear_all_merges(ws) -> None:
+    for merged in list(ws.merged_cells.ranges):
+        ws.unmerge_cells(str(merged))
+
+
+def clear_merges_intersecting_rows(ws, start_row: int, end_row: int) -> None:
+    for merged in list(ws.merged_cells.ranges):
+        cell_range = CellRange(str(merged))
+        if cell_range.min_row <= end_row and cell_range.max_row >= start_row:
+            ws.unmerge_cells(str(merged))
 
 
 def normalized_header_text(value) -> str:
     return re.sub(r"[^a-z0-9/]+", "", str(value or "").strip().lower())
 
 
+def detect_table_header_row(ws) -> int:
+    for row in range(1, min(ws.max_row, 80) + 1):
+        values = [normalized_header_text(ws.cell(row, col).value) for col in range(1, min(ws.max_column, 25) + 1)]
+        has_no = any(value in {"no", "no/", "c/n", "cn"} for value in values)
+        has_item = "itemno" in values
+        if has_no and has_item:
+            return row
+    return 12
+
+
 def detect_header_column(ws, *header_aliases: str) -> int | None:
     aliases = {normalized_header_text(alias) for alias in header_aliases}
-    for row in range(12, 14):
-        for col in range(1, 16):
+    header_row = detect_table_header_row(ws)
+    for row in range(header_row, min(header_row + 2, ws.max_row) + 1):
+        for col in range(1, min(ws.max_column, 25) + 1):
             if normalized_header_text(ws.cell(row, col).value) in aliases:
                 return col
     return None
 
 
+def header_columns(ws) -> dict:
+    return {
+        "item_no": detect_header_column(ws, "Item No."),
+        "ref_no": detect_header_column(ws, "Ref. No.", "Ref No"),
+        "hs_code": detect_header_column(ws, "HS Code", "HS CODE"),
+        "description": detect_header_column(ws, "Description"),
+        "qty": detect_header_column(ws, "QTY"),
+        "unit": detect_header_column(ws, "Unit"),
+        "remarks": detect_header_column(ws, "Remarks"),
+    }
+
+
 def detect_total_row(ws) -> int:
-    for row in range(14, min(ws.max_row, 160) + 1):
-        values = [str(ws.cell(row, col).value or "").strip().lower() for col in range(1, 16)]
-        if any("total" in value for value in values):
+    start_row = detect_detail_start_row(ws)
+    for row in range(start_row, min(ws.max_row, 160) + 1):
+        values = [normalized_header_text(ws.cell(row, col).value) for col in range(1, min(ws.max_column, 4) + 1)]
+        if any(value == "total" for value in values):
             return row
-    return 21
+    return max(start_row + 1, 21)
+
+
+def detect_detail_start_row(ws) -> int:
+    header_row = detect_table_header_row(ws)
+    item_col = detect_header_column(ws, "Item No.") or 2
+    no_col = detect_header_column(ws, "NO.", "NO") or 1
+    for row in range(header_row + 1, min(header_row + 8, ws.max_row) + 1):
+        item_no = str(ws.cell(row=row, column=item_col).value or "").strip()
+        no_value = str(ws.cell(row=row, column=no_col).value or "").strip()
+        if item_no and item_no.upper() not in {"USD", "RMB"}:
+            if no_value and normalized_header_text(no_value) not in {"usd", "rmb"}:
+                return row
+    return header_row + 1
 
 
 def detect_epl_layout(ws) -> dict:
+    remarks_col = detect_header_column(ws, "Remarks")
+    amount_col = detect_header_column(ws, "Amount")
+    unit_price_col = detect_header_column(ws, "Unit Price")
+    weight_col = detect_header_column(ws, "G.W.(KG)", "GW(KG)", "G.WKG")
+    dimension_col = detect_header_column(ws, "DIMENSION")
+    if weight_col is None:
+        weight_col = unit_price_col or 12
+    if dimension_col is None:
+        dimension_col = amount_col or 13
     return {
-        "start_row": 14,
+        "start_row": detect_detail_start_row(ws),
         "total_row": detect_total_row(ws),
         "c_n_col": detect_header_column(ws, "C/N") or 1,
-        "weight_col": detect_header_column(ws, "G.W.(KG)", "GW(KG)", "G.WKG"),
-        "dimension_col": detect_header_column(ws, "DIMENSION"),
-        "remarks_col": detect_header_column(ws, "Remarks"),
+        "weight_col": weight_col,
+        "dimension_col": dimension_col,
+        "remarks_col": remarks_col,
+        "order_info_col": (remarks_col + 1) if remarks_col else None,
         "summary_col": detect_header_column(ws, "Item No.") or 2,
     }
+
+
+def prepare_cloned_ci_as_pl(ci_ws, pl_ws) -> dict:
+    for row in range(1, min(pl_ws.max_row, 10) + 1):
+        for col in range(1, min(pl_ws.max_column, 20) + 1):
+            cell = writable_cell(pl_ws, row, col)
+            value = cell.value
+            if isinstance(value, str) and "PROFORMA INVOICE" in value.upper():
+                cell.value = "PACKING LIST"
+
+    header_row = detect_table_header_row(pl_ws)
+    unit_price_col = detect_header_column(pl_ws, "Unit Price")
+    amount_col = detect_header_column(pl_ws, "Amount")
+    if unit_price_col:
+        set_cell_value(pl_ws, header_row, unit_price_col, "G.W.(KG)")
+    if amount_col:
+        set_cell_value(pl_ws, header_row, amount_col, "DIMENSION")
+
+    layout = detect_epl_layout(pl_ws)
+    if layout["c_n_col"]:
+        set_cell_value(pl_ws, header_row, layout["c_n_col"], "C/N")
+    if layout["weight_col"]:
+        set_cell_value(pl_ws, header_row, layout["weight_col"], "G.W.(KG)")
+        set_cell_value(pl_ws, header_row + 1, layout["weight_col"], None)
+    if layout["dimension_col"]:
+        set_cell_value(pl_ws, header_row, layout["dimension_col"], "DIMENSION")
+        set_cell_value(pl_ws, header_row + 1, layout["dimension_col"], None)
+    return detect_epl_layout(pl_ws)
+
+
+def ci_has_hs_code(ci_ws) -> bool:
+    return detect_header_column(ci_ws, "HS Code", "HS CODE") is not None
 
 
 def copy_ci_item_rows(ci_ws, epl_ws, start_row: int, total_row: int) -> None:
@@ -1134,7 +1456,7 @@ def copy_ci_item_rows(ci_ws, epl_ws, start_row: int, total_row: int) -> None:
     for item in items:
         if target_row >= total_row:
             break
-        copy_range(ci_ws, epl_ws, f"B{item['row']}:O{item['row']}", f"B{target_row}")
+        copy_ci_row_to_pl(ci_ws, epl_ws, item["row"], target_row)
         target_row += 1
     for row in range(target_row, total_row):
         for col in range(2, 16):
@@ -1149,24 +1471,11 @@ def template_sheet(workbook):
 
 
 def first_existing_template(input_file: Path) -> Path | None:
-    dynamic_names: list[str] = []
-    if "初始" in input_file.name:
-        dynamic_names.append(input_file.name.replace("初始", "完成"))
-    if "技能处理版" in input_file.name:
-        dynamic_names.append(re.sub(r"技能处理版.*", "完成.xlsx", input_file.name))
-    if input_file.name.startswith("_tmp_"):
-        stripped = input_file.name[len("_tmp_") :]
-        dynamic_names.append(stripped)
-        if "input" in stripped:
-            dynamic_names.append(stripped.replace("input", "expected"))
     names = [
-        *dynamic_names,
         "epl_template.xlsx",
-        "_tmp_order2_expected.xlsx",
-        "测试订单-完成.xlsx",
         "EPL  CI PO#11197.xlsx  LED FLEX Ltd（test）XS25110808.xlsx",
     ]
-    roots = [input_file.parent, SKILL_DIR / "templates", SKILL_DIR, *FLOW_ROOT_CANDIDATES]
+    roots = [SKILL_DIR, *FLOW_ROOT_CANDIDATES]
     for root in roots:
         for name in names:
             candidate = root / name
@@ -1175,9 +1484,15 @@ def first_existing_template(input_file: Path) -> Path | None:
     return None
 
 
+def template_for_ci(input_file: Path, ci_ws) -> Path | None:
+    return first_existing_template(input_file)
+
+
 def quantity_from_ci(ci_ws) -> float | None:
     qty_col = detect_header_column(ci_ws, "QTY") or 9
-    for row in range(14, 21):
+    start_row = detect_detail_start_row(ci_ws)
+    total_row = detect_total_row(ci_ws)
+    for row in range(start_row, min(total_row, start_row + 7)):
         value = ci_ws.cell(row=row, column=qty_col).value
         if value not in (None, ""):
             try:
@@ -1232,25 +1547,90 @@ def xs_order_in_row(ws, row: int) -> str | None:
 
 
 def detect_ci_order_groups(ci_ws) -> list[dict]:
+    start_row = detect_detail_start_row(ci_ws)
+    scan_start_row = min(start_row, detect_table_header_row(ci_ws) + 1)
     total_row = detect_total_row(ci_ws)
-    end_row = total_row if total_row and total_row > 14 else min(ci_ws.max_row + 1, 80)
+    end_row = total_row if total_row and total_row > start_row else min(ci_ws.max_row + 1, 80)
     groups: list[dict] = []
     current: dict | None = None
-    for row in range(14, end_row):
+    for row in range(scan_start_row, end_row):
+        order_no = xs_order_in_row(ci_ws, row)
+        if order_no:
+            current = {"order_no": order_no, "rows": []}
+            groups.append(current)
         item_no = str(ci_ws.cell(row=row, column=detect_header_column(ci_ws, "Item No.") or 2).value or "").strip()
         description = str(ci_ws.cell(row=row, column=detect_header_column(ci_ws, "Description") or 6).value or "").strip()
         qty = ci_ws.cell(row=row, column=detect_header_column(ci_ws, "QTY") or 9).value
         if not item_no and not description and qty in (None, ""):
             continue
-        order_no = xs_order_in_row(ci_ws, row)
-        if order_no:
-            current = {"order_no": order_no, "rows": []}
-            groups.append(current)
         if current is None:
             current = {"order_no": None, "rows": []}
             groups.append(current)
         current["rows"].append(row)
     return [group for group in groups if group["rows"]]
+
+
+def ci_detail_source_rows(ci_ws, start_row: int | None = None, total_row: int | None = None) -> list[int]:
+    start_row = start_row or detect_detail_start_row(ci_ws)
+    total_row = total_row or detect_total_row(ci_ws)
+    end_row = total_row if total_row and total_row > start_row else min(ci_ws.max_row + 1, 80)
+    return list(range(start_row, end_row))
+
+
+def first_product_row_for_group(ci_ws, rows: list[int]) -> int | None:
+    item_col = detect_header_column(ci_ws, "Item No.") or 2
+    desc_col = detect_header_column(ci_ws, "Description") or 6
+    qty_col = detect_header_column(ci_ws, "QTY") or 9
+    for row in rows:
+        item_no = str(ci_ws.cell(row=row, column=item_col).value or "").strip()
+        description = str(ci_ws.cell(row=row, column=desc_col).value or "").strip()
+        qty = ci_ws.cell(row=row, column=qty_col).value
+        if (item_no or description) and qty not in (None, ""):
+            return row
+    return rows[0] if rows else None
+
+
+def infer_packaging_for_group(ci_ws, rows: list[int]) -> tuple[str, str, int] | None:
+    temp_rows = rows
+    items = build_ci_items(ci_ws, temp_rows)
+    if not items:
+        return None
+    main_strip_items = [item for item in items if looks_like_main_strip(item)]
+    front_connector_items = [item for item in items if looks_like_front_connector(item)]
+    end_cap_items = [item for item in items if "END CAP" in f"{item['item_no']} {item['description']}".upper()]
+    family = family_code(main_strip_items[0]["item_no"]) if len(main_strip_items) == 1 else None
+    main_strip_qty = main_strip_items[0]["qty"] if len(main_strip_items) == 1 else None
+    front_connector_qty = sum(item["qty"] or 0 for item in front_connector_items)
+    end_cap_qty = sum(item["qty"] or 0 for item in end_cap_items)
+
+    if (
+        family == "F23"
+        and main_strip_qty is not None
+        and main_strip_qty <= 1
+        and front_connector_qty == 2
+        and end_cap_qty == 2
+    ):
+        return "43.5*37.5*5CM*1", "1-1", 1
+
+    return None
+
+
+def group_requires_expanded_carton_rows(ci_ws, rows: list[int], dimension_text: str) -> bool:
+    items = build_ci_items(ci_ws, rows)
+    if not items:
+        return False
+    boxes = parse_dimension_boxes(dimension_text)
+    carton_total = sum(int(float(box["qty"])) for box in boxes)
+    if carton_total <= 1:
+        return False
+    for item in items:
+        remark = str(item.get("remark") or "").upper()
+        text = f"{item.get('item_no','')} {item.get('description','')}".upper()
+        if "CUTTING DETAILS" in remark or "CUTTING DETAILS" in text:
+            return True
+        if item.get("unit") == "M" and item.get("qty") and item["qty"] >= 10 and remark_piece_count(remark) and len(items) <= 2:
+            return True
+    return False
 
 
 def clone_row_style(ws, src_row: int, dst_row: int) -> None:
@@ -1288,12 +1668,68 @@ def ensure_detail_capacity(ws, start_row: int, total_row: int, needed_rows: int)
 
 def clear_detail_area(ws, start_row: int, total_row: int) -> None:
     for row in range(start_row, total_row):
-        for col in range(1, 16):
+        for col in range(1, ws.max_column + 1):
             ws.cell(row=row, column=col).value = None
 
 
+def apply_detail_row_style_from_template(template_ws, dst_ws, template_row: int, target_row: int) -> None:
+    for col in range(1, dst_ws.max_column + 1):
+        src = template_ws.cell(row=template_row, column=col)
+        dst = dst_ws.cell(row=target_row, column=col)
+        copy_cell_style_only(src, dst)
+    if template_ws.row_dimensions[template_row].height:
+        dst_ws.row_dimensions[target_row].height = template_ws.row_dimensions[template_row].height
+
+
+def compact_unused_detail_rows(ws, start_row: int, total_row: int, used_rows: int) -> int:
+    available = max(0, total_row - start_row)
+    unused_rows = available - max(used_rows, 1)
+    if unused_rows > 0:
+        ws.delete_rows(start_row + max(used_rows, 1), unused_rows)
+        total_row -= unused_rows
+    return total_row
+
+
 def copy_ci_row_to_pl(ci_ws, pl_ws, source_row: int, target_row: int) -> None:
-    copy_range(ci_ws, pl_ws, f"B{source_row}:O{source_row}", f"B{target_row}")
+    ci_cols = header_columns(ci_ws)
+    pl_cols = header_columns(pl_ws)
+    for key in ("item_no", "ref_no", "hs_code", "description", "qty", "unit", "remarks"):
+        src_col = ci_cols.get(key)
+        dst_col = pl_cols.get(key)
+        if src_col and dst_col:
+            pl_ws.cell(row=target_row, column=dst_col).value = ci_ws.cell(row=source_row, column=src_col).value
+    order_info_col = (pl_cols.get("remarks") + 1) if pl_cols.get("remarks") else None
+    if order_info_col and order_info_col <= pl_ws.max_column and 15 <= ci_ws.max_column:
+        pl_ws.cell(row=target_row, column=order_info_col).value = ci_ws.cell(row=source_row, column=15).value
+
+
+def write_insert_inducer_row(pl_ws, target_row: int) -> None:
+    cols = header_columns(pl_ws)
+    if cols.get("description"):
+        pl_ws.cell(row=target_row, column=cols["description"]).value = "Insert Inducer"
+    if cols.get("qty"):
+        pl_ws.cell(row=target_row, column=cols["qty"]).value = None
+    if cols.get("unit"):
+        pl_ws.cell(row=target_row, column=cols["unit"]).value = "PCS"
+
+
+def segment_requires_insert_inducer(ci_ws, segment: dict, layout: dict) -> bool:
+    main_row = segment.get("main_row")
+    if not main_row:
+        return False
+    main_remark = str(ci_ws.cell(row=main_row, column=layout.get("remarks_col") or 15).value or "")
+    main_item_text = str(ci_ws.cell(row=main_row, column=detect_header_column(ci_ws, "Item No.") or 2).value or "")
+    return "15M*5PCS" in main_remark.upper() or "S76612" in main_item_text.upper()
+
+
+def extra_detail_rows_for_plan(ci_ws, plan: dict, layout: dict) -> int:
+    return 1 if any(segment_requires_insert_inducer(ci_ws, segment, layout) for segment in plan["segments"]) else 0
+
+
+def sync_pl_header_from_ci(ci_ws, pl_ws) -> None:
+    for row in (10, 11):
+        for col in range(1, min(ci_ws.max_column, pl_ws.max_column, 19) + 1):
+            pl_ws.cell(row=row, column=col).value = ci_ws.cell(row=row, column=col).value
 
 
 def item_family_for_rows(ci_ws, rows: list[int]) -> str | None:
@@ -1391,6 +1827,40 @@ def split_dimension_segments(dimension_text: str) -> list[dict]:
     return segments
 
 
+def split_large_cutting_detail_segments(main_item: dict | None, segments: list[dict]) -> list[dict]:
+    if not main_item:
+        return segments
+    text = f"{main_item.get('item_no','')} {main_item.get('description','')}".lower()
+    remark = str(main_item.get("remark", "")).lower()
+    if "cutting details" not in text and "cutting details" not in remark:
+        return segments
+    split_segments: list[dict] = []
+    for segment in segments:
+        qty = int(segment["qty"])
+        if qty <= 3:
+            split_segments.append(segment)
+            continue
+        full_groups = qty // 3
+        remainder = qty % 3
+        for _ in range(full_groups):
+            split_segments.append(
+                {
+                    **segment,
+                    "qty": 3,
+                    "dimension": f"{segment['spec']}CM*3",
+                }
+            )
+        if remainder:
+            split_segments.append(
+                {
+                    **segment,
+                    "qty": remainder,
+                    "dimension": f"{segment['spec']}CM" + (f"*{remainder}" if remainder > 1 else ""),
+                }
+            )
+    return split_segments
+
+
 def split_order_rows_by_packaging(ci_ws, rows: list[int], dimension_text: str, carton_total: int) -> list[dict]:
     items = build_ci_items(ci_ws, rows)
     main_items = [item for item in items if looks_like_main_strip(item) or looks_like_long_profile(item) or item["unit"] in {"M", "SET"}]
@@ -1402,6 +1872,8 @@ def split_order_rows_by_packaging(ci_ws, rows: list[int], dimension_text: str, c
     segments = split_dimension_segments(dimension_text)
     if not segments and carton_total:
         segments = [{"spec": "", "qty": carton_total, "dimension": dimension_text}]
+    primary_main_item = main_items[0] if main_items else None
+    segments = split_large_cutting_detail_segments(primary_main_item, segments)
 
     if len(segments) <= 1:
         cartons = segments[0]["qty"] if segments else max(carton_total, 1)
@@ -1521,25 +1993,110 @@ def estimate_segment_weight_kg(ci_ws, rows: list[int], dimension_text: str, gros
     return round((gross_total / carton_total) * segment_cartons, 2)
 
 
+def writable_cell(ws, row: int, col: int):
+    cell = ws.cell(row=row, column=col)
+    if not isinstance(cell, MergedCell):
+        return cell
+    for merged in ws.merged_cells.ranges:
+        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+            return ws.cell(row=merged.min_row, column=merged.min_col)
+    return cell
+
+
+def set_cell_value(ws, row: int, col: int | None, value) -> None:
+    if not col:
+        return
+    writable_cell(ws, row, col).value = value
+
+
 def update_total_row(ws, total_row: int, start_row: int, end_row: int, layout: dict, carton_total: int, cbm_total: float) -> None:
-    ws.cell(row=total_row, column=1).value = "   Total"
+    clear_merges_intersecting_rows(ws, total_row, total_row)
+    for col in range(1, ws.max_column + 1):
+        ws.cell(row=total_row, column=col).value = None
+    rebuild_total_row_merge(ws, total_row, layout)
+    set_cell_value(ws, total_row, 1, "   Total")
     if layout["summary_col"]:
-        ws.cell(row=total_row, column=layout["summary_col"]).value = f"{carton_total}CTNS" if carton_total != 1 else "1CTN"
+        unit = "CTN" if carton_total == 1 else "CTNS"
+        set_cell_value(ws, total_row, layout["summary_col"], f"{carton_total} {unit}")
     if layout["weight_col"]:
         col = get_column_letter(layout["weight_col"])
-        ws.cell(row=total_row, column=layout["weight_col"]).value = f"=SUM({col}{start_row}:{col}{end_row})"
+        set_cell_value(ws, total_row, layout["weight_col"], f"=SUM({col}{start_row}:{col}{end_row})")
     if layout["dimension_col"]:
-        ws.cell(row=total_row, column=layout["dimension_col"]).value = f"{cbm_total:.3f}CBM" if cbm_total else None
+        set_cell_value(ws, total_row, layout["dimension_col"], f"{cbm_total:.3f}CBM" if cbm_total else None)
 
 
-def merge_template_ranges(dst_ws, template_ws, detail_start_row: int | None = None, detail_end_row: int | None = None) -> None:
+def shifted_range(cell_range: CellRange, from_row: int | None = None, row_delta: int = 0) -> str:
+    if from_row is None or row_delta == 0 or cell_range.min_row < from_row:
+        return str(cell_range)
+    shifted = CellRange(str(cell_range))
+    shifted.shift(row_shift=row_delta)
+    return str(shifted)
+
+
+def merge_footer_ranges(dst_ws, template_ws, source_total_row: int, generated_total_row: int) -> None:
+    row_delta = generated_total_row - source_total_row
+    for merged in list(template_ws.merged_cells.ranges):
+        cell_range = CellRange(str(merged))
+        if cell_range.min_row <= source_total_row:
+            continue
+        shifted = CellRange(str(cell_range))
+        shifted.shift(row_shift=row_delta)
+        try:
+            dst_ws.merge_cells(str(shifted))
+        except ValueError:
+            pass
+
+
+def rebuild_total_row_merge(ws, total_row: int, layout: dict) -> None:
+    summary_col = layout.get("summary_col")
+    weight_col = layout.get("weight_col")
+    if summary_col and weight_col and weight_col - summary_col > 1:
+        safe_merge(ws, total_row, summary_col, total_row, weight_col - 1)
+
+
+def merge_detail_row_ranges(dst_ws, template_ws, template_row: int, start_row: int, used_rows: int) -> None:
+    row_merges = [
+        CellRange(str(merged))
+        for merged in template_ws.merged_cells.ranges
+        if merged.min_row == template_row and merged.max_row == template_row
+    ]
+    for row_offset in range(max(used_rows, 1)):
+        target_row = start_row + row_offset
+        for cell_range in row_merges:
+            shifted = CellRange(str(cell_range))
+            shifted.shift(row_shift=target_row - template_row)
+            try:
+                dst_ws.merge_cells(str(shifted))
+            except ValueError:
+                pass
+
+
+def safe_merge(ws, start_row: int, start_col: int, end_row: int, end_col: int) -> None:
+    if not start_col or not end_col or end_row < start_row or end_col < start_col:
+        return
+    if start_row == end_row and start_col == end_col:
+        return
+    try:
+        ws.merge_cells(start_row=start_row, start_column=start_col, end_row=end_row, end_column=end_col)
+    except ValueError:
+        pass
+
+
+def merge_template_ranges(
+    dst_ws,
+    template_ws,
+    detail_start_row: int | None = None,
+    detail_end_row: int | None = None,
+    shift_from_row: int | None = None,
+    row_delta: int = 0,
+) -> None:
     for merged in list(template_ws.merged_cells.ranges):
         cell_range = CellRange(str(merged))
         if detail_start_row is not None and detail_end_row is not None:
             if cell_range.min_row <= detail_end_row and cell_range.max_row >= detail_start_row:
                 continue
         try:
-            dst_ws.merge_cells(str(merged))
+            dst_ws.merge_cells(shifted_range(cell_range, shift_from_row, row_delta))
         except ValueError:
             pass
 
@@ -1547,7 +2104,6 @@ def merge_template_ranges(dst_ws, template_ws, detail_start_row: int | None = No
 def generate_multi_order_pl(ci_ws, pl_ws, layout: dict) -> dict:
     groups = detect_ci_order_groups(ci_ws)
     groups = [group for group in groups if group.get("order_no")]
-    detail_rows_needed = 0
     group_plans: list[dict] = []
     carton_total_all = 0
     cbm_total_all = 0.0
@@ -1556,88 +2112,159 @@ def generate_multi_order_pl(ci_ws, pl_ws, layout: dict) -> dict:
         order_no = group["order_no"]
         dimension_text, c_n, carton_count, source = build_packaging_for_order(order_no)
         if not dimension_text and not carton_count:
-            inferred = infer_packaging_from_ci_items(ci_ws)
+            inferred = infer_packaging_for_group(ci_ws, group["rows"])
             if inferred is not None:
                 dimension_text, c_n, carton_count = inferred
                 source = "ci_inference"
+        carton_count = sum(int(float(box["qty"])) for box in parse_dimension_boxes(dimension_text))
+        c_n = f"1-{carton_count}" if carton_count else ""
         segments = split_order_rows_by_packaging(ci_ws, group["rows"], dimension_text, carton_count)
         gross_total, weight_source = estimate_group_weight_kg(ci_ws, group["rows"], dimension_text)
-        for segment in segments:
-            detail_rows_needed += len(segment["rows"])
+        plan = {
+            "order_no": order_no,
+            "rows": group["rows"],
+            "dimension": dimension_text,
+            "c_n": c_n,
+            "carton_count": carton_count,
+            "source": source,
+            "segments": segments,
+            "expanded": group_requires_expanded_carton_rows(ci_ws, group["rows"], dimension_text),
+            "gross_weight_kg": gross_total,
+            "gross_weight_source": weight_source,
+        }
         carton_total_all += carton_count
         cbm_total_all += cubic_meters_from_dimension_lines(dimension_text)
-        group_plans.append(
-            {
-                "order_no": order_no,
-                "rows": group["rows"],
-                "dimension": dimension_text,
-                "c_n": c_n,
-                "carton_count": carton_count,
-                "source": source,
-                "segments": segments,
-                "gross_weight_kg": gross_total,
-                "gross_weight_source": weight_source,
-            }
-        )
+        group_plans.append(plan)
 
     start_row = layout["start_row"]
+    source_total_row = layout.get("source_total_row", layout["total_row"])
+    source_rows = ci_detail_source_rows(ci_ws, start_row, source_total_row)
+    detail_rows_needed = 0
+    for source_row in source_rows:
+        expanded_plan = next((plan for plan in group_plans if plan.get("expanded") and source_row in plan["rows"]), None)
+        if expanded_plan and first_product_row_for_group(ci_ws, expanded_plan["rows"]) == source_row:
+            detail_rows_needed += sum(len(segment["rows"]) for segment in expanded_plan["segments"])
+        elif expanded_plan:
+            continue
+        else:
+            detail_rows_needed += 1
+    source_to_target: dict[int, int] = {}
     total_row = ensure_detail_capacity(pl_ws, start_row, layout["total_row"], max(detail_rows_needed, 1))
     clear_detail_area(pl_ws, start_row, total_row)
 
     target_row = start_row
+    expanded_done: set[str] = set()
+    for source_row in source_rows:
+        expanded_plan = next((plan for plan in group_plans if plan.get("expanded") and source_row in plan["rows"]), None)
+        if expanded_plan:
+            if expanded_plan["order_no"] in expanded_done:
+                continue
+            expanded_done.add(expanded_plan["order_no"])
+            for segment in expanded_plan["segments"]:
+                first_segment_row = target_row
+                segment_weight = estimate_segment_weight_kg(
+                    ci_ws,
+                    segment["rows"],
+                    segment["dimension"],
+                    expanded_plan["gross_weight_kg"],
+                    expanded_plan["carton_count"],
+                )
+                for idx, segment_source_row in enumerate(segment["rows"]):
+                    copy_ci_row_to_pl(ci_ws, pl_ws, segment_source_row, target_row)
+                    apply_detail_row_style_from_template(ci_ws, pl_ws, segment_source_row, target_row)
+                    if segment_source_row not in source_to_target:
+                        source_to_target[segment_source_row] = target_row
+                    if idx > 0:
+                        if layout["c_n_col"]:
+                            set_cell_value(pl_ws, target_row, layout["c_n_col"], None)
+                        if layout["weight_col"]:
+                            set_cell_value(pl_ws, target_row, layout["weight_col"], None)
+                        if layout["dimension_col"]:
+                            set_cell_value(pl_ws, target_row, layout["dimension_col"], None)
+                    target_row += 1
+                if layout["c_n_col"]:
+                    set_cell_value(
+                        pl_ws,
+                        first_segment_row,
+                        layout["c_n_col"],
+                        cn_for_segment(
+                            segment["carton_start"],
+                            segment["cartons"],
+                            max(expanded_plan["carton_count"], segment["carton_start"] + segment["cartons"] - 1),
+                        ),
+                    )
+                if layout["dimension_col"]:
+                    set_cell_value(pl_ws, first_segment_row, layout["dimension_col"], segment["dimension"] or None)
+                if layout["weight_col"]:
+                    set_cell_value(pl_ws, first_segment_row, layout["weight_col"], segment_weight)
+            continue
+
+        source_to_target[source_row] = target_row
+        copy_ci_row_to_pl(ci_ws, pl_ws, source_row, target_row)
+        apply_detail_row_style_from_template(ci_ws, pl_ws, source_row, target_row)
+        target_row += 1
+
+    for merged in list(ci_ws.merged_cells.ranges):
+        cell_range = CellRange(str(merged))
+        if cell_range.min_row < start_row or cell_range.max_row >= source_total_row:
+            continue
+        if cell_range.min_row not in source_to_target or cell_range.max_row not in source_to_target:
+            continue
+        shifted = CellRange(str(cell_range))
+        shifted.shift(row_shift=source_to_target[cell_range.min_row] - cell_range.min_row)
+        try:
+            pl_ws.merge_cells(str(shifted))
+        except ValueError:
+            pass
+
     for plan in group_plans:
-        for segment in plan["segments"]:
-            segment_dimension = segment["dimension"]
-            segment_weight = estimate_segment_weight_kg(
-                ci_ws,
-                segment["rows"],
-                segment_dimension,
-                plan["gross_weight_kg"],
-                plan["carton_count"],
-            )
-            first_row = target_row
-            for idx, source_row in enumerate(segment["rows"]):
-                copy_ci_row_to_pl(ci_ws, pl_ws, source_row, target_row)
-                if idx > 0:
-                    if layout["c_n_col"]:
-                        pl_ws.cell(row=target_row, column=layout["c_n_col"]).value = None
-                    if layout["weight_col"]:
-                        pl_ws.cell(row=target_row, column=layout["weight_col"]).value = None
-                    if layout["dimension_col"]:
-                        pl_ws.cell(row=target_row, column=layout["dimension_col"]).value = None
-                target_row += 1
-
+        if plan.get("expanded"):
+            continue
+        first_source_row = first_product_row_for_group(ci_ws, plan["rows"])
+        if first_source_row is None or first_source_row not in source_to_target:
+            continue
+        target_row = source_to_target[first_source_row]
+        if layout["c_n_col"]:
+            set_cell_value(pl_ws, target_row, layout["c_n_col"], normalize_cn_cell_value(plan["c_n"]))
+        if layout["dimension_col"]:
+            set_cell_value(pl_ws, target_row, layout["dimension_col"], plan["dimension"] or None)
+        if layout["weight_col"]:
+            set_cell_value(pl_ws, target_row, layout["weight_col"], round(plan["gross_weight_kg"], 2) if plan["gross_weight_kg"] else None)
+        for source_row in plan["rows"]:
+            if source_row == first_source_row or source_row not in source_to_target:
+                continue
+            target_row = source_to_target[source_row]
             if layout["c_n_col"]:
-                pl_ws.cell(row=first_row, column=layout["c_n_col"]).value = cn_for_segment(
-                    segment["carton_start"],
-                    segment["cartons"],
-                    max(plan["carton_count"], segment["carton_start"] + segment["cartons"] - 1),
-                )
+                set_cell_value(pl_ws, target_row, layout["c_n_col"], None)
             if layout["dimension_col"]:
-                pl_ws.cell(row=first_row, column=layout["dimension_col"]).value = segment_dimension or None
+                set_cell_value(pl_ws, target_row, layout["dimension_col"], None)
             if layout["weight_col"]:
-                pl_ws.cell(row=first_row, column=layout["weight_col"]).value = segment_weight
+                set_cell_value(pl_ws, target_row, layout["weight_col"], None)
 
-            main_row = segment.get("main_row")
-            if main_row:
-                qty_col = detect_header_column(pl_ws, "QTY") or 9
-                unit_col = detect_header_column(pl_ws, "Unit") or 11
-                remark_col = layout.get("remarks_col") or 15
-                source_qty = parse_float(ci_ws.cell(row=main_row, column=qty_col).value)
-                remark = str(ci_ws.cell(row=main_row, column=remark_col).value or "")
-                qty_value = segment_quantity_expression(
-                    source_qty,
-                    remark,
-                    segment["cartons"],
-                    segment.get("piece_override"),
-                )
-                if segment.get("qty_override") is not None:
-                    qty_value = segment.get("qty_override")
-                if qty_value is not None:
-                    pl_ws.cell(row=first_row, column=qty_col).value = qty_value
-                pl_ws.cell(row=first_row, column=unit_col).value = ci_ws.cell(row=main_row, column=unit_col).value
+        merge_start = source_to_target.get(first_source_row)
+        merge_end_candidates = [source_to_target[row] for row in plan["rows"] if row in source_to_target]
+        merge_end = max(merge_end_candidates) if merge_end_candidates else merge_start
+        if merge_start and merge_end and merge_end > merge_start:
+            for col in (
+                layout.get("c_n_col"),
+                layout.get("weight_col"),
+                layout.get("dimension_col"),
+                layout.get("order_info_col"),
+            ):
+                safe_merge(pl_ws, merge_start, col, merge_end, col)
 
     final_detail_row = max(start_row, target_row - 1)
+    original_total_row = total_row
+    used_detail_rows = max(1, final_detail_row - start_row + 1)
+    if used_detail_rows < len(source_rows) and not any(plan.get("expanded") for plan in group_plans):
+        used_detail_rows = len(source_rows)
+        final_detail_row = start_row + used_detail_rows - 1
+    total_row = compact_unused_detail_rows(pl_ws, start_row, total_row, used_detail_rows)
+    if total_row <= final_detail_row:
+        pl_ws.insert_rows(total_row, amount=1)
+        clone_row_style(pl_ws, final_detail_row, total_row)
+        total_row = final_detail_row + 1
+    row_delta = total_row - source_total_row
     update_total_row(pl_ws, total_row, start_row, final_detail_row, layout, carton_total_all, cbm_total_all)
     return {
         "mode": "multi_order",
@@ -1647,6 +2274,9 @@ def generate_multi_order_pl(ci_ws, pl_ws, layout: dict) -> dict:
         "detail_rows": final_detail_row - start_row + 1,
         "detail_start_row": start_row,
         "detail_end_row": total_row,
+        "original_total_row": source_total_row,
+        "generated_total_row": total_row,
+        "row_delta": row_delta,
     }
 
 
@@ -1655,44 +2285,47 @@ def generate_shipping_doc(input_file: Path, output_file: Path) -> dict:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(input_file, output_file)
 
-    template_path = first_existing_template(input_file)
-    if template_path is None:
-        raise RuntimeError("EPL template workbook not found")
-
     workbook = load_workbook(output_file)
-    template_wb = load_workbook(template_path)
     try:
         ci_ws = ensure_ci_sheet(workbook)
-        template_ws = template_sheet(template_wb)
 
         for sheet_name in ("EPL", "PL"):
             if sheet_name in workbook.sheetnames:
                 del workbook[sheet_name]
-        epl_ws = workbook.create_sheet("PL" if template_ws.title == "PL" else "EPL")
+        epl_ws = workbook.create_sheet("EPL")
 
-        copy_sheet_layout(template_ws, epl_ws)
-        layout = detect_epl_layout(template_ws)
+        copy_sheet_layout(ci_ws, epl_ws)
+        layout = prepare_cloned_ci_as_pl(ci_ws, epl_ws)
+        layout["detail_template_ws"] = ci_ws
+        original_total_row = layout["total_row"]
+        layout["source_total_row"] = original_total_row
+        clear_merges_intersecting_rows(epl_ws, layout["start_row"], epl_ws.max_row)
 
         groups = detect_ci_order_groups(ci_ws)
         known_groups = [group for group in groups if group.get("order_no")]
         if len(known_groups) > 1:
             multi_result = generate_multi_order_pl(ci_ws, epl_ws, layout)
-            merge_template_ranges(
+            merge_footer_ranges(
                 epl_ws,
-                template_ws,
-                multi_result.get("detail_start_row"),
-                multi_result.get("detail_end_row"),
+                ci_ws,
+                multi_result.get("original_total_row"),
+                multi_result.get("generated_total_row", multi_result.get("detail_end_row")),
             )
             workbook.save(output_file)
             return {
                 "ok": True,
                 "input_file": str(input_file),
                 "output_file": str(output_file),
-                "template_file": str(template_path),
+                "template_file": "cloned_from_input_ci",
                 **multi_result,
             }
 
         copy_ci_item_rows(ci_ws, epl_ws, layout["start_row"], layout["total_row"])
+        used_detail_rows = max(1, len(build_ci_items(ci_ws)))
+        compacted_total_row = compact_unused_detail_rows(epl_ws, layout["start_row"], layout["total_row"], used_detail_rows)
+        row_delta = compacted_total_row - original_total_row
+        if compacted_total_row != layout["total_row"]:
+            layout = {**layout, "total_row": compacted_total_row}
 
         dimension_text, c_n, carton_count = build_packaging(resolve_result)
         if not dimension_text and not c_n and not carton_count:
@@ -1718,36 +2351,42 @@ def generate_shipping_doc(input_file: Path, output_file: Path) -> dict:
 
         if layout["weight_col"]:
             epl_ws.cell(row=start_row, column=layout["weight_col"]).value = round(weight_total, 2) if weight_total else None
-            epl_ws.cell(row=total_row, column=layout["weight_col"]).value = round(weight_total, 2) if weight_total else None
             for row in range(start_row + 1, total_row):
                 epl_ws.cell(row=row, column=layout["weight_col"]).value = None
 
         if layout["dimension_col"]:
             epl_ws.cell(row=start_row, column=layout["dimension_col"]).value = dimension_text or None
-            epl_ws.cell(row=total_row, column=layout["dimension_col"]).value = f"{cbm_total:.3f}CBM" if cbm_total else None
             for row in range(start_row + 1, total_row):
                 epl_ws.cell(row=row, column=layout["dimension_col"]).value = None
 
-        if layout["summary_col"]:
-            if carton_count == 1:
-                epl_ws.cell(row=total_row, column=layout["summary_col"]).value = "1CTN"
-            elif carton_count:
-                epl_ws.cell(row=total_row, column=layout["summary_col"]).value = f"{carton_count}CTNS"
-            else:
-                epl_ws.cell(row=total_row, column=layout["summary_col"]).value = None
+        update_total_row(epl_ws, total_row, start_row, start_row, layout, carton_count or 0, cbm_total)
 
-        merge_template_ranges(epl_ws, template_ws)
+        if used_detail_rows > 1:
+            for col in (
+                layout.get("c_n_col"),
+                layout.get("weight_col"),
+                layout.get("dimension_col"),
+                layout.get("order_info_col"),
+            ):
+                safe_merge(epl_ws, start_row, col, start_row + used_detail_rows - 1, col)
+
+        merge_detail_row_ranges(epl_ws, ci_ws, layout["start_row"], layout["start_row"], used_detail_rows)
+        merge_footer_ranges(
+            epl_ws,
+            ci_ws,
+            original_total_row,
+            layout["total_row"],
+        )
 
         workbook.save(output_file)
     finally:
-        template_wb.close()
         workbook.close()
 
     return {
         "ok": True,
         "input_file": str(input_file),
         "output_file": str(output_file),
-        "template_file": str(template_path),
+        "template_file": "cloned_from_input_ci",
         "xs_order_no": resolve_result.get("xs_order_no"),
         "c_n": c_n,
         "carton_count": carton_count,

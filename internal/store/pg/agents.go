@@ -409,7 +409,8 @@ func (s *PGAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, userID 
 	var role string
 	if store.IsCrossTenant(ctx) {
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id = $2", agentID, userID,
+			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id IN ($2, $3) ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END LIMIT 1",
+			agentID, userID, store.TenantWideUserID,
 		).Scan(&role)
 	} else {
 		tid := store.TenantIDFromContext(ctx)
@@ -417,7 +418,8 @@ func (s *PGAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, userID 
 			return false, "", nil
 		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id = $2 AND tenant_id = $3", agentID, userID, tid,
+			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id IN ($2, $3) AND tenant_id = $4 ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END LIMIT 1",
+			agentID, userID, store.TenantWideUserID, tid,
 		).Scan(&role)
 	}
 	if err != nil {
@@ -434,7 +436,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 			 WHERE deleted_at IS NULL AND (
 			     owner_id = $1
 			     OR is_default = true
-			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = $1)
+			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN ($1, $2))
 			     OR (
 			         agent_type = 'predefined'
 			         AND id IN (
@@ -447,7 +449,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 			         )
 			     )
 			 )
-			 ORDER BY created_at DESC`, userID)
+			 ORDER BY created_at DESC`, userID, store.TenantWideUserID)
 		if err != nil {
 			return nil, err
 		}
@@ -464,7 +466,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 		 WHERE deleted_at IS NULL AND tenant_id = $2 AND (
 		     owner_id = $1
 		     OR is_default = true
-		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = $1 AND tenant_id = $2)
+		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN ($1, $3) AND tenant_id = $2)
 		     OR (
 		         agent_type = 'predefined'
 		         AND id IN (
@@ -477,7 +479,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 		         )
 		     )
 		 )
-		 ORDER BY created_at DESC`, userID, tid)
+		 ORDER BY created_at DESC`, userID, tid, store.TenantWideUserID)
 	if err != nil {
 		return nil, err
 	}
@@ -644,4 +646,3 @@ func replaceIDX(s, replacement string) string {
 	}
 	return result.String()
 }
-

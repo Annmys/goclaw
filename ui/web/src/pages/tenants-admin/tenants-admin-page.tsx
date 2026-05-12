@@ -94,15 +94,12 @@ export function TenantsAdminPage() {
                   <th className="px-4 py-2 text-left font-medium">{t("slug")}</th>
                   <th className="px-4 py-2 text-left font-medium">{t("status")}</th>
                   <th className="px-4 py-2 text-left font-medium">{t("created")}</th>
+                  <th className="px-4 py-2 text-right font-medium">{t("actions")}</th>
                 </tr>
               </thead>
               <tbody>
                 {tenants.map((tenant) => (
-                  <tr
-                    key={tenant.id}
-                    className="border-b last:border-0 hover:bg-muted/30 cursor-pointer"
-                    onClick={() => navigate(ROUTES.TENANT_DETAIL.replace(":id", tenant.id))}
-                  >
+                  <tr key={tenant.id} className="border-b last:border-0 hover:bg-muted/30">
                     <td className="px-4 py-2 font-medium">{tenant.name}</td>
                     <td className="px-4 py-2">
                       <code className="rounded bg-muted px-1.5 py-0.5 text-xs">{tenant.slug}</code>
@@ -114,6 +111,15 @@ export function TenantsAdminPage() {
                     </td>
                     <td className="px-4 py-2 text-muted-foreground text-xs">
                       {new Date(tenant.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate(ROUTES.TENANT_DETAIL.replace(":id", tenant.id))}
+                      >
+                        {t("manage")}
+                      </Button>
                     </td>
                   </tr>
                 ))}

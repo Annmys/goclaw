@@ -215,6 +215,7 @@ export function SkillsPage() {
         <SkillEditDialog
           skill={editTarget}
           onClose={() => setEditTarget(null)}
+          getSkillFileContent={getSkillFileContent}
           onSave={async (id, updates) => { await updateSkill(id, updates); setEditTarget(null); }}
         />
       )}

@@ -5,10 +5,6 @@ import { useHttp } from "@/hooks/use-ws";
 import { queryKeys } from "@/lib/query-keys";
 import type { EvolutionSuggestion } from "@/types/evolution";
 
-/**
- * Fetches and manages evolution suggestions for an agent.
- * @param status - optional status filter (empty = all)
- */
 export function useEvolutionSuggestions(agentId: string, status?: string) {
   const http = useHttp();
   const queryClient = useQueryClient();
@@ -33,7 +29,8 @@ export function useEvolutionSuggestions(agentId: string, status?: string) {
           queryKey: queryKeys.evolution.suggestions(agentId, { status: status ?? "" }),
         });
         queryClient.invalidateQueries({ queryKey: queryKeys.evolution.audit(agentId, { limit: 50 }) });
-        toast.success(`建议已${newStatus === "approved" ? "批准" : newStatus === "rejected" ? "拒绝" : "回滚"}`);
+        const label = newStatus === "approved" ? "批准" : newStatus === "rejected" ? "拒绝" : "回滚";
+        toast.success(`建议已${label}`);
       } catch (error) {
         console.error("evolution suggestion update failed", error);
         toast.error("建议状态更新失败");

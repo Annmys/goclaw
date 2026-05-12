@@ -442,8 +442,8 @@ func (s *SQLiteTeamStore) ListUserTeams(ctx context.Context, userID string) ([]s
 	baseQuery := `SELECT ` + teamSelectCols + `
 		 FROM agent_teams t
 		 WHERE t.status = ?
-		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id = ?)`
-	args := []any{store.TeamStatusActive, userID}
+		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id IN (?, ?))`
+	args := []any{store.TeamStatusActive, userID, store.TenantWideUserID}
 
 	if !store.IsCrossTenant(ctx) {
 		tenantID := store.TenantIDFromContext(ctx)
@@ -489,8 +489,8 @@ func (s *SQLiteTeamStore) HasTeamAccess(ctx context.Context, teamID uuid.UUID, u
 	}
 	var exists bool
 	err = s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = ? AND user_id = ?`+tClause+`)`,
-		append([]any{teamID, userID}, tArgs...)...,
+		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = ? AND user_id IN (?, ?)`+tClause+`)`,
+		append([]any{teamID, userID, store.TenantWideUserID}, tArgs...)...,
 	).Scan(&exists)
 	return exists, err
 }

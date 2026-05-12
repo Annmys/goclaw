@@ -118,6 +118,11 @@ func (s *SQLiteTenantStore) UpdateTenant(ctx context.Context, id uuid.UUID, upda
 	return execMapUpdate(ctx, s.db, "tenants", id, updates)
 }
 
+func (s *SQLiteTenantStore) DeleteTenant(ctx context.Context, id uuid.UUID) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM tenants WHERE id = ?`, id)
+	return err
+}
+
 // ============================================================
 // Tenant-user membership
 // ============================================================

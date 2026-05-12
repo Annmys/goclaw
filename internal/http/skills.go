@@ -37,7 +37,7 @@ type SkillsHandler struct {
 	msgBus         *bus.MessageBus
 	tenantCfgStore store.SkillTenantConfigStore
 	tenantStore    store.TenantStore
-	db             *sql.DB // for export/import direct queries
+	db             *sql.DB  // for export/import direct queries
 	uploadLocks    sync.Map // per-slug mutex; bounded by validated slug set, entries are tiny (*sync.Mutex)
 }
 
@@ -214,14 +214,52 @@ func (h *SkillsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	delete(updates, "is_system")
 	delete(updates, "enabled")
 
-	if err := h.skills.UpdateSkill(r.Context(), id, updates); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
+	var contentChanged bool
+	if rawContent, ok := updates["content"]; ok {
+		delete(updates, "content")
+		content, _ := rawContent.(string)
+		if content == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content must be a non-empty SKILL.md string"})
+			return
+		}
+		if len(content) > maxSkillUploadSize {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "content exceeds skill upload size limit"})
+			return
+		}
+		if name, _, _, _ := skills.ParseSkillFrontmatter(content); name == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content must include SKILL.md YAML frontmatter with name"})
+			return
+		}
+		violations, safe := skills.GuardSkillContent(content)
+		if !safe {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": skills.FormatGuardViolations(violations)})
+			return
+		}
+		if _, err := h.skills.SaveSkillContentVersion(r.Context(), id, content); err != nil {
+			if err.Error() == "cannot edit system skill content" {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		contentChanged = true
+	}
+
+	if len(updates) > 0 {
+		if err := h.skills.UpdateSkill(r.Context(), id, updates); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
 	}
 
 	h.skills.BumpVersion()
 	h.emitCacheInvalidate(bus.CacheKindSkills, idStr, uuid.Nil)
-	emitAudit(h.msgBus, r, "skill.updated", "skill", idStr)
+	if contentChanged {
+		emitAudit(h.msgBus, r, "skill.content_updated", "skill", idStr)
+	} else {
+		emitAudit(h.msgBus, r, "skill.updated", "skill", idStr)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"ok": "true"})
 }
 

@@ -32,6 +32,11 @@ const (
 	AgentTypePredefined = "predefined" // shared agent-level context files
 )
 
+// TenantWideUserID marks an access grant as available to every user in the
+// current tenant. It is stored in existing user_id grant columns to avoid a
+// second permission system.
+const TenantWideUserID = "*"
+
 // Agent status constants.
 const (
 	AgentStatusActive       = "active"

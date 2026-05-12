@@ -106,6 +106,7 @@ export const queryKeys = {
     all: ["tenants"] as const,
     detail: (tenantId: string) => ["tenants", tenantId] as const,
     users: (tenantId: string) => ["tenants", tenantId, "users"] as const,
+    access: (tenantId: string) => ["tenants", tenantId, "access"] as const,
   },
   vault: {
     all: ["vault"] as const,

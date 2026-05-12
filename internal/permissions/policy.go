@@ -245,10 +245,12 @@ func isAdminMethod(method string) bool {
 		protocol.MethodTeamsTaskDeleteBulk,
 
 		// Tenants — write paths.
-		"tenants.create",
-		"tenants.update",
-		"tenants.users.add",
-		"tenants.users.remove",
+		protocol.MethodTenantsCreate,
+		protocol.MethodTenantsUpdate,
+		protocol.MethodTenantsDelete,
+		protocol.MethodTenantsUsersAdd,
+		protocol.MethodTenantsUsersRemove,
+		protocol.MethodTenantsAccessUpdate,
 
 		// API keys expose secret material — gate list + mutations as admin.
 		protocol.MethodAPIKeysList,
@@ -378,10 +380,11 @@ func isReadMethod(method string) bool {
 		protocol.MethodVoicesList,
 
 		// Tenants read
-		"tenants.list",
-		"tenants.get",
-		"tenants.users.list",
-		"tenants.mine",
+		protocol.MethodTenantsList,
+		protocol.MethodTenantsGet,
+		protocol.MethodTenantsUsersList,
+		protocol.MethodTenantsMine,
+		protocol.MethodTenantsAccessGet,
 
 		// Teams read
 		protocol.MethodTeamsList,

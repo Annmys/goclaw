@@ -97,3 +97,4 @@ tmp_*
 tmp_shiptest/
 *.test
 hooks.test
+.gitnexus

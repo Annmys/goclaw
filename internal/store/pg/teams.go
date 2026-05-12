@@ -366,15 +366,15 @@ func (s *PGTeamStore) ListUserTeams(ctx context.Context, userID string) ([]store
 	baseQuery := `SELECT id, name, lead_agent_id, COALESCE(description,'') AS description, status, settings, created_by, created_at, updated_at
 		 FROM agent_teams t
 		 WHERE t.status = $1
-		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id = $2)`
-	args := []any{store.TeamStatusActive, userID}
+		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id IN ($2, $3))`
+	args := []any{store.TeamStatusActive, userID, store.TenantWideUserID}
 
 	if !store.IsCrossTenant(ctx) {
 		tenantID := store.TenantIDFromContext(ctx)
 		if tenantID == uuid.Nil {
 			return nil, nil
 		}
-		baseQuery += ` AND t.tenant_id = $3`
+		baseQuery += ` AND t.tenant_id = $4`
 		args = append(args, tenantID)
 	}
 	baseQuery += ` ORDER BY t.created_at DESC`
@@ -385,14 +385,14 @@ func (s *PGTeamStore) ListUserTeams(ctx context.Context, userID string) ([]store
 }
 
 func (s *PGTeamStore) HasTeamAccess(ctx context.Context, teamID uuid.UUID, userID string) (bool, error) {
-	tClause, tArgs, _, err := scopeClause(ctx, 3)
+	tClause, tArgs, _, err := scopeClause(ctx, 4)
 	if err != nil {
 		return false, err
 	}
 	var exists bool
 	err = s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = $1 AND user_id = $2`+tClause+`)`,
-		append([]any{teamID, userID}, tArgs...)...,
+		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = $1 AND user_id IN ($2, $3)`+tClause+`)`,
+		append([]any{teamID, userID, store.TenantWideUserID}, tArgs...)...,
 	).Scan(&exists)
 	return exists, err
 }

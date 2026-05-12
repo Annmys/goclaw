@@ -70,6 +70,11 @@ services:
       - type: bind
         source: D:\数据\测试数据\包装计算
         target: /mnt/package-calc-tests
+        read_only: true
+      - type: bind
+        source: D:\数据\测试数据
+        target: /mnt/test-data
+        read_only: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     dns:

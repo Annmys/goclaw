@@ -26,6 +26,9 @@ type EvolutionHandler struct {
 	skillLoader *skills.Loader
 	dataDir     string
 
+	// Optional: skill read access for non-destructive business smoke tests.
+	skillReader store.SkillStore
+
 	// Optional: agent store for applying threshold suggestions.
 	agentStore store.AgentStore
 
@@ -40,9 +43,15 @@ type EvolutionHandlerOpt func(*EvolutionHandler)
 func WithSkillCreation(ss store.SkillManageStore, loader *skills.Loader, dataDir string) EvolutionHandlerOpt {
 	return func(h *EvolutionHandler) {
 		h.skillStore = ss
+		h.skillReader = ss
 		h.skillLoader = loader
 		h.dataDir = dataDir
 	}
+}
+
+// WithSkillReader enables non-destructive skill smoke checks without enabling skill creation.
+func WithSkillReader(ss store.SkillStore) EvolutionHandlerOpt {
+	return func(h *EvolutionHandler) { h.skillReader = ss }
 }
 
 // WithAgentStore enables threshold suggestion auto-apply on approval.
@@ -246,6 +255,23 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 
 	// Handle approval: dispatch by suggestion type.
 	if body.Status == "approved" {
+		preflightScope := approvalPreflightScope(existing.SuggestionType)
+		preflight := h.executeRegressionRun(r, agentID, preflightScope, suggestionID.String())
+		if err := h.recordRegressionRun(r, agentID, preflight); err != nil {
+			slog.Warn("evolution.approval_preflight.record_failed", "suggestion", suggestionID, "error", err)
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record approval preflight regression"})
+			return
+		}
+		if preflight.Status != "passed" {
+			h.recordAuditEvent(r, agentID, "suggestion_approval_blocked", suggestionID.String(), "blocked", "failed",
+				"approval preflight regression failed: "+preflightScope)
+			writeJSON(w, http.StatusBadRequest, map[string]string{
+				"error": "approval preflight regression failed; fix failed cases before applying this suggestion",
+				"scope": preflightScope,
+			})
+			return
+		}
+
 		switch existing.SuggestionType {
 		case store.SuggestFeedbackCorrection:
 			if err := h.suggestions.UpdateSuggestionStatus(r.Context(), suggestionID, "approved", reviewedBy); err != nil {
@@ -338,4 +364,13 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 	}
 	h.recordAuditEvent(r, agentID, "suggestion_"+body.Status, suggestionID.String(), body.Status, "ok", "suggestion status updated")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func approvalPreflightScope(suggestionType store.SuggestionType) string {
+	switch suggestionType {
+	case store.SuggestFeedbackCorrection:
+		return "business_workflow_smoke"
+	default:
+		return "agent_safety"
+	}
 }

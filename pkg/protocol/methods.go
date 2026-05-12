@@ -49,8 +49,8 @@ const (
 
 // Phase 2 - NEEDED methods
 const (
-	MethodSkillsList  = "skills.list"
-	MethodSkillsGet   = "skills.get"
+	MethodSkillsList   = "skills.list"
+	MethodSkillsGet    = "skills.get"
 	MethodSkillsUpdate = "skills.update"
 
 	MethodCronList   = "cron.list"
@@ -124,28 +124,43 @@ const (
 
 // Agent teams
 const (
-	MethodTeamsList     = "teams.list"
-	MethodTeamsCreate   = "teams.create"
-	MethodTeamsGet      = "teams.get"
-	MethodTeamsDelete   = "teams.delete"
-	MethodTeamsTaskList      = "teams.tasks.list"
-	MethodTeamsTaskGet       = "teams.tasks.get"
-	MethodTeamsTaskGetLight  = "teams.tasks.get-light"
-	MethodTeamsTaskApprove   = "teams.tasks.approve"
-	MethodTeamsTaskReject    = "teams.tasks.reject"
-	MethodTeamsTaskComment   = "teams.tasks.comment"
-	MethodTeamsTaskComments  = "teams.tasks.comments"
-	MethodTeamsTaskEvents    = "teams.tasks.events"
-	MethodTeamsTaskCreate    = "teams.tasks.create"
-	MethodTeamsTaskDelete     = "teams.tasks.delete"
-	MethodTeamsTaskDeleteBulk = "teams.tasks.delete-bulk"
-	MethodTeamsTaskAssign            = "teams.tasks.assign"
-	MethodTeamsTaskActiveBySession   = "teams.tasks.active-by-session"
-	MethodTeamsMembersAdd    = "teams.members.add"
-	MethodTeamsMembersRemove = "teams.members.remove"
-	MethodTeamsUpdate        = "teams.update"
-	MethodTeamsKnownUsers    = "teams.known_users"
-	MethodTeamsScopes        = "teams.scopes"
+	MethodTeamsList                = "teams.list"
+	MethodTeamsCreate              = "teams.create"
+	MethodTeamsGet                 = "teams.get"
+	MethodTeamsDelete              = "teams.delete"
+	MethodTeamsTaskList            = "teams.tasks.list"
+	MethodTeamsTaskGet             = "teams.tasks.get"
+	MethodTeamsTaskGetLight        = "teams.tasks.get-light"
+	MethodTeamsTaskApprove         = "teams.tasks.approve"
+	MethodTeamsTaskReject          = "teams.tasks.reject"
+	MethodTeamsTaskComment         = "teams.tasks.comment"
+	MethodTeamsTaskComments        = "teams.tasks.comments"
+	MethodTeamsTaskEvents          = "teams.tasks.events"
+	MethodTeamsTaskCreate          = "teams.tasks.create"
+	MethodTeamsTaskDelete          = "teams.tasks.delete"
+	MethodTeamsTaskDeleteBulk      = "teams.tasks.delete-bulk"
+	MethodTeamsTaskAssign          = "teams.tasks.assign"
+	MethodTeamsTaskActiveBySession = "teams.tasks.active-by-session"
+	MethodTeamsMembersAdd          = "teams.members.add"
+	MethodTeamsMembersRemove       = "teams.members.remove"
+	MethodTeamsUpdate              = "teams.update"
+	MethodTeamsKnownUsers          = "teams.known_users"
+	MethodTeamsScopes              = "teams.scopes"
+)
+
+// Tenants
+const (
+	MethodTenantsMine         = "tenants.mine"
+	MethodTenantsList         = "tenants.list"
+	MethodTenantsGet          = "tenants.get"
+	MethodTenantsCreate       = "tenants.create"
+	MethodTenantsUpdate       = "tenants.update"
+	MethodTenantsDelete       = "tenants.delete"
+	MethodTenantsUsersList    = "tenants.users.list"
+	MethodTenantsUsersAdd     = "tenants.users.add"
+	MethodTenantsUsersRemove  = "tenants.users.remove"
+	MethodTenantsAccessGet    = "tenants.access.get"
+	MethodTenantsAccessUpdate = "tenants.access.update"
 )
 
 // Team workspace
@@ -189,8 +204,8 @@ const (
 	MethodBrowserScreenshot = "browser.screenshot"
 
 	// Zalo Personal
-	MethodZaloPersonalQRStart   = "zalo.personal.qr.start"
-	MethodZaloPersonalContacts  = "zalo.personal.contacts"
+	MethodZaloPersonalQRStart  = "zalo.personal.qr.start"
+	MethodZaloPersonalContacts = "zalo.personal.contacts"
 
 	// WhatsApp
 	MethodWhatsAppQRStart = "whatsapp.qr.start"

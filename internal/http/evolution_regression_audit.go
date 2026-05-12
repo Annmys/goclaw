@@ -1,11 +1,17 @@
 package http
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,17 +91,13 @@ func (h *EvolutionHandler) handleRunRegression(w http.ResponseWriter, r *http.Re
 	if body.Scope == "" {
 		body.Scope = "agent_safety"
 	}
+	if !isValidRegressionScope(body.Scope) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "scope must be agent_safety, core_skill_smoke, business_workflow_smoke, or business_output_golden"})
+		return
+	}
 
 	run := h.executeRegressionRun(r, agentID, body.Scope, body.SuggestionID)
-	value, _ := json.Marshal(run)
-	if err := h.metrics.RecordMetric(r.Context(), store.EvolutionMetric{
-		ID:         uuid.New(),
-		AgentID:    agentID,
-		SessionKey: "evolution-center",
-		MetricType: store.MetricRegression,
-		MetricKey:  run.Status,
-		Value:      value,
-	}); err != nil {
+	if err := h.recordRegressionRun(r, agentID, run); err != nil {
 		slog.Warn("evolution.regression.record_failed", "error", err)
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -170,6 +172,19 @@ func (h *EvolutionHandler) executeRegressionRun(r *http.Request, agentID uuid.UU
 		addCase("retrieval_metrics_aggregate", "passed", "retrieval metrics aggregation is available")
 	}
 
+	if scope == "core_skill_smoke" {
+		h.addCoreSkillSmokeCases(r, addCase)
+	}
+	if scope == "business_workflow_smoke" {
+		h.addCoreSkillSmokeCases(r, addCase)
+		h.addBusinessWorkflowSmokeCases(addCase)
+	}
+	if scope == "business_output_golden" {
+		h.addCoreSkillSmokeCases(r, addCase)
+		h.addBusinessWorkflowSmokeCases(addCase)
+		h.addBusinessOutputGoldenCases(r, addCase)
+	}
+
 	run.Total = len(run.Cases)
 	run.Status = "passed"
 	if run.Failed > 0 {
@@ -177,6 +192,253 @@ func (h *EvolutionHandler) executeRegressionRun(r *http.Request, agentID uuid.UU
 	}
 	run.CompletedAt = time.Now().UTC()
 	return run
+}
+
+func isValidRegressionScope(scope string) bool {
+	switch scope {
+	case "agent_safety", "core_skill_smoke", "business_workflow_smoke", "business_output_golden":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *EvolutionHandler) recordRegressionRun(r *http.Request, agentID uuid.UUID, run evolutionRegressionRun) error {
+	value, _ := json.Marshal(run)
+	return h.metrics.RecordMetric(r.Context(), store.EvolutionMetric{
+		ID:         uuid.New(),
+		AgentID:    agentID,
+		SessionKey: "evolution-center",
+		MetricType: store.MetricRegression,
+		MetricKey:  run.Status,
+		Value:      value,
+	})
+}
+
+func (h *EvolutionHandler) addCoreSkillSmokeCases(r *http.Request, addCase func(name, status, message string)) {
+	if h.skillReader == nil {
+		addCase("core_skill_reader", "failed", "skill store is not configured")
+		return
+	}
+	required := []string{
+		"excel-type-identify",
+		"shipping-doc-processing",
+		"flow-order-query",
+		"package-weight-query",
+		"label-generate",
+		"package-calculation",
+	}
+	for _, slug := range required {
+		info, ok := h.skillReader.GetSkill(r.Context(), slug)
+		if !ok || info == nil {
+			addCase("core_skill_"+slug, "failed", "skill is not active or not visible in this tenant")
+			continue
+		}
+		if info.Path == "" {
+			addCase("core_skill_"+slug, "failed", fmt.Sprintf("skill %s has empty file path", slug))
+			continue
+		}
+		stat, err := os.Stat(info.Path)
+		if err != nil {
+			addCase("core_skill_"+slug, "failed", fmt.Sprintf("SKILL.md not readable: %v", err))
+			continue
+		}
+		if stat.Size() == 0 {
+			addCase("core_skill_"+slug, "failed", "SKILL.md is empty")
+			continue
+		}
+		addCase("core_skill_"+slug, "passed", fmt.Sprintf("%s v%d is readable", info.Name, info.Version))
+	}
+}
+
+func (h *EvolutionHandler) addBusinessWorkflowSmokeCases(addCase func(name, status, message string)) {
+	requiredFiles := []struct {
+		name string
+		path string
+	}{
+		{"flow_order_mapping_sqlite", "/mnt/target/flow-orders/全部年份订单映射表.sqlite"},
+		{"flow_order_content_sqlite", "/mnt/target/flow-orders/全部年份流转单内容索引.sqlite"},
+		{"package_weight_sqlite", "/mnt/source/product-package-weights/产品包装重量表.sqlite"},
+		{"package_materials_sqlite", "/mnt/package-materials/包装资料.sqlite"},
+	}
+	for _, item := range requiredFiles {
+		h.addFileReadableCase(item.name, item.path, addCase)
+	}
+
+	requiredDirs := []struct {
+		name string
+		path string
+	}{
+		{"label_templates_dir", "/mnt/label-templates"},
+		{"workspace_storage_dir", "/app/workspace"},
+	}
+	for _, item := range requiredDirs {
+		info, err := os.Stat(item.path)
+		if err != nil {
+			addCase(item.name, "failed", fmt.Sprintf("%s not readable: %v", item.path, err))
+			continue
+		}
+		if !info.IsDir() {
+			addCase(item.name, "failed", fmt.Sprintf("%s is not a directory", item.path))
+			continue
+		}
+		entries, err := os.ReadDir(item.path)
+		if err != nil {
+			addCase(item.name, "failed", fmt.Sprintf("%s cannot be listed: %v", item.path, err))
+			continue
+		}
+		addCase(item.name, "passed", fmt.Sprintf("%s is readable with %d entries", item.path, len(entries)))
+	}
+
+	for _, rel := range []string{
+		filepath.Join("工字标"),
+		filepath.Join("唛头"),
+		filepath.Join("品名标"),
+	} {
+		h.addDirectoryReadableCase("label_template_"+rel, filepath.Join("/mnt/label-templates", rel), addCase)
+	}
+}
+
+type shippingGoldenRegressionOutput struct {
+	OK        bool                           `json:"ok"`
+	Error     string                         `json:"error"`
+	CasesDir  string                         `json:"cases_dir"`
+	OutputDir string                         `json:"output_dir"`
+	Total     int                            `json:"total"`
+	Passed    int                            `json:"passed"`
+	Failed    int                            `json:"failed"`
+	Cases     []shippingGoldenRegressionCase `json:"cases"`
+}
+
+type shippingGoldenRegressionCase struct {
+	Name          string   `json:"name"`
+	Status        string   `json:"status"`
+	Score         int      `json:"score"`
+	MinScore      int      `json:"min_score"`
+	GeneratedFile string   `json:"generated_file"`
+	Failures      []string `json:"failures"`
+}
+
+func (h *EvolutionHandler) addBusinessOutputGoldenCases(r *http.Request, addCase func(name, status, message string)) {
+	scriptPath := filepath.Join("/app/bundled-skills", "shipping-doc-processing", "scripts", "shipping_golden_regression.py")
+	if _, err := os.Stat(scriptPath); err != nil {
+		fallback := filepath.Join("skills", "shipping-doc-processing", "scripts", "shipping_golden_regression.py")
+		if _, fallbackErr := os.Stat(fallback); fallbackErr == nil {
+			scriptPath = fallback
+		} else {
+			addCase("shipping_doc_golden_script", "failed", fmt.Sprintf("%s not readable: %v", scriptPath, err))
+			return
+		}
+	}
+
+	casesDir := "/mnt/test-data/船务清单"
+	if _, err := os.Stat(casesDir); err != nil {
+		addCase("shipping_doc_golden_cases", "failed", fmt.Sprintf("%s not readable: %v", casesDir, err))
+		return
+	}
+
+	outputDir := filepath.Join("/app/workspace", "system", "evolution-regression", "shipping-doc-processing", time.Now().UTC().Format("20060102-150405"))
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		addCase("shipping_doc_golden_output_dir", "failed", fmt.Sprintf("%s cannot be created: %v", outputDir, err))
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(
+		ctx,
+		"python3",
+		scriptPath,
+		"--cases-dir",
+		casesDir,
+		"--output-dir",
+		outputDir,
+		"--case",
+		"测试订单7",
+		"--case",
+		"测试订单8",
+		"--min-score",
+		"75",
+	)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		addCase("shipping_doc_golden_timeout", "failed", ctx.Err().Error())
+		return
+	}
+	if stderr.Len() > 0 {
+		slog.Warn("evolution.shipping_golden.stderr", "stderr", strings.TrimSpace(stderr.String()))
+	}
+
+	var payload shippingGoldenRegressionOutput
+	if jsonErr := json.Unmarshal(stdout.Bytes(), &payload); jsonErr != nil {
+		message := strings.TrimSpace(stdout.String())
+		if len(message) > 500 {
+			message = message[:500] + "..."
+		}
+		addCase("shipping_doc_golden_parse", "failed", fmt.Sprintf("cannot parse regression output: %v; stdout=%s", jsonErr, message))
+		return
+	}
+	if err != nil && payload.Total == 0 {
+		addCase("shipping_doc_golden_run", "failed", fmt.Sprintf("script failed: %v; error=%s", err, payload.Error))
+		return
+	}
+	for _, item := range payload.Cases {
+		status := "failed"
+		if item.Status == "passed" {
+			status = "passed"
+		}
+		message := fmt.Sprintf("score %d/%d, output=%s", item.Score, item.MinScore, item.GeneratedFile)
+		if len(item.Failures) > 0 {
+			message = fmt.Sprintf("%s, failures=%s", message, strings.Join(item.Failures, "; "))
+		}
+		addCase("shipping_doc_golden_"+item.Name, status, message)
+	}
+	if len(payload.Cases) == 0 {
+		addCase("shipping_doc_golden_cases", "failed", fmt.Sprintf("no cases executed from %s", payload.CasesDir))
+	}
+}
+
+func (h *EvolutionHandler) addFileReadableCase(name, path string, addCase func(name, status, message string)) {
+	info, err := os.Stat(path)
+	if err != nil {
+		addCase(name, "failed", fmt.Sprintf("%s not readable: %v", path, err))
+		return
+	}
+	if info.IsDir() {
+		addCase(name, "failed", fmt.Sprintf("%s is a directory, expected file", path))
+		return
+	}
+	if info.Size() <= 0 {
+		addCase(name, "failed", fmt.Sprintf("%s is empty", path))
+		return
+	}
+	addCase(name, "passed", fmt.Sprintf("%s exists, %.1f KB", path, float64(info.Size())/1024))
+}
+
+func (h *EvolutionHandler) addDirectoryReadableCase(name, path string, addCase func(name, status, message string)) {
+	info, err := os.Stat(path)
+	if err != nil {
+		addCase(name, "failed", fmt.Sprintf("%s not readable: %v", path, err))
+		return
+	}
+	if !info.IsDir() {
+		addCase(name, "failed", fmt.Sprintf("%s is not a directory", path))
+		return
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		addCase(name, "failed", fmt.Sprintf("%s cannot be listed: %v", path, err))
+		return
+	}
+	if len(entries) == 0 {
+		addCase(name, "failed", fmt.Sprintf("%s has no template files", path))
+		return
+	}
+	addCase(name, "passed", fmt.Sprintf("%s is readable with %d entries", path, len(entries)))
 }
 
 func (h *EvolutionHandler) handleListAudit(w http.ResponseWriter, r *http.Request) {

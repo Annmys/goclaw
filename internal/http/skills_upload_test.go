@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"mime/multipart"
 	"net/http"
@@ -494,9 +495,31 @@ func (s *skillManageStoreStub) GetNextVersion(_ context.Context, slug string) in
 func (s *skillManageStoreStub) GetNextVersionLocked(_ context.Context, slug string) (int, func() error, error) {
 	return s.GetNextVersion(context.Background(), slug), func() error { return nil }, nil
 }
+func (s *skillManageStoreStub) SaveSkillContentVersion(_ context.Context, id uuid.UUID, content string) (int, error) {
+	skill, ok := s.skills[id]
+	if !ok {
+		return 0, nil
+	}
+	next := s.GetNextVersion(context.Background(), skill.Slug)
+	skill.Version = next
+	skill.Path = filepath.Join(filepath.Dir(skill.BaseDir), fmt.Sprintf("%d", next), "SKILL.md")
+	skill.BaseDir = filepath.Dir(skill.Path)
+	s.nextBySlug[skill.Slug] = next
+	s.skills[id] = skill
+	_ = content
+	return next, nil
+}
 func (s *skillManageStoreStub) IsSystemSkill(slug string) bool {
 	_, ok := s.systemDirs[slug]
 	return ok
+}
+func (s *skillManageStoreStub) IsCustomSkillSlug(_ context.Context, slug string) bool {
+	for _, skill := range s.skills {
+		if skill.Slug == slug && !skill.IsSystem && skill.Status != "deleted" {
+			return true
+		}
+	}
+	return false
 }
 func (s *skillManageStoreStub) ListAllSkills(context.Context) []store.SkillInfo {
 	out := make([]store.SkillInfo, 0, len(s.skills))

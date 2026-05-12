@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 import json
 import sqlite3
 import sys
@@ -70,8 +70,8 @@ def find_weight_db() -> Path | None:
         if root.exists():
             candidates.extend(root.glob("*.sqlite"))
 
-    official = [p for p in candidates if p.name == "产品包装重量表.sqlite"]
-    preferred = [p for p in candidates if "产品包装重量表" in p.name and p.name != "产品包装重量表-新测试.sqlite"]
+    official = [p for p in candidates if p.name == "产品包装重量表.sqlite" and is_valid_db(p)]
+    preferred = [p for p in candidates if "产品包装重量表" in p.name and p.name != "产品包装重量表-新测试.sqlite" and is_valid_db(p)]
     fallback = [p for p in candidates if p.name == "产品包装重量表-新测试.sqlite"]
     for path in [*official, *preferred, *fallback, *candidates]:
         if is_valid_db(path):

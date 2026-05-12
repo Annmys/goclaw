@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"regexp"
 	"strings"
 
@@ -29,6 +31,10 @@ var cronFailurePattern = regexp.MustCompile(`(?is)\b(failure|failed|error|timed 
 
 func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg *config.Config, channelMgr *channels.Manager, sessionMgr store.SessionStore, agentStore store.AgentStore) func(job *store.CronJob) (*store.CronJobResult, error) {
 	return func(job *store.CronJob) (*store.CronJobResult, error) {
+		if job.Payload.Kind == "command" && strings.TrimSpace(job.Payload.Command) != "" {
+			return runCronCommandJob(job, cfg)
+		}
+
 		agentID := job.AgentID
 		if agentID == "" && agentStore != nil {
 			// Resolve real default agent from DB instead of using literal "default" string.
@@ -163,6 +169,47 @@ func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg 
 
 		return cronResult, nil
 	}
+}
+
+func runCronCommandJob(job *store.CronJob, cfg *config.Config) (*store.CronJobResult, error) {
+	jobTimeout := cfg.Cron.JobTimeoutDuration()
+	cronCtx, cancelCron := context.WithTimeout(context.Background(), jobTimeout)
+	defer cancelCron()
+
+	command := strings.TrimSpace(job.Payload.Command)
+	cmd := exec.CommandContext(cronCtx, "sh", "-c", command)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	content := strings.TrimSpace(stdout.String())
+	stderrText := strings.TrimSpace(stderr.String())
+	if stderrText != "" {
+		if content != "" {
+			content += "\n"
+		}
+		content += stderrText
+	}
+	if content == "" {
+		content = fmt.Sprintf("command completed: %s", command)
+	}
+	if cronCtx.Err() != nil {
+		return &store.CronJobResult{
+			Content: content,
+			Status:  "error",
+			Error:   cronCtx.Err().Error(),
+		}, cronCtx.Err()
+	}
+	if err != nil {
+		return &store.CronJobResult{
+			Content: content,
+			Status:  "error",
+			Error:   err.Error(),
+		}, nil
+	}
+	return &store.CronJobResult{Content: content}, nil
 }
 
 // resolveCronPeerKind infers peer kind from the cron job's user ID.

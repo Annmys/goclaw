@@ -26,15 +26,19 @@ interface SkillEditDialogProps {
   skill: SkillInfo;
   onClose: () => void;
   onSave: (id: string, updates: Record<string, unknown>) => Promise<unknown>;
+  getSkillFileContent: (id: string, path: string, version?: number) => Promise<{ content: string; path: string; size: number }>;
 }
 
-export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps) {
+export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }: SkillEditDialogProps) {
   const { t } = useTranslation("skills");
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
   const [visibility, setVisibility] = useState(skill.visibility ?? "private");
   const [tags, setTags] = useState<string[]>(skill.tags ?? []);
   const [tagInput, setTagInput] = useState("");
+  const [content, setContent] = useState("");
+  const [initialContent, setInitialContent] = useState("");
+  const [contentLoading, setContentLoading] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -42,7 +46,32 @@ export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps
     setDescription(skill.description);
     setVisibility(skill.visibility ?? "private");
     setTags(skill.tags ?? []);
+    setContent("");
+    setInitialContent("");
   }, [skill]);
+
+  useEffect(() => {
+    if (!skill.id || skill.is_system) return;
+    let cancelled = false;
+    setContentLoading(true);
+    getSkillFileContent(skill.id, "SKILL.md", skill.version)
+      .then((res) => {
+        if (cancelled) return;
+        setContent(res.content);
+        setInitialContent(res.content);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setContent("");
+        setInitialContent("");
+      })
+      .finally(() => {
+        if (!cancelled) setContentLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [skill.id, skill.is_system, skill.version, getSkillFileContent]);
 
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
@@ -60,7 +89,11 @@ export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps
     if (!skill.id) return;
     setLoading(true);
     try {
-      await onSave(skill.id, { name, description, visibility, tags });
+      const updates: Record<string, unknown> = { name, description, visibility, tags };
+      if (!skill.is_system && content !== initialContent) {
+        updates.content = content;
+      }
+      await onSave(skill.id, updates);
       onClose();
     } catch {
       // toast shown by hook — keep dialog open
@@ -71,7 +104,7 @@ export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>{t("edit.title")}</DialogTitle>
         </DialogHeader>
@@ -139,6 +172,23 @@ export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps
               </div>
             )}
           </div>
+
+          {!skill.is_system && (
+            <div className="space-y-1.5">
+              <Label htmlFor="skill-content">{t("edit.content")}</Label>
+              <Textarea
+                id="skill-content"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={18}
+                spellCheck={false}
+                disabled={contentLoading}
+                className="font-mono text-xs leading-relaxed"
+                placeholder={contentLoading ? t("edit.contentLoading") : t("edit.contentPlaceholder")}
+              />
+              <p className="text-xs text-muted-foreground">{t("edit.contentHint")}</p>
+            </div>
+          )}
         </div>
 
         <DialogFooter>

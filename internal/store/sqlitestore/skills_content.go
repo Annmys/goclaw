@@ -289,3 +289,21 @@ func (s *SQLiteSkillStore) IsSystemSkill(slug string) bool {
 	return err == nil && isSystem
 }
 
+// IsCustomSkillSlug reports whether a slug already belongs to a custom skill in
+// the current tenant. Seeders use this to avoid converting admin-managed skills
+// back into system skills during restart.
+func (s *SQLiteSkillStore) IsCustomSkillSlug(ctx context.Context, slug string) bool {
+	tid := store.TenantIDFromContext(ctx)
+	if tid == uuid.Nil {
+		tid = store.MasterTenantID
+	}
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM skills
+			WHERE slug = ? AND tenant_id = ? AND is_system = 0 AND status != 'deleted'
+		)`,
+		slug, tid,
+	).Scan(&exists)
+	return err == nil && exists
+}
