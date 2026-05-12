@@ -1,0 +1,7 @@
+skills/
+tmp_shiptest/
+node_modules/
+ui/web/node_modules/
+dist/
+build/
+coverage/

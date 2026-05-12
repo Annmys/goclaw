@@ -1,0 +1,6 @@
+services:
+  goclaw:
+    volumes:
+      - type: bind
+        source: D:\数据\产品包装重量表
+        target: /mnt/source/product-package-weights

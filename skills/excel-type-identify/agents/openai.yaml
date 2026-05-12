@@ -1,0 +1,7 @@
+interface:
+  display_name: "excel类型识别"
+  short_description: "识别 Excel 类型并决定下一步交给哪个核心流程或 skill。"
+  default_prompt: "Use $excel类型识别 to identify this Excel file type and decide the next processing step. If it is a shipping document, hand off to $船务清单处理."
+
+policy:
+  allow_implicit_invocation: true

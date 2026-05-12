@@ -1,0 +1,7 @@
+interface:
+  display_name: "流转单查询"
+  short_description: "按 XS 订单号查询流转单外箱、箱数和船务清单包装信息"
+  default_prompt: "Use $流转单查询 to query flow order packaging details by XS order number."
+
+policy:
+  allow_implicit_invocation: true
