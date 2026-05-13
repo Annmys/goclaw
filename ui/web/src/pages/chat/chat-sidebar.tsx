@@ -36,24 +36,42 @@ export const ChatSidebar = memo(function ChatSidebar({
   const ToggleIcon = sessionsCollapsed ? PanelLeftOpen : PanelLeftClose;
 
   return (
-    <div className="flex h-full w-72 max-w-[85vw] flex-col border-r bg-background transition-[width] duration-200">
+    <div
+      className={cn(
+        "flex h-full flex-col border-r bg-background transition-[width] duration-200",
+        sessionsCollapsed ? "w-14 max-w-14" : "w-72 max-w-[85vw]",
+      )}
+    >
       {/* Agent selector */}
-      <div className="border-b p-3">
-        <div className="flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <AgentSelector value={agentId} onChange={onAgentChange} />
-          </div>
+      <div className={cn("border-b", sessionsCollapsed ? "p-2" : "p-3")}>
+        {sessionsCollapsed ? (
           <button
             type="button"
-            onClick={() => onSessionsCollapsedChange?.(!sessionsCollapsed)}
-            className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            title={sessionsCollapsed ? t("expandSessions") : t("collapseSessions")}
-            aria-label={sessionsCollapsed ? t("expandSessions") : t("collapseSessions")}
-            aria-expanded={!sessionsCollapsed}
+            onClick={() => onSessionsCollapsedChange?.(false)}
+            className="mx-auto flex cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            title={t("expandSessions")}
+            aria-label={t("expandSessions")}
+            aria-expanded={false}
           >
             <ToggleIcon className="h-4 w-4" />
           </button>
-        </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <AgentSelector value={agentId} onChange={onAgentChange} />
+            </div>
+            <button
+              type="button"
+              onClick={() => onSessionsCollapsedChange?.(true)}
+              className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+              title={t("collapseSessions")}
+              aria-label={t("collapseSessions")}
+              aria-expanded
+            >
+              <ToggleIcon className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* New chat button */}
