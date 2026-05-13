@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="450" viewBox="0 0 1100 450">
+  <style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#334155;stroke-width:2;rx:16}.title{font:700 28px "Microsoft YaHei",sans-serif;fill:#0f172a}.text{font:600 20px "Microsoft YaHei",sans-serif;fill:#1e293b}.small{font:16px "Microsoft YaHei",sans-serif;fill:#475569}.arrow{stroke:#2563eb;stroke-width:3;marker-end:url(#a)}</style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1100" height="450"/><text x="550" y="50" text-anchor="middle" class="title">Skill 业务自动化流程</text>
+  <rect x="60" y="150" width="170" height="100" class="box"/><text x="145" y="190" text-anchor="middle" class="text">用户上传文件</text><text x="145" y="220" text-anchor="middle" class="small">Excel / 图片 / PDF</text>
+  <rect x="290" y="150" width="170" height="100" class="box"/><text x="375" y="190" text-anchor="middle" class="text">类型识别</text><text x="375" y="220" text-anchor="middle" class="small">判断业务流程</text>
+  <rect x="520" y="150" width="180" height="100" class="box"/><text x="610" y="190" text-anchor="middle" class="text">调用专门 Skill</text><text x="610" y="220" text-anchor="middle" class="small">船务 / 标签 / 包装</text>
+  <rect x="760" y="150" width="170" height="100" class="box"/><text x="845" y="190" text-anchor="middle" class="text">校验输出</text><text x="845" y="220" text-anchor="middle" class="small">数据 / 格式 / 路径</text>
+  <rect x="410" y="310" width="280" height="80" class="box"/><text x="550" y="343" text-anchor="middle" class="text">问题反馈进入版本迭代</text><text x="550" y="370" text-anchor="middle" class="small">记录原因、修复 Skill、回归测试</text>
+  <line x1="230" y1="200" x2="290" y2="200" class="arrow"/><line x1="460" y1="200" x2="520" y2="200" class="arrow"/><line x1="700" y1="200" x2="760" y2="200" class="arrow"/><line x1="845" y1="250" x2="690" y2="330" class="arrow"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="520" viewBox="0 0 1100 520">
+  <style>
+    .bg{fill:#f8fafc}.box{fill:#fff;stroke:#334155;stroke-width:2;rx:16}.title{font:700 28px "Microsoft YaHei",sans-serif;fill:#0f172a}.text{font:600 20px "Microsoft YaHei",sans-serif;fill:#1e293b}.small{font:16px "Microsoft YaHei",sans-serif;fill:#475569}.arrow{stroke:#2563eb;stroke-width:3;marker-end:url(#a)}
+  </style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1100" height="520"/>
+  <text x="550" y="50" text-anchor="middle" class="title">GoClaw 中文系统架构</text>
+  <rect x="50" y="110" width="210" height="110" class="box"/><text x="155" y="155" text-anchor="middle" class="text">前端控制台</text><text x="155" y="185" text-anchor="middle" class="small">对话 / 配置 / 审计</text>
+  <rect x="330" y="110" width="240" height="110" class="box"/><text x="450" y="155" text-anchor="middle" class="text">GoClaw 后端网关</text><text x="450" y="185" text-anchor="middle" class="small">权限 / 调度 / API / WS</text>
+  <rect x="650" y="90" width="210" height="90" class="box"/><text x="755" y="130" text-anchor="middle" class="text">模型 Provider</text><text x="755" y="158" text-anchor="middle" class="small">Kimi / DeepSeek / 兼容接口</text>
+  <rect x="650" y="220" width="210" height="90" class="box"/><text x="755" y="260" text-anchor="middle" class="text">PostgreSQL</text><text x="755" y="288" text-anchor="middle" class="small">租户 / 会话 / 权限 / pgvector</text>
+  <rect x="650" y="350" width="210" height="90" class="box"/><text x="755" y="390" text-anchor="middle" class="text">本地挂载数据</text><text x="755" y="418" text-anchor="middle" class="small">Excel / 标签 / sqlite / 文件</text>
+  <rect x="330" y="300" width="240" height="110" class="box"/><text x="450" y="345" text-anchor="middle" class="text">Agent 与 Skill</text><text x="450" y="375" text-anchor="middle" class="small">工具调用 / 文件处理 / 自动化</text>
+  <line x1="260" y1="165" x2="330" y2="165" class="arrow"/><line x1="570" y1="145" x2="650" y2="135" class="arrow"/><line x1="570" y1="178" x2="650" y2="255" class="arrow"/><line x1="570" y1="200" x2="650" y2="380" class="arrow"/><line x1="450" y1="220" x2="450" y2="300" class="arrow"/>
+</svg>

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="420" viewBox="0 0 1100 420">
+  <style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#334155;stroke-width:2;rx:14}.title{font:700 28px "Microsoft YaHei",sans-serif;fill:#0f172a}.text{font:600 18px "Microsoft YaHei",sans-serif;fill:#1e293b}.arrow{stroke:#2563eb;stroke-width:3;marker-end:url(#a)}</style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1100" height="420"/><text x="550" y="50" text-anchor="middle" class="title">Agent 八阶段执行流程</text>
+  <g transform="translate(45 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">上下文</text></g>
+  <g transform="translate(175 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">历史</text></g>
+  <g transform="translate(305 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">提示词</text></g>
+  <g transform="translate(435 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">思考</text></g>
+  <g transform="translate(565 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">行动</text></g>
+  <g transform="translate(695 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">观察</text></g>
+  <g transform="translate(825 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">记忆</text></g>
+  <g transform="translate(955 130)"><rect class="box" width="110" height="70"/><text x="55" y="43" text-anchor="middle" class="text">摘要</text></g>
+  <path d="M155 165H175M285 165H305M415 165H435M545 165H565M675 165H695M805 165H825M935 165H955" class="arrow"/>
+  <text x="550" y="285" text-anchor="middle" class="text">每一步都有记录，可插入 Hook、工具审批、错误处理、审计和回归验证</text>
+</svg>
