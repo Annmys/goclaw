@@ -1,4 +1,4 @@
-import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Menu, LogOut, Globe, Clock, Building2, ChevronDown, Check, User, KeyRound, Info, Settings2 } from "lucide-react";
+import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Menu, LogOut, Globe, Clock, Building2, ChevronDown, Check, User, KeyRound, Settings2 } from "lucide-react";
 import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { useUiStore } from "@/stores/use-ui-store";
@@ -12,7 +12,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Popover } from "radix-ui";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { AboutDialog } from "./about-dialog";
 import { SystemSettingsModal } from "./system-settings-modal";
 
 interface TopbarProps {
@@ -130,7 +129,6 @@ function UserMenu() {
   const { currentTenant, currentTenantName, tenants, isOwner, isMultiTenant, currentTenantId } = useTenants();
   const [open, setOpen] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showAbout, setShowAbout] = useState(false);
   const navigate = useNavigate();
 
   const tenantLabel = currentTenant?.name || currentTenantName || "";
@@ -221,15 +219,6 @@ function UserMenu() {
             <span>{t("apiKeys")}</span>
           </button>
 
-          {/* About */}
-          <button
-            onClick={() => { setOpen(false); setShowAbout(true); }}
-            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent"
-          >
-            <Info className="h-3.5 w-3.5 shrink-0" />
-            <span>{t("about.menuItem")}</span>
-          </button>
-
           <div className="my-1 border-t" />
 
           {/* Logout */}
@@ -254,7 +243,6 @@ function UserMenu() {
       onConfirm={() => { setShowLogoutConfirm(false); logout(); }}
     />
 
-    <AboutDialog open={showAbout} onOpenChange={setShowAbout} />
     </>
   );
 }
