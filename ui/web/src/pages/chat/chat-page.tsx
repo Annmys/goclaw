@@ -51,6 +51,11 @@ function writeStoredSelections(map: StoredChatSelectionMap) {
   window.localStorage.setItem(LOCAL_STORAGE_KEYS.LAST_CHAT_SELECTION, JSON.stringify(map));
 }
 
+function readStoredSessionsCollapsed() {
+  if (typeof window === "undefined") return true;
+  return window.localStorage.getItem(LOCAL_STORAGE_KEYS.CHAT_SESSIONS_COLLAPSED) !== "false";
+}
+
 function safeFilenamePart(value: string) {
   return value
     .trim()
@@ -363,7 +368,15 @@ export function ChatPage() {
   const isMobile = useIsMobile();
   useVirtualKeyboard();
   const [chatSidebarOpen, setChatSidebarOpen] = useState(false);
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(readStoredSessionsCollapsed);
   const [taskPanelOpen, setTaskPanelOpen] = useState(false);
+
+  const handleSessionsCollapsedChange = useCallback((collapsed: boolean) => {
+    setSessionsCollapsed(collapsed);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(LOCAL_STORAGE_KEYS.CHAT_SESSIONS_COLLAPSED, String(collapsed));
+    }
+  }, []);
 
   // Auto-open task panel when first task appears, auto-close when all done.
   const prevTaskCountRef = useRef(0);
@@ -414,6 +427,8 @@ export function ChatPage() {
               onSessionSelect={handleSessionSelectMobile}
               onDeleteSession={handleDeleteSession}
               onNewChat={handleNewChatMobile}
+              sessionsCollapsed={sessionsCollapsed}
+              onSessionsCollapsedChange={handleSessionsCollapsedChange}
             />
           </div>
         </>
@@ -427,6 +442,8 @@ export function ChatPage() {
           onSessionSelect={handleSessionSelect}
           onDeleteSession={handleDeleteSession}
           onNewChat={handleNewChat}
+          sessionsCollapsed={sessionsCollapsed}
+          onSessionsCollapsedChange={handleSessionsCollapsedChange}
         />
       )}
 
