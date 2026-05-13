@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="440" viewBox="0 0 1100 440">
+  <style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#334155;stroke-width:2;rx:16}.title{font:700 28px "Microsoft YaHei",sans-serif;fill:#0f172a}.text{font:600 20px "Microsoft YaHei",sans-serif;fill:#1e293b}.small{font:16px "Microsoft YaHei",sans-serif;fill:#475569}.arrow{stroke:#2563eb;stroke-width:3;marker-end:url(#a)}</style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1100" height="440"/><text x="550" y="50" text-anchor="middle" class="title">模型 Provider 路由</text>
+  <rect x="80" y="165" width="170" height="90" class="box"/><text x="165" y="202" text-anchor="middle" class="text">Agent</text><text x="165" y="230" text-anchor="middle" class="small">绑定模型策略</text>
+  <rect x="330" y="165" width="200" height="90" class="box"/><text x="430" y="202" text-anchor="middle" class="text">Provider 适配层</text><text x="430" y="230" text-anchor="middle" class="small">统一请求 / 错误分类</text>
+  <rect x="650" y="60" width="180" height="80" class="box"/><text x="740" y="95" text-anchor="middle" class="text">Kimi Code</text><text x="740" y="120" text-anchor="middle" class="small">代码与工具场景</text>
+  <rect x="650" y="180" width="180" height="80" class="box"/><text x="740" y="215" text-anchor="middle" class="text">OpenAI 兼容</text><text x="740" y="240" text-anchor="middle" class="small">通用接口</text>
+  <rect x="650" y="300" width="180" height="80" class="box"/><text x="740" y="335" text-anchor="middle" class="text">其他模型</text><text x="740" y="360" text-anchor="middle" class="small">DeepSeek / DashScope</text>
+  <rect x="900" y="165" width="150" height="90" class="box"/><text x="975" y="202" text-anchor="middle" class="text">响应回传</text><text x="975" y="230" text-anchor="middle" class="small">流式 / 工具调用</text>
+  <line x1="250" y1="210" x2="330" y2="210" class="arrow"/><line x1="530" y1="195" x2="650" y2="100" class="arrow"/><line x1="530" y1="210" x2="650" y2="220" class="arrow"/><line x1="530" y1="225" x2="650" y2="340" class="arrow"/><line x1="830" y1="220" x2="900" y2="210" class="arrow"/>
+</svg>

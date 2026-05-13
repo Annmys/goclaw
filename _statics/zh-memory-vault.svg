@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="480" viewBox="0 0 1100 480">
+  <style>.bg{fill:#f8fafc}.box{fill:#fff;stroke:#334155;stroke-width:2;rx:16}.title{font:700 28px "Microsoft YaHei",sans-serif;fill:#0f172a}.text{font:600 20px "Microsoft YaHei",sans-serif;fill:#1e293b}.small{font:16px "Microsoft YaHei",sans-serif;fill:#475569}.arrow{stroke:#2563eb;stroke-width:3;marker-end:url(#a)}</style>
+  <defs><marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/></marker></defs>
+  <rect class="bg" width="1100" height="480"/><text x="550" y="50" text-anchor="middle" class="title">记忆、Vault 与知识图谱</text>
+  <rect x="70" y="130" width="180" height="100" class="box"/><text x="160" y="172" text-anchor="middle" class="text">会话上下文</text><text x="160" y="200" text-anchor="middle" class="small">当前对话</text>
+  <rect x="320" y="80" width="190" height="100" class="box"/><text x="415" y="122" text-anchor="middle" class="text">长期记忆</text><text x="415" y="150" text-anchor="middle" class="small">摘要 / 经验 / 偏好</text>
+  <rect x="320" y="245" width="190" height="100" class="box"/><text x="415" y="287" text-anchor="middle" class="text">Vault 文档库</text><text x="415" y="315" text-anchor="middle" class="small">资料 / 文件 / 链接</text>
+  <rect x="600" y="160" width="210" height="110" class="box"/><text x="705" y="205" text-anchor="middle" class="text">Knowledge Graph</text><text x="705" y="235" text-anchor="middle" class="small">实体 / 关系 / 业务规则</text>
+  <rect x="880" y="160" width="170" height="110" class="box"/><text x="965" y="205" text-anchor="middle" class="text">Agent 查询</text><text x="965" y="235" text-anchor="middle" class="small">辅助执行任务</text>
+  <line x1="250" y1="175" x2="320" y2="130" class="arrow"/><line x1="250" y1="190" x2="320" y2="292" class="arrow"/><line x1="510" y1="130" x2="600" y2="190" class="arrow"/><line x1="510" y1="292" x2="600" y2="235" class="arrow"/><line x1="810" y1="215" x2="880" y2="215" class="arrow"/>
+</svg>
