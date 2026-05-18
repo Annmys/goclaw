@@ -2,6 +2,7 @@ package http
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 type EvolutionHandler struct {
 	metrics     store.EvolutionMetricsStore
 	suggestions store.EvolutionSuggestionStore
+	engine      *agent.SuggestionEngine
 
 	// Optional: skill creation on SuggestSkillAdd approval.
 	// Nil-safe — skill creation disabled if any is nil.
@@ -64,6 +66,11 @@ func WithToolTenantCfgs(tc store.BuiltinToolTenantConfigStore) EvolutionHandlerO
 	return func(h *EvolutionHandler) { h.toolTenantCfgs = tc }
 }
 
+// WithSuggestionEngine enables manual analysis from the admin evolution center.
+func WithSuggestionEngine(engine *agent.SuggestionEngine) EvolutionHandlerOpt {
+	return func(h *EvolutionHandler) { h.engine = engine }
+}
+
 func NewEvolutionHandler(m store.EvolutionMetricsStore, s store.EvolutionSuggestionStore, opts ...EvolutionHandlerOpt) *EvolutionHandler {
 	h := &EvolutionHandler{metrics: m, suggestions: s}
 	for _, opt := range opts {
@@ -77,6 +84,7 @@ func (h *EvolutionHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/feedback", h.adminAuth(h.handleListFeedback))
 	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/feedback", h.auth(h.handleCreateFeedback))
 	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/suggestions", h.adminAuth(h.handleListSuggestions))
+	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/suggestions/analyze", h.adminAuth(h.handleAnalyzeSuggestions))
 	mux.HandleFunc("PATCH /v1/agents/{agentID}/evolution/suggestions/{suggestionID}", h.adminAuth(h.handleUpdateSuggestion))
 	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/regression-tests", h.adminAuth(h.handleListRegressionRuns))
 	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/regression-tests/run", h.adminAuth(h.handleRunRegression))
@@ -202,6 +210,33 @@ func (h *EvolutionHandler) handleListSuggestions(w http.ResponseWriter, r *http.
 		suggestions = []store.EvolutionSuggestion{}
 	}
 	writeJSON(w, http.StatusOK, suggestions)
+}
+
+// handleAnalyzeSuggestions runs the suggestion engine immediately for one agent.
+// It only creates pending suggestions and never applies changes directly.
+func (h *EvolutionHandler) handleAnalyzeSuggestions(w http.ResponseWriter, r *http.Request) {
+	agentID, ok := h.resolveAgentID(w, r)
+	if !ok {
+		return
+	}
+	if h.engine == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "suggestion analysis is not configured"})
+		return
+	}
+	created, err := h.engine.Analyze(r.Context(), agentID)
+	if err != nil {
+		slog.Warn("evolution.analyze_suggestions failed", "agent", agentID, "error", err)
+		h.recordAuditEvent(r, agentID, "suggestions_analyze", "", "failed", "failed", err.Error())
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	h.recordAuditEvent(r, agentID, "suggestions_analyze", "", "pending", "ok",
+		fmt.Sprintf("manual analysis created %d pending suggestions", len(created)))
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"status":  "ok",
+		"created": len(created),
+		"items":   created,
+	})
 }
 
 // handleUpdateSuggestion updates a suggestion's status (approve/reject/rollback).
@@ -370,6 +405,12 @@ func approvalPreflightScope(suggestionType store.SuggestionType) string {
 	switch suggestionType {
 	case store.SuggestFeedbackCorrection:
 		return "business_workflow_smoke"
+	case store.SuggestSkillAdd:
+		return "core_skill_smoke"
+	case store.SuggestToolOrder:
+		return "business_workflow_smoke"
+	case store.SuggestThreshold:
+		return "agent_safety"
 	default:
 		return "agent_safety"
 	}
