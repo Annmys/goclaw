@@ -172,14 +172,13 @@ func (h *EvolutionHandler) executeRegressionRun(r *http.Request, agentID uuid.UU
 		addCase("retrieval_metrics_aggregate", "passed", "retrieval metrics aggregation is available")
 	}
 
-	if scope == "core_skill_smoke" {
+	switch scope {
+	case "core_skill_smoke":
 		h.addCoreSkillSmokeCases(r, addCase)
-	}
-	if scope == "business_workflow_smoke" {
+	case "business_workflow_smoke":
 		h.addCoreSkillSmokeCases(r, addCase)
 		h.addBusinessWorkflowSmokeCases(addCase)
-	}
-	if scope == "business_output_golden" {
+	case "business_output_golden":
 		h.addCoreSkillSmokeCases(r, addCase)
 		h.addBusinessWorkflowSmokeCases(addCase)
 		h.addBusinessOutputGoldenCases(r, addCase)
@@ -290,11 +289,7 @@ func (h *EvolutionHandler) addBusinessWorkflowSmokeCases(addCase func(name, stat
 		addCase(item.name, "passed", fmt.Sprintf("%s is readable with %d entries", item.path, len(entries)))
 	}
 
-	for _, rel := range []string{
-		filepath.Join("工字标"),
-		filepath.Join("唛头"),
-		filepath.Join("品名标"),
-	} {
+	for _, rel := range []string{"工字标", "唛头", "品名标"} {
 		h.addDirectoryReadableCase("label_template_"+rel, filepath.Join("/mnt/label-templates", rel), addCase)
 	}
 }

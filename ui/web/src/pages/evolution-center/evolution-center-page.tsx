@@ -9,6 +9,7 @@ import {
   MessageSquareWarning,
   RefreshCw,
   RotateCcw,
+  ShieldCheck,
   Sparkles,
   XCircle,
 } from "lucide-react";
@@ -32,54 +33,60 @@ import type {
   EvolutionSuggestion,
 } from "@/types/evolution";
 
-const pipeline = [
+const pipelineSteps = [
   {
-    title: "反馈采集",
-    description: "聊天回复下方可提交有用、没用、纠错反馈。负面反馈会进入待审队列，不会直接改核心能力。",
-    status: "已接入",
+    name: "反馈采集",
+    state: "已接入",
+    detail: "聊天回复下方的有用、没用、纠错会写入进化指标；负面反馈和纠错会生成待审核建议，不直接修改线上能力。",
   },
   {
-    title: "指标沉淀",
-    description: "记录工具调用成功率、耗时、检索使用率，为后续自动建议提供数据依据。",
-    status: "已接入",
+    name: "指标沉淀",
+    state: "已接入",
+    detail: "记录工具调用、检索使用、用户反馈、回归测试、审计事件，作为后续建议生成和回滚判断的数据来源。",
   },
   {
-    title: "建议生成",
-    description: "规则引擎会生成阈值、工具、skill 草稿和纠错类建议，当前仍以管理员审核为准。",
-    status: "部分完成",
+    name: "建议生成",
+    state: "部分完成",
+    detail: "当前支持阈值、工具策略、新增自定义 skill 草稿、用户纠错类建议；核心 skill 修改仍需要人工复核。",
   },
   {
-    title: "沙箱回归",
-    description: "支持 Agent 安全回归、核心业务 skill 冒烟回归、业务依赖回归和船务清单 golden 样例输出评分。",
-    status: "进行中",
+    name: "沙箱回归",
+    state: "已接入",
+    detail: "审批前会自动跑回归。支持 Agent 安全回归、核心 skill 冒烟、业务依赖检查、船务清单 golden 输出评分。",
   },
   {
-    title: "审批发布",
-    description: "核心 skill、模型、工具、租户、数据库和源码级变更必须人工审批，不能自动上线。",
-    status: "已接入",
+    name: "审批发布",
+    state: "部分完成",
+    detail: "建议必须由管理员批准后才能应用。新增自定义 skill 可由建议草稿创建；核心 skill、模型、工具、源码仍不允许自动覆盖。",
   },
   {
-    title: "审计回滚",
-    description: "反馈、审批、测试和回滚动作会记录审计。阈值类建议已有 baseline 回滚能力。",
-    status: "已接入",
+    name: "审计回滚",
+    state: "已接入",
+    detail: "反馈、审批、回归、应用、回滚动作都会进入审计记录；阈值类建议支持按 baseline 回滚。",
   },
 ];
 
-const autonomousRoadmap = [
-  ...pipeline.map((item) => ({
-    name: item.title,
-    state: item.status,
-    detail: item.description,
-  })),
-  { name: "业务依赖回归", state: "已接入", detail: "已检查船务、标签、包装计算依赖的核心 skill、sqlite 索引、标签模板和共享存储目录。" },
-  { name: "业务输出回归测试集", state: "进行中", detail: "已先接入船务清单处理 golden 样例评分；下一步继续补标签生成、包装计算、Excel 类型识别。" },
-];
-
-const pendingRoadmap = [
-  { name: "候选版本生成", state: "未完成", detail: "后续由进化引擎生成候选 skill 版本，不直接覆盖线上核心 skill。" },
-  { name: "自动评分器", state: "部分完成", detail: "船务清单已检查 Excel sheet、合并单元格、列宽、Logo/图片、关键字段、Total 后垃圾行和多包装行保留。" },
-  { name: "审批发布链", state: "部分完成", detail: "审批前已接入自动回归阻断；核心 skill 候选版本发布和灰度链路还要继续做。" },
-  { name: "监控与自动回滚", state: "部分完成", detail: "阈值类建议可回滚；业务 skill 的失败率、纠错率、评分下降回滚还未完成。" },
+const pendingSteps = [
+  {
+    name: "候选版本生成",
+    state: "待开发",
+    detail: "把纠错反馈自动整理成候选 skill 版本或候选规则包，只进入审核区，不直接替换线上版本。",
+  },
+  {
+    name: "业务评分器扩展",
+    state: "进行中",
+    detail: "船务清单已有 golden 评分基础；还需要补齐标签生成、包装计算、Excel 类型识别等业务回归评分器。",
+  },
+  {
+    name: "核心 skill 审批链",
+    state: "待开发",
+    detail: "核心 skill 修改需要候选版本、差异查看、回归结果、人工批准、版本发布、可回滚全链路。",
+  },
+  {
+    name: "自动回滚策略",
+    state: "待开发",
+    detail: "后续根据失败率、纠错率、业务评分下降触发自动回滚建议，仍保留管理员最终确认。",
+  },
 ];
 
 const statusText: Record<string, string> = {
@@ -94,10 +101,17 @@ const statusText: Record<string, string> = {
 };
 
 const suggestionTypeText: Record<string, string> = {
-  threshold: "检索阈值",
+  threshold: "阈值调整",
   tool_order: "工具策略",
   skill_add: "新增 skill 草稿",
   feedback_correction: "用户纠错",
+};
+
+const regressionScopeText: Record<EvolutionRegressionScope, string> = {
+  agent_safety: "Agent 安全回归",
+  core_skill_smoke: "核心 skill 冒烟回归",
+  business_workflow_smoke: "业务依赖回归",
+  business_output_golden: "业务输出 golden 回归",
 };
 
 function statusVariant(status: string) {
@@ -106,10 +120,10 @@ function statusVariant(status: string) {
   return "secondary";
 }
 
-function pipelineVariant(status: string) {
+function roadmapVariant(status: string) {
   if (status === "已接入") return "outline";
-  if (status === "进行中" || status === "部分完成" || status === "开始建设") return "secondary";
-  return "secondary";
+  if (status === "部分完成" || status === "进行中") return "secondary";
+  return "default";
 }
 
 function SuggestionCard({
@@ -121,6 +135,7 @@ function SuggestionCard({
 }) {
   const isPending = suggestion.status === "pending";
   const canRollback = suggestion.status === "applied" || suggestion.status === "approved";
+  const parameters = suggestion.parameters ? JSON.stringify(suggestion.parameters, null, 2) : "";
 
   return (
     <div className="rounded-lg border p-4">
@@ -129,20 +144,22 @@ function SuggestionCard({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{suggestionTypeText[suggestion.suggestion_type] ?? suggestion.suggestion_type}</Badge>
             <Badge variant={statusVariant(suggestion.status)}>{statusText[suggestion.status] ?? suggestion.status}</Badge>
-            <span className="text-xs text-muted-foreground">
-              {new Date(suggestion.created_at).toLocaleString()}
-            </span>
+            <span className="text-xs text-muted-foreground">{new Date(suggestion.created_at).toLocaleString()}</span>
           </div>
           <p className="mt-2 text-sm font-medium">{suggestion.suggestion}</p>
-          {suggestion.rationale && (
-            <p className="mt-1 text-sm text-muted-foreground">{suggestion.rationale}</p>
+          {suggestion.rationale && <p className="mt-1 text-sm text-muted-foreground">{suggestion.rationale}</p>}
+          {parameters && (
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs text-muted-foreground">查看建议参数</summary>
+              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-2 text-xs">{parameters}</pre>
+            </details>
           )}
         </div>
         <div className="flex shrink-0 gap-2">
           {isPending && (
             <>
               <Button size="sm" onClick={() => onUpdateStatus(suggestion.id, "approved")}>
-                批准
+                批准并执行
               </Button>
               <Button size="sm" variant="outline" onClick={() => onUpdateStatus(suggestion.id, "rejected")}>
                 拒绝
@@ -179,12 +196,10 @@ function FeedbackCard({ item }: { item: EvolutionFeedback }) {
         <span className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleString()}</span>
       </div>
       <p className="mt-2 truncate text-xs text-muted-foreground">会话：{item.session_key}</p>
-      {item.value.message_content && (
-        <p className="mt-2 line-clamp-3 text-muted-foreground">{item.value.message_content}</p>
-      )}
+      {item.value.message_content && <p className="mt-2 line-clamp-3 text-muted-foreground">{item.value.message_content}</p>}
       {item.value.correction && (
         <div className="mt-2 rounded-md bg-muted p-2">
-          <p className="text-xs font-medium">用户纠错</p>
+          <p className="text-xs font-medium">用户纠错内容</p>
           <p className="mt-1 whitespace-pre-wrap">{item.value.correction}</p>
         </div>
       )}
@@ -203,6 +218,13 @@ function RegressionCard({
   running: boolean;
   onRun: (scope?: EvolutionRegressionScope) => Promise<EvolutionRegressionRun | null>;
 }) {
+  const scopes: EvolutionRegressionScope[] = [
+    "agent_safety",
+    "core_skill_smoke",
+    "business_workflow_smoke",
+    "business_output_golden",
+  ];
+
   return (
     <Card>
       <CardHeader>
@@ -212,26 +234,16 @@ function RegressionCard({
             <CardTitle>沙箱回归测试</CardTitle>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => void onRun("agent_safety")} disabled={running}>
-              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
-              Agent 安全回归
-            </Button>
-            <Button size="sm" onClick={() => void onRun("core_skill_smoke")} disabled={running}>
-              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
-              核心 skill 冒烟回归
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => void onRun("business_workflow_smoke")} disabled={running}>
-              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
-              业务依赖回归
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => void onRun("business_output_golden")} disabled={running}>
-              <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
-              业务输出回归
-            </Button>
+            {scopes.map((scope) => (
+              <Button key={scope} size="sm" variant={scope === "agent_safety" ? "outline" : "secondary"} onClick={() => void onRun(scope)} disabled={running}>
+                <RefreshCw className={`mr-1 h-3.5 w-3.5 ${running ? "animate-spin" : ""}`} />
+                {regressionScopeText[scope]}
+              </Button>
+            ))}
           </div>
         </div>
         <CardDescription>
-          Agent 安全回归检查基础读写链路；核心 skill 冒烟回归检查核心业务 skill 是否存在、可读、版本文件非空；业务依赖回归进一步检查流转单索引、重量表、包装资料、标签模板和共享存储目录；业务输出回归会用真实初始订单生成文件并对比完成样例评分。
+          审批前会自动跑对应回归；也可以在这里手动执行。业务输出 golden 回归会生成测试输出并记录评分。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -248,14 +260,10 @@ function RegressionCard({
                   <span className="text-sm font-medium">{run.scope}</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {new Date(run.completed_at).toLocaleString()} · {run.passed}/{run.total} 通过
+                  {new Date(run.completed_at).toLocaleString()}，{run.passed}/{run.total} 通过
                 </p>
               </div>
-              {run.status === "passed" ? (
-                <CheckCircle2 className="h-5 w-5 text-emerald-500" />
-              ) : (
-                <XCircle className="h-5 w-5 text-destructive" />
-              )}
+              {run.status === "passed" ? <CheckCircle2 className="h-5 w-5 text-emerald-500" /> : <XCircle className="h-5 w-5 text-destructive" />}
             </div>
             <div className="space-y-2">
               {run.cases.map((item) => (
@@ -313,6 +321,52 @@ function AuditCard({ events, loading }: { events: EvolutionAuditEvent[]; loading
   );
 }
 
+function RoadmapList({ title, items }: {
+  title: string;
+  items: Array<{ name: string; state: string; detail: string }>;
+}) {
+  return (
+    <div>
+      <p className="mb-3 text-sm font-semibold">{title}</p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {items.map((item) => (
+          <div key={item.name} className="rounded-lg border p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="font-medium">{item.name}</p>
+              <Badge variant={roadmapVariant(item.state)}>{item.state}</Badge>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MetricList({ title, empty, items }: {
+  title: string;
+  empty: string;
+  items: Array<{ key: string; left: string; right: string }>;
+}) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">{title}</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{empty}</p>
+      ) : (
+        <div className="space-y-2">
+          {items.map((item) => (
+            <div key={item.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+              <span className="truncate">{item.left}</span>
+              <span className="shrink-0 text-muted-foreground">{item.right}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EvolutionCenterPage() {
   const { agents, loading: agentsLoading, refresh } = useAgents();
   const [agentId, setAgentId] = useState("");
@@ -337,7 +391,7 @@ export function EvolutionCenterPage() {
     <div className="p-4 sm:p-6 pb-10">
       <PageHeader
         title="智能进化中心"
-        description="集中查看用户反馈、演进指标、待审建议、沙箱回归和审计回滚。当前目标是受控进化，核心业务能力必须先测试、再审批、再发布。"
+        description="集中查看用户反馈、进化指标、待审建议、沙箱回归、审批发布和审计回滚。目标是受控进化：先收集问题，再生成建议，再回归验证，最后人工批准发布。"
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="secondary">管理员可见</Badge>
@@ -354,10 +408,10 @@ export function EvolutionCenterPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-amber-500" />
-              <CardTitle>自治进化目标闭环</CardTitle>
+              <CardTitle>自治进化闭环</CardTitle>
             </div>
             <CardDescription>
-              从业务执行、用户反馈、纠错暂存，到建议生成、沙箱回归、人工审批、发布和回滚，逐步形成可控的长期迭代闭环。
+              反馈采集、指标沉淀、建议生成、沙箱回归、审批发布、审计回滚已经整合到同一条路线中，避免分散在多个孤立卡片里。
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-4">
@@ -385,7 +439,7 @@ export function EvolutionCenterPage() {
         <Card>
           <CardHeader>
             <CardTitle>Agent 范围</CardTitle>
-            <CardDescription>按 Agent 查看反馈、指标、建议、回归测试和审计记录。</CardDescription>
+            <CardDescription>选择 Agent 后查看它的反馈、指标、建议、回归测试和审计记录。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <select
@@ -443,9 +497,9 @@ export function EvolutionCenterPage() {
                 <CardHeader>
                   <div className="flex items-center gap-2">
                     <BarChart3 className="h-5 w-5 text-primary" />
-                    <CardTitle>演进指标</CardTitle>
+                    <CardTitle>进化指标</CardTitle>
                   </div>
-                  <CardDescription>来自 GoClaw evolution metrics，显示工具成功率和检索使用率。</CardDescription>
+                  <CardDescription>展示工具成功率、调用次数、检索使用率等数据，作为自动建议的依据。</CardDescription>
                 </CardHeader>
                 <CardContent>
                   {!agentId ? (
@@ -509,17 +563,19 @@ export function EvolutionCenterPage() {
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-5 w-5 text-primary" />
-                  <CardTitle>演进建议审批</CardTitle>
+                  <CardTitle>进化建议审批</CardTitle>
                 </div>
-                <CardDescription>审批后才会进入下一步。新增自定义 skill 走轻量审批，核心 skill、业务依赖和源码级改动仍必须人工复核，不能由建议直接覆盖线上。</CardDescription>
+                <CardDescription>
+                  批准前会先跑对应回归。新增自定义 skill 可以通过草稿创建；核心 skill、模型、工具、数据库和源码级改动必须人工复核。
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {!agentId ? (
-                  <EmptyState icon={GitBranch} title="请选择 Agent" description="选择 Agent 后查看演进建议。" />
+                  <EmptyState icon={GitBranch} title="请选择 Agent" description="选择 Agent 后查看进化建议。" />
                 ) : suggestionsLoading ? (
                   <TableSkeleton rows={4} />
                 ) : suggestions.length === 0 ? (
-                  <EmptyState icon={CheckCircle2} title="暂无建议" description="当前 Agent 暂无演进建议。" />
+                  <EmptyState icon={CheckCircle2} title="暂无建议" description="当前 Agent 暂无进化建议。" />
                 ) : (
                   <div className="space-y-3">
                     {suggestions.map((suggestion) => (
@@ -538,62 +594,27 @@ export function EvolutionCenterPage() {
                   <ClipboardList className="h-5 w-5 text-primary" />
                   <CardTitle>完整自治进化路线</CardTitle>
                 </div>
-                <CardDescription>已接入能力和待开发能力放在同一条路线里看，避免独立卡片占用页面空间。</CardDescription>
+                <CardDescription>
+                  把反馈采集、指标沉淀、建议生成、沙箱回归、审批发布、审计回滚放到同一条路线中，便于判断哪些已完成、哪些还要继续开发。
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <RoadmapList title="已接入和建设中" items={autonomousRoadmap} />
-                <RoadmapList title="还需要继续开发" items={pendingRoadmap} />
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="h-4 w-4 text-primary" />
+                    <p className="text-sm font-medium">安全边界</p>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    自定义 skill 可以走轻量审批；核心 skill、模型配置、工具权限、租户权限、数据库和源码改动必须人工审核并保留回滚记录。
+                  </p>
+                </div>
+                <RoadmapList title="已接入和建设中" items={pipelineSteps} />
+                <RoadmapList title="还需要继续开发" items={pendingSteps} />
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </div>
-    </div>
-  );
-}
-
-function RoadmapList({ title, items }: {
-  title: string;
-  items: Array<{ name: string; state: string; detail: string }>;
-}) {
-  return (
-    <div>
-      <p className="mb-3 text-sm font-semibold">{title}</p>
-      <div className="grid gap-3 lg:grid-cols-2">
-        {items.map((item) => (
-          <div key={item.name} className="rounded-lg border p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="font-medium">{item.name}</p>
-              <Badge variant={pipelineVariant(item.state)}>{item.state}</Badge>
-            </div>
-            <p className="mt-1 text-sm text-muted-foreground">{item.detail}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function MetricList({ title, empty, items }: {
-  title: string;
-  empty: string;
-  items: Array<{ key: string; left: string; right: string }>;
-}) {
-  return (
-    <div>
-      <p className="mb-2 text-sm font-medium">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{empty}</p>
-      ) : (
-        <div className="space-y-2">
-          {items.map((item) => (
-            <div key={item.key} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
-              <span className="truncate">{item.left}</span>
-              <span className="shrink-0 text-muted-foreground">{item.right}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

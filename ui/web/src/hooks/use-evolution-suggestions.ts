@@ -14,8 +14,7 @@ export function useEvolutionSuggestions(agentId: string, status?: string) {
 
   const { data, isLoading } = useQuery({
     queryKey: queryKeys.evolution.suggestions(agentId, { status: status ?? "" }),
-    queryFn: () =>
-      http.get<EvolutionSuggestion[]>(`/v1/agents/${agentId}/evolution/suggestions`, params),
+    queryFn: () => http.get<EvolutionSuggestion[]>(`/v1/agents/${agentId}/evolution/suggestions`, params),
     enabled: !!agentId,
   });
 
@@ -29,11 +28,13 @@ export function useEvolutionSuggestions(agentId: string, status?: string) {
           queryKey: queryKeys.evolution.suggestions(agentId, { status: status ?? "" }),
         });
         queryClient.invalidateQueries({ queryKey: queryKeys.evolution.audit(agentId, { limit: 50 }) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.evolution.regression(agentId, { limit: 20 }) });
         const label = newStatus === "approved" ? "批准" : newStatus === "rejected" ? "拒绝" : "回滚";
         toast.success(`建议已${label}`);
       } catch (error) {
         console.error("evolution suggestion update failed", error);
-        toast.error("建议状态更新失败");
+        toast.error(error instanceof Error ? error.message : "建议状态更新失败");
+        throw error;
       }
     },
     [http, agentId, status, queryClient],

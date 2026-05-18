@@ -11,6 +11,13 @@ export type EvolutionRegressionScope =
   | "business_workflow_smoke"
   | "business_output_golden";
 
+const labelByScope: Record<EvolutionRegressionScope, string> = {
+  agent_safety: "Agent 安全回归",
+  core_skill_smoke: "核心业务 skill 冒烟回归",
+  business_workflow_smoke: "业务工作流依赖回归",
+  business_output_golden: "业务输出 golden 回归",
+};
+
 export function useEvolutionRegression(agentId: string) {
   const http = useHttp();
   const queryClient = useQueryClient();
@@ -38,12 +45,6 @@ export function useEvolutionRegression(agentId: string) {
     async (scope: EvolutionRegressionScope = "agent_safety") => {
       if (!agentId) return null;
       const result = await mutation.mutateAsync({ scope });
-      const labelByScope: Record<EvolutionRegressionScope, string> = {
-        agent_safety: "Agent 安全回归",
-        core_skill_smoke: "核心业务 skill 冒烟回归",
-        business_workflow_smoke: "业务工作流依赖回归",
-        business_output_golden: "业务输出 golden 回归",
-      };
       const label = labelByScope[scope];
       if (result.status === "passed") {
         toast.success(`${label}通过`);
