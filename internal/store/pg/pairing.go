@@ -17,7 +17,6 @@ const (
 	codeAlphabet         = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	codeLength           = 8
 	codeTTL              = 60 * time.Minute
-	pairedDeviceTTL      = 30 * 24 * time.Hour // 30 days
 	maxPendingPerAccount = 3
 )
 
@@ -101,11 +100,10 @@ func (s *PGPairingStore) ApprovePairing(ctx context.Context, code, approvedBy st
 
 	// Add to paired — use the request's tenant (the channel that initiated pairing)
 	now := time.Now()
-	expiresAt := now.Add(pairedDeviceTTL)
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO paired_devices (id, sender_id, channel, chat_id, paired_by, paired_at, metadata, expires_at, tenant_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, expiresAt, reqTenantID,
+		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, nil, reqTenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create paired device: %w", err)

@@ -258,16 +258,16 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 			return
 		}
 		if paired {
-			client.role = permissions.RoleOperator
-			client.authenticated = true
-		client.userID = params.UserID
-			client.pairedSenderID = params.SenderID
-			client.pairedChannel = "browser"
 			tid, errCode := r.resolveTenantHint(ctx, params.TenantHint, params.UserID)
 			if errCode != "" {
 				client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
 				return
 			}
+			client.role = r.roleForTenantUser(ctx, tid, params.UserID)
+			client.authenticated = true
+			client.userID = params.UserID
+			client.pairedSenderID = params.SenderID
+			client.pairedChannel = "browser"
 			client.tenantID = tid
 			slog.Info("browser pairing authenticated", "sender_id", params.SenderID, "client", client.id, "tenant_id", client.tenantID)
 			r.sendConnectResponse(ctx, client, req.ID)
@@ -415,6 +415,28 @@ func (r *MethodRouter) getUserTenantRole(ctx context.Context, tenantID uuid.UUID
 		r.permCache.SetTenantRole(ctx, tenantID, userID, role)
 	}
 	return role, nil
+}
+
+func (r *MethodRouter) roleForTenantUser(ctx context.Context, tenantID uuid.UUID, userID string) permissions.Role {
+	if r.tenantStore == nil || userID == "" || tenantID == uuid.Nil {
+		return permissions.RoleOperator
+	}
+	role, err := r.getUserTenantRole(ctx, tenantID, userID)
+	if err != nil || role == "" {
+		slog.Warn("security.browser_pairing_role_fallback", "user", userID, "tenant_id", tenantID, "error", err)
+		return permissions.RoleOperator
+	}
+	switch role {
+	case store.TenantRoleOwner, store.TenantRoleAdmin:
+		return permissions.RoleAdmin
+	case store.TenantRoleOperator, store.TenantRoleMember:
+		return permissions.RoleOperator
+	case store.TenantRoleViewer:
+		return permissions.RoleViewer
+	default:
+		slog.Warn("security.browser_pairing_unknown_tenant_role", "user", userID, "tenant_id", tenantID, "role", role)
+		return permissions.RoleOperator
+	}
 }
 
 // applyTenantScope narrows an owner client's data scope to a specific tenant.

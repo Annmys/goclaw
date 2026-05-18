@@ -21,7 +21,6 @@ const (
 	codeAlphabet         = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	codeLength           = 8
 	codeTTL              = 60 * time.Minute
-	pairedDeviceTTL      = 30 * 24 * time.Hour
 	maxPendingPerAccount = 3
 )
 
@@ -95,11 +94,10 @@ func (s *SQLitePairingStore) ApprovePairing(ctx context.Context, code, approvedB
 
 	s.db.ExecContext(ctx, "DELETE FROM pairing_requests WHERE id = ?", reqID)
 
-	expiresAt := now.Add(pairedDeviceTTL)
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO paired_devices (id, sender_id, channel, chat_id, paired_by, paired_at, metadata, expires_at, tenant_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, expiresAt, reqTenantID,
+		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, nil, reqTenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create paired device: %w", err)
