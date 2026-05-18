@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/audio"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway/methods"
@@ -167,6 +168,7 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 	// V3: Evolution metrics + suggestions API
 	if d.pgStores != nil && d.pgStores.EvolutionMetrics != nil && d.pgStores.EvolutionSuggestions != nil {
 		var evoOpts []httpapi.EvolutionHandlerOpt
+		evoOpts = append(evoOpts, httpapi.WithSuggestionEngine(agent.NewSuggestionEngine(d.pgStores.EvolutionMetrics, d.pgStores.EvolutionSuggestions)))
 		if manageStore, ok := d.pgStores.Skills.(store.SkillManageStore); ok && d.skillsLoader != nil {
 			evoOpts = append(evoOpts, httpapi.WithSkillCreation(manageStore, d.skillsLoader, d.dataDir))
 		} else if d.pgStores.Skills != nil {

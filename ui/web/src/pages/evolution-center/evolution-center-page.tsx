@@ -378,7 +378,7 @@ export function EvolutionCenterPage() {
   );
 
   const { toolAggs, retrievalAggs, loading: metricsLoading } = useEvolutionMetrics(agentId, timeRange);
-  const { suggestions, loading: suggestionsLoading, updateStatus } = useEvolutionSuggestions(agentId);
+  const { suggestions, loading: suggestionsLoading, analyzing: suggestionsAnalyzing, analyzeNow, updateStatus } = useEvolutionSuggestions(agentId);
   const { feedback, loading: feedbackLoading } = useEvolutionFeedback(agentId, timeRange);
   const { latestRun, loading: regressionLoading, running: regressionRunning, runRegression } = useEvolutionRegression(agentId);
   const { events: auditEvents, loading: auditLoading } = useEvolutionAudit(agentId);
@@ -561,13 +561,21 @@ export function EvolutionCenterPage() {
           <TabsContent value="suggestions" className="mt-4">
             <Card>
               <CardHeader>
-                <div className="flex items-center gap-2">
-                  <GitBranch className="h-5 w-5 text-primary" />
-                  <CardTitle>进化建议审批</CardTitle>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <GitBranch className="h-5 w-5 text-primary" />
+                      <CardTitle>进化建议审批</CardTitle>
+                    </div>
+                    <CardDescription className="mt-1">
+                      批准前会先跑对应回归。新增自定义 skill 可以通过草稿创建；核心 skill、模型、工具、数据库和源码级改动必须人工复核。
+                    </CardDescription>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => void analyzeNow()} disabled={!agentId || suggestionsAnalyzing}>
+                    <RefreshCw className={`mr-1 h-3.5 w-3.5 ${suggestionsAnalyzing ? "animate-spin" : ""}`} />
+                    立即分析生成建议
+                  </Button>
                 </div>
-                <CardDescription>
-                  批准前会先跑对应回归。新增自定义 skill 可以通过草稿创建；核心 skill、模型、工具、数据库和源码级改动必须人工复核。
-                </CardDescription>
               </CardHeader>
               <CardContent>
                 {!agentId ? (
