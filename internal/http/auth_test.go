@@ -371,8 +371,8 @@ func TestResolveAuth_BrowserPairingScopesToMemberTenant(t *testing.T) {
 	if !auth.Authenticated {
 		t.Fatal("expected authenticated")
 	}
-	if auth.Role != permissions.RoleOperator {
-		t.Fatalf("role = %v, want operator", auth.Role)
+	if auth.Role != permissions.RoleAdmin {
+		t.Fatalf("role = %v, want admin", auth.Role)
 	}
 	if auth.TenantID != tenantID {
 		t.Fatalf("tenantID = %v, want %v", auth.TenantID, tenantID)

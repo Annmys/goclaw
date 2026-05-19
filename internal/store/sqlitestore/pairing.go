@@ -92,20 +92,30 @@ func (s *SQLitePairingStore) ApprovePairing(ctx context.Context, code, approvedB
 		return nil, fmt.Errorf("pairing code %s not found or expired", code)
 	}
 
+	var meta map[string]string
+	if len(metaJSON) > 0 {
+		json.Unmarshal(metaJSON, &meta)
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	if approvedBy != "" {
+		meta["approved_by"] = approvedBy
+	}
+	if approverTenantID := store.TenantIDFromContext(ctx); approverTenantID != uuid.Nil {
+		meta["approved_by_tenant_id"] = approverTenantID.String()
+	}
+	updatedMetaJSON, _ := json.Marshal(meta)
+
 	s.db.ExecContext(ctx, "DELETE FROM pairing_requests WHERE id = ?", reqID)
 
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO paired_devices (id, sender_id, channel, chat_id, paired_by, paired_at, metadata, expires_at, tenant_id)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, nil, reqTenantID,
+		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, updatedMetaJSON, nil, reqTenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create paired device: %w", err)
-	}
-
-	var meta map[string]string
-	if len(metaJSON) > 0 {
-		json.Unmarshal(metaJSON, &meta)
 	}
 
 	return &store.PairedDeviceData{
@@ -114,6 +124,8 @@ func (s *SQLitePairingStore) ApprovePairing(ctx context.Context, code, approvedB
 		ChatID:   chatID,
 		PairedAt: now.UnixMilli(),
 		PairedBy: approvedBy,
+		TenantID: reqTenantID.String(),
+		UserID:   meta["user_id"],
 		Metadata: meta,
 	}, nil
 }
@@ -179,10 +191,17 @@ func (s *SQLitePairingStore) ListPending(ctx context.Context) []store.PairingReq
 			slog.Warn("pairing: scan error", "error", err)
 			continue
 		}
+		d.TenantID = tid.String()
 		d.CreatedAt = parseTimeToMillis(createdAtStr)
 		d.ExpiresAt = parseTimeToMillis(expiresAtStr)
 		if len(metaJSON) > 0 {
 			json.Unmarshal(metaJSON, &d.Metadata)
+		}
+		if d.Metadata == nil {
+			d.Metadata = map[string]string{}
+		}
+		if v, ok := d.Metadata["user_id"]; ok {
+			d.UserID = v
 		}
 		result = append(result, d)
 	}
@@ -218,9 +237,16 @@ func (s *SQLitePairingStore) ListPaired(ctx context.Context) []store.PairedDevic
 			slog.Warn("pairing: scan paired error", "error", err)
 			continue
 		}
+		d.TenantID = tid.String()
 		d.PairedAt = parseTimeToMillis(pairedAtStr)
 		if len(metaJSON) > 0 {
 			json.Unmarshal(metaJSON, &d.Metadata)
+		}
+		if d.Metadata == nil {
+			d.Metadata = map[string]string{}
+		}
+		if v, ok := d.Metadata["user_id"]; ok {
+			d.UserID = v
 		}
 		result = append(result, d)
 	}
