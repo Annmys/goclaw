@@ -31,6 +31,7 @@ import {
   DatabaseBackup,
   Webhook,
   Sparkles,
+  FolderSync,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SidebarGroup } from "./sidebar-group";
@@ -120,6 +121,9 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           <SidebarItem to={ROUTES.MEMORY} icon={Brain} label={t("nav.memory")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.VAULT} icon={FileArchive} label={t("nav.vault")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.KNOWLEDGE_GRAPH} icon={Network} label={t("nav.knowledgeGraph")} collapsed={collapsed} />
+          {isAdmin && (
+            <SidebarItem to={ROUTES.LOCAL_KNOWLEDGE} icon={FolderSync} label={t("nav.localKnowledge")} collapsed={collapsed} />
+          )}
           <SidebarItem to={ROUTES.STORAGE} icon={HardDrive} label={t("nav.storage")} collapsed={collapsed} />
         </SidebarGroup>
 

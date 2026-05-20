@@ -26,6 +26,7 @@
     "memory": "Memory",
     "vault": "Vault",
     "knowledgeGraph": "Knowledge Graph",
+    "localKnowledge": "Local Knowledge",
     "traces": "Traces",
     "realtimeEvents": "Realtime Events",
     "usage": "Usage",

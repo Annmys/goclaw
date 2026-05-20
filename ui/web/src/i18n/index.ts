@@ -28,6 +28,7 @@ import enTts from "./locales/en/tts.json";
 import enSetup from "./locales/en/setup.json";
 import enMemory from "./locales/en/memory.json";
 import enVault from "./locales/en/vault.json";
+import enLocalKnowledge from "./locales/en/local-knowledge.json";
 import enStorage from "./locales/en/storage.json";
 import enPendingMessages from "./locales/en/pending-messages.json";
 import enContacts from "./locales/en/contacts.json";
@@ -69,6 +70,7 @@ import viTts from "./locales/vi/tts.json";
 import viSetup from "./locales/vi/setup.json";
 import viMemory from "./locales/vi/memory.json";
 import viVault from "./locales/vi/vault.json";
+import viLocalKnowledge from "./locales/vi/local-knowledge.json";
 import viStorage from "./locales/vi/storage.json";
 import viPendingMessages from "./locales/vi/pending-messages.json";
 import viContacts from "./locales/vi/contacts.json";
@@ -110,6 +112,7 @@ import zhTts from "./locales/zh/tts.json";
 import zhSetup from "./locales/zh/setup.json";
 import zhMemory from "./locales/zh/memory.json";
 import zhVault from "./locales/zh/vault.json";
+import zhLocalKnowledge from "./locales/zh/local-knowledge.json";
 import zhStorage from "./locales/zh/storage.json";
 import zhPendingMessages from "./locales/zh/pending-messages.json";
 import zhContacts from "./locales/zh/contacts.json";
@@ -140,7 +143,7 @@ const ns = [
   "agents", "teams", "sessions", "skills", "cron", "config",
   "channels", "providers", "traces", "events",
   "usage", "approvals", "nodes", "logs", "tools", "mcp", "tts",
-  "setup", "memory", "vault", "storage", "pending-messages", "contacts", "activity", "api-keys",
+  "setup", "memory", "vault", "local-knowledge", "storage", "pending-messages", "contacts", "activity", "api-keys",
   "cli-credentials", "packages", "tenants", "system-settings", "import-export",
   "v3-capabilities",
   "backup",
@@ -156,7 +159,7 @@ i18n.use(initReactI18next).init({
       channels: enChannels, providers: enProviders, traces: enTraces,
       events: enEvents, usage: enUsage,
       approvals: enApprovals, nodes: enNodes, logs: enLogs, tools: enTools,
-      mcp: enMcp, tts: enTts, setup: enSetup, memory: enMemory, vault: enVault, storage: enStorage,
+      mcp: enMcp, tts: enTts, setup: enSetup, memory: enMemory, vault: enVault, "local-knowledge": enLocalKnowledge, storage: enStorage,
       "pending-messages": enPendingMessages,
       contacts: enContacts, activity: enActivity, "api-keys": enApiKeys,
       "cli-credentials": enCliCredentials,
@@ -175,7 +178,7 @@ i18n.use(initReactI18next).init({
       channels: viChannels, providers: viProviders, traces: viTraces,
       events: viEvents, usage: viUsage,
       approvals: viApprovals, nodes: viNodes, logs: viLogs, tools: viTools,
-      mcp: viMcp, tts: viTts, setup: viSetup, memory: viMemory, vault: viVault, storage: viStorage,
+      mcp: viMcp, tts: viTts, setup: viSetup, memory: viMemory, vault: viVault, "local-knowledge": viLocalKnowledge, storage: viStorage,
       "pending-messages": viPendingMessages,
       contacts: viContacts, activity: viActivity, "api-keys": viApiKeys,
       "cli-credentials": viCliCredentials,
@@ -194,7 +197,7 @@ i18n.use(initReactI18next).init({
       channels: zhChannels, providers: zhProviders, traces: zhTraces,
       events: zhEvents, usage: zhUsage,
       approvals: zhApprovals, nodes: zhNodes, logs: zhLogs, tools: zhTools,
-      mcp: zhMcp, tts: zhTts, setup: zhSetup, memory: zhMemory, vault: zhVault, storage: zhStorage,
+      mcp: zhMcp, tts: zhTts, setup: zhSetup, memory: zhMemory, vault: zhVault, "local-knowledge": zhLocalKnowledge, storage: zhStorage,
       "pending-messages": zhPendingMessages,
       contacts: zhContacts, activity: zhActivity, "api-keys": zhApiKeys,
       "cli-credentials": zhCliCredentials,
