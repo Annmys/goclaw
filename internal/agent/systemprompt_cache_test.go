@@ -150,6 +150,23 @@ func TestExecutionBiasAbsentInBootstrap(t *testing.T) {
 	}
 }
 
+func TestToolingSectionPrefersSpecificToolsBeforeExec(t *testing.T) {
+	prompt := BuildSystemPrompt(SystemPromptConfig{
+		Mode:      PromptFull,
+		ToolNames: []string{"exec", "read_file", "list_files", "send_file", "use_skill", "skill_search"},
+	})
+	for _, want := range []string{
+		"Speed rule: prefer the most specific built-in tool or skill before using `exec`/shell.",
+		"Use `read_file` for file contents",
+		"Use `exec` only when you genuinely need command execution",
+		"Do not use `exec`/bash for simple `ls`, `cat`, `grep`",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt missing speed guidance %q", want)
+		}
+	}
+}
+
 // TestStableFilesAboveBoundary verifies AGENTS.md lands above boundary,
 // USER.md lands below boundary.
 func TestStableFilesAboveBoundary(t *testing.T) {
