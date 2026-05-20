@@ -210,7 +210,8 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 	// workers and business skill readers stay independent.
 	if d.pgStores != nil && d.pgStores.LocalKnowledgeSources != nil {
 		seedLocalKnowledgeSources(context.Background(), d.pgStores.LocalKnowledgeSources)
-		d.server.SetLocalKnowledgeHandler(httpapi.NewLocalKnowledgeHandler(d.pgStores.LocalKnowledgeSources))
+		d.localKnowledgeSyncer = httpapi.NewLocalKnowledgeSyncer(d.pgStores.LocalKnowledgeSources)
+		d.server.SetLocalKnowledgeHandler(httpapi.NewLocalKnowledgeHandlerWithSyncer(d.pgStores.LocalKnowledgeSources, d.localKnowledgeSyncer))
 	}
 
 	// V3: Orchestration mode API (read-only)
