@@ -1,0 +1,36 @@
+{
+  "title": "Tri thức cục bộ",
+  "description": "Xem nguồn dữ liệu cục bộ đã đăng ký, ánh xạ container, chế độ đồng bộ và trạng thái chỉ mục. Trang này chỉ hiển thị registry/status, chưa có nghĩa là dữ liệu đã được ghi vào Vault hoặc Knowledge Graph.",
+  "summary": {
+    "total": "Nguồn đã đăng ký",
+    "enabled": "Đã bật",
+    "scheduled": "Đồng bộ lịch"
+  },
+  "table": {
+    "title": "Trạng thái nguồn",
+    "source": "Nguồn",
+    "paths": "Đường dẫn",
+    "mode": "Chế độ / Đích",
+    "counts": "Tệp / Bản ghi",
+    "lastSync": "Lần đồng bộ cuối"
+  },
+  "status": {
+    "enabled": "Bật",
+    "disabled": "Tắt"
+  },
+  "paths": {
+    "windows": "Đường dẫn Windows",
+    "container": "Đường dẫn container"
+  },
+  "counts": {
+    "files": "Tệp",
+    "records": "Bản ghi"
+  },
+  "lastSuccess": "Thành công",
+  "never": "Chưa đồng bộ",
+  "empty": {
+    "title": "Chưa có nguồn tri thức cục bộ",
+    "description": "Backend chưa đăng ký nguồn tri thức cục bộ nào."
+  }
+}
+

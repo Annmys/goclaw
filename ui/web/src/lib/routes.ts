@@ -32,6 +32,7 @@ export const ROUTES = {
   CLI_CREDENTIALS: "/cli-credentials",
   MCP: "/mcp",
   TTS: "/tts",
+  LOCAL_KNOWLEDGE: "/local-knowledge",
   STORAGE: "/storage",
   PENDING_MESSAGES: "/pending-messages",
   MEMORY: "/memory",

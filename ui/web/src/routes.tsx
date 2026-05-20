@@ -69,6 +69,9 @@ const BuiltinToolsPage = lazyWithRetry(() =>
 const TtsPage = lazyWithRetry(() =>
   import("@/pages/tts/tts-page").then((m) => ({ default: m.TtsPage })),
 );
+const LocalKnowledgePage = lazyWithRetry(() =>
+  import("@/pages/local-knowledge/local-knowledge-page").then((m) => ({ default: m.LocalKnowledgePage })),
+);
 const EventsPage = lazyWithRetry(() =>
   import("@/pages/events/events-page").then((m) => ({ default: m.EventsPage })),
 );
@@ -193,6 +196,7 @@ export function AppRoutes() {
           <Route path={ROUTES.BUILTIN_TOOLS} element={<RequireAdmin><BuiltinToolsPage /></RequireAdmin>} />
           <Route path={ROUTES.MCP} element={<RequireAdmin><MCPPage /></RequireAdmin>} />
           <Route path={ROUTES.TTS} element={<RequireCrossTenant><TtsPage /></RequireCrossTenant>} />
+          <Route path={ROUTES.LOCAL_KNOWLEDGE} element={<RequireAdmin><LocalKnowledgePage /></RequireAdmin>} />
           <Route path={ROUTES.STORAGE} element={<StoragePage />} />
           <Route path={ROUTES.PACKAGES} element={<RequireAdmin><PackagesPage /></RequireAdmin>} />
           <Route path={ROUTES.EVOLUTION_CENTER} element={<RequireAdmin><EvolutionCenterPage /></RequireAdmin>} />

@@ -25,6 +25,7 @@
     "mcpServers": "MCP 服务器",
     "memory": "记忆",
     "knowledgeGraph": "Knowledge Graph",
+    "localKnowledge": "本地知识源",
     "nodes": "Nodes",
     "overview": "概览",
     "pendingMessages": "待处理消息",
