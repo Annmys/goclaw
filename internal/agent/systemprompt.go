@@ -542,6 +542,11 @@ func buildToolingSection(toolNames []string, hasSandbox bool, shellDenyGroups ma
 		"Tool availability (filtered by policy).",
 		"Tool names are case-sensitive. Call tools exactly as listed.",
 		"",
+		"Speed rule: prefer the most specific built-in tool or skill before using `exec`/shell.",
+		"Use `read_file` for file contents, `list_files` for directory listings, `send_file` for existing attachments, `skill_search`/`use_skill` for domain workflows, and vault/memory tools for stored knowledge.",
+		"Use `exec` only when you genuinely need command execution, scripting, database inspection, tests, or a transformation that no direct tool/skill can perform.",
+		"Do not use `exec`/bash for simple `ls`, `cat`, `grep`, or one-off inspection when a direct tool is available.",
+		"",
 	}
 
 	// Sort tool names for deterministic output — critical for prompt caching.
@@ -564,7 +569,7 @@ func buildToolingSection(toolNames []string, hasSandbox bool, shellDenyGroups ma
 			"",
 			"NOTE: The `exec` tool runs commands inside a Docker sandbox container automatically.",
 			"You do NOT need to use `docker run` or `docker exec` — just run commands directly (e.g. `python3 script.py`).",
-			"The sandbox has: bash, python3, git, curl, jq, ripgrep.",
+			"The sandbox has bash, python3, git, curl, jq, and ripgrep, but shell is a fallback for real command execution, not the default way to inspect files.",
 			"Do NOT attempt to install Docker or run Docker commands inside exec.",
 		)
 	}
