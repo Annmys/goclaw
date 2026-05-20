@@ -110,7 +110,14 @@ func (l *Loop) processToolResult(
 		rs.deliverables = append(rs.deliverables, result.Deliverable)
 	}
 
-	contentForLLM := compressToolResultForNextTurn(registryName, result.ForLLM)
+	contentForLLM, compressionInfo := compressToolResultForNextTurnWithInfo(registryName, result.ForLLM)
+	if compressionInfo.Compressed {
+		rs.toolCompressionEvents = append(rs.toolCompressionEvents, toolCompressionEvent{
+			ToolName:        registryName,
+			OriginalChars:   compressionInfo.OriginalChars,
+			CompressedChars: compressionInfo.CompressedChars,
+		})
+	}
 	toolMsg = providers.Message{
 		Role:       "tool",
 		Content:    contentForLLM,

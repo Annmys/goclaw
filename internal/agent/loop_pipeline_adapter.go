@@ -36,6 +36,7 @@ func (l *Loop) runViaPipeline(ctx context.Context, req RunRequest) (*RunResult, 
 	if err != nil {
 		return nil, err
 	}
+	l.recordToolCompressionMetrics(ctx, req.SessionKey, bridgeRS.toolCompressionEvents)
 	return convertRunResult(pResult), nil
 }
 

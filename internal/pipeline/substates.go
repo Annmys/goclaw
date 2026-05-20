@@ -58,6 +58,7 @@ type ToolState struct {
 	MediaResults   []MediaResult // media files produced by tools
 	Deliverables   []string      // tool output content for team task results
 	LoopKilled     bool          // set when loop detector triggers critical
+	ToolCompressionEvents any     // agent-owned tool result compression events for metrics
 }
 
 // ObserveState: owned by ObserveStage.
