@@ -65,8 +65,9 @@ func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx
 
 // toolRawResult wraps a tools.Result with timing for metrics recording.
 type toolRawResult struct {
-	result   *tools.Result
-	duration time.Duration
+	result      *tools.Result
+	duration    time.Duration
+	compression toolResultCompressionInfo
 }
 
 // makeExecuteToolRaw wraps tool I/O only (parallel-safe, no state mutation).
@@ -108,13 +109,14 @@ func (l *Loop) makeExecuteToolRaw(req *RunRequest) func(ctx context.Context, tc 
 		// Emit tool span end inside goroutine to prevent orphaned spans on ctx cancellation.
 		l.emitToolSpanEnd(ctx, spanID, start, result)
 
+		contentForLLM, compressionInfo := compressToolResultForNextTurnWithInfo(registryName, result.ForLLM)
 		msg := providers.Message{
 			Role:       "tool",
-			Content:    result.ForLLM,
+			Content:    contentForLLM,
 			ToolCallID: tc.ID,
 			IsError:    result.IsError,
 		}
-		return msg, &toolRawResult{result: result, duration: dur}, nil
+		return msg, &toolRawResult{result: result, duration: dur, compression: compressionInfo}, nil
 	}
 }
 
@@ -126,17 +128,26 @@ func (l *Loop) makeProcessToolResult(req *RunRequest, bridgeRS *runState) func(c
 		registryName := l.resolveToolCallName(tc.Name)
 
 		// Extract result and timing from toolRawResult wrapper.
-		var result *tools.Result
-		var dur time.Duration
-		if raw, ok := rawData.(*toolRawResult); ok && raw != nil {
-			result = raw.result
-			dur = raw.duration
-		} else if r, ok := rawData.(*tools.Result); ok {
-			result = r // backward compat
-		}
-		if result == nil {
-			return []providers.Message{rawMsg}
-		}
+	var result *tools.Result
+	var dur time.Duration
+	var compression toolResultCompressionInfo
+	if raw, ok := rawData.(*toolRawResult); ok && raw != nil {
+		result = raw.result
+		dur = raw.duration
+		compression = raw.compression
+	} else if r, ok := rawData.(*tools.Result); ok {
+		result = r // backward compat
+	}
+	if result == nil {
+		return []providers.Message{rawMsg}
+	}
+	if compression.Compressed {
+		bridgeRS.toolCompressionEvents = append(bridgeRS.toolCompressionEvents, toolCompressionEvent{
+			ToolName:        registryName,
+			OriginalChars:   compression.OriginalChars,
+			CompressedChars: compression.CompressedChars,
+		})
+	}
 
 		// Record tool metrics (non-blocking, best-effort).
 		l.recordToolMetric(ctx, req.SessionKey, registryName, !result.IsError, dur)
@@ -168,6 +179,9 @@ func syncBridgeToState(bridgeRS *runState, state *pipeline.RunState, action tool
 	state.Tool.LoopKilled = bridgeRS.loopKilled
 	state.Tool.AsyncToolCalls = bridgeRS.asyncToolCalls
 	state.Tool.Deliverables = bridgeRS.deliverables
+	if len(bridgeRS.toolCompressionEvents) > 0 {
+		state.Tool.ToolCompressionEvents = append([]toolCompressionEvent(nil), bridgeRS.toolCompressionEvents...)
+	}
 	state.Evolution.BootstrapWrite = bridgeRS.bootstrapWriteDetected
 	state.Evolution.TeamTaskSpawns = bridgeRS.teamTaskSpawns
 	state.Evolution.TeamTaskCreates = bridgeRS.teamTaskCreates
@@ -216,6 +230,39 @@ func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string
 			slog.Debug("evolution.metric.record_failed", "tool", toolName, "error", err)
 		}
 	}()
+}
+
+func (l *Loop) recordToolCompressionMetric(ctx context.Context, sessionKey string, event toolCompressionEvent) {
+	if l.evolutionMetricsStore == nil {
+		return
+	}
+	tenantID := store.TenantIDFromContext(ctx)
+	go func() {
+		bgCtx, cancel := context.WithTimeout(store.WithTenantID(context.Background(), tenantID), 5*time.Second)
+		defer cancel()
+		value, _ := json.Marshal(map[string]any{
+			"original_chars":   event.OriginalChars,
+			"compressed_chars": event.CompressedChars,
+			"saved_chars":      event.OriginalChars - event.CompressedChars,
+		})
+		if err := l.evolutionMetricsStore.RecordMetric(bgCtx, store.EvolutionMetric{
+			ID:         uuid.New(),
+			TenantID:   tenantID,
+			AgentID:    l.agentUUID,
+			SessionKey: sessionKey,
+			MetricType: store.MetricTool,
+			MetricKey:  event.ToolName + ".compression",
+			Value:      value,
+		}); err != nil {
+			slog.Debug("evolution.metric.tool_compression_failed", "tool", event.ToolName, "error", err)
+		}
+	}()
+}
+
+func (l *Loop) recordToolCompressionMetrics(ctx context.Context, sessionKey string, events []toolCompressionEvent) {
+	for _, event := range events {
+		l.recordToolCompressionMetric(ctx, sessionKey, event)
+	}
 }
 
 // makeToolEmitRun creates a tool event emitter with request context.

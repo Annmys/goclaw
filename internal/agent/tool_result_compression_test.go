@@ -7,9 +7,12 @@ import (
 
 func TestCompressToolResultForNextTurn_CompressesExecOutput(t *testing.T) {
 	content := strings.Repeat("a", immediateToolResultCompressThreshold+1000)
-	got := compressToolResultForNextTurn("exec", content)
+	got, info := compressToolResultForNextTurnWithInfo("exec", content)
 	if got == content {
 		t.Fatal("expected exec output to be compressed")
+	}
+	if !info.Compressed || info.OriginalChars <= info.CompressedChars {
+		t.Fatalf("expected compression info to report savings: %+v", info)
 	}
 	if !strings.Contains(got, "Tool result compressed for next LLM turn") {
 		t.Fatalf("missing compression marker: %q", testTruncate(got, 200))

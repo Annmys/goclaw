@@ -667,6 +667,12 @@ type MediaResult struct {
 	Prompt string `json:"prompt,omitempty"`
 }
 
+type toolCompressionEvent struct {
+	ToolName        string
+	OriginalChars   int
+	CompressedChars int
+}
+
 // runState encapsulates all mutable state for a single agent run.
 // Grouping these fields enables extracting loop sub-operations into methods
 // on *runState without passing 20+ individual variables.
@@ -684,6 +690,7 @@ type runState struct {
 	mediaResults   []MediaResult
 	deliverables   []string // tool output content for team task results
 	pendingMsgs    []providers.Message
+	toolCompressionEvents []toolCompressionEvent
 
 	// Event state
 	blockReplies   int
