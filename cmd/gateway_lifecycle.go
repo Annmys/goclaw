@@ -148,6 +148,12 @@ func (d *gatewayDeps) runLifecycle(
 		taskTicker.Start()
 	}
 
+	var localKnowledgeWorker *localKnowledgeSyncWorker
+	if d.localKnowledgeSyncer != nil {
+		localKnowledgeWorker = newLocalKnowledgeSyncWorker(d.localKnowledgeSyncer, defaultLocalKnowledgeSyncInterval)
+		localKnowledgeWorker.Start()
+	}
+
 	go func() {
 		sig := <-deps.sigCh
 		slog.Info("graceful shutdown initiated", "signal", sig)
@@ -161,6 +167,9 @@ func (d *gatewayDeps) runLifecycle(
 		deps.heartbeatTicker.Stop()
 		if taskTicker != nil {
 			taskTicker.Stop()
+		}
+		if localKnowledgeWorker != nil {
+			localKnowledgeWorker.Stop()
 		}
 
 		// Drain audit log queue before closing DB

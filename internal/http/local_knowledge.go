@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -23,11 +24,19 @@ import (
 
 // LocalKnowledgeHandler exposes the local knowledge source registry.
 type LocalKnowledgeHandler struct {
-	store store.LocalKnowledgeSourceStore
+	store  store.LocalKnowledgeSourceStore
+	syncer *LocalKnowledgeSyncer
 }
 
 func NewLocalKnowledgeHandler(s store.LocalKnowledgeSourceStore) *LocalKnowledgeHandler {
-	return &LocalKnowledgeHandler{store: s}
+	return NewLocalKnowledgeHandlerWithSyncer(s, NewLocalKnowledgeSyncer(s))
+}
+
+func NewLocalKnowledgeHandlerWithSyncer(s store.LocalKnowledgeSourceStore, syncer *LocalKnowledgeSyncer) *LocalKnowledgeHandler {
+	if syncer == nil {
+		syncer = NewLocalKnowledgeSyncer(s)
+	}
+	return &LocalKnowledgeHandler{store: s, syncer: syncer}
 }
 
 func (h *LocalKnowledgeHandler) RegisterRoutes(mux *http.ServeMux) {
@@ -141,29 +150,24 @@ func (h *LocalKnowledgeHandler) handleSyncOne(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	result := h.syncSource(r, source)
-	writeJSON(w, statusForSyncResults([]localKnowledgeSyncResult{result}), result)
+	result := h.syncer.SyncSource(r.Context(), source)
+	writeJSON(w, statusForSyncResults([]LocalKnowledgeSyncResult{result}), result)
 }
 
 func (h *LocalKnowledgeHandler) handleSyncAll(w http.ResponseWriter, r *http.Request) {
-	sources, err := h.store.ListSources(r.Context())
+	results, err := h.syncer.SyncAll(r.Context(), func(source store.LocalKnowledgeSourceData) bool {
+		return source.Enabled
+	})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-
-	results := make([]localKnowledgeSyncResult, 0, len(sources))
-	for i := range sources {
-		if !sources[i].Enabled {
-			continue
-		}
-		src := sources[i]
-		results = append(results, h.syncSource(r, &src))
-	}
 	writeJSON(w, statusForSyncResults(results), map[string]any{"results": results})
 }
 
-type localKnowledgeSyncResult struct {
+// LocalKnowledgeSyncResult is returned by manual sync APIs and used by the
+// background sync loop for structured logging.
+type LocalKnowledgeSyncResult struct {
 	SourceKey     string `json:"source_key"`
 	Name          string `json:"name"`
 	Path          string `json:"path"`
@@ -175,6 +179,47 @@ type localKnowledgeSyncResult struct {
 	Error         string `json:"error,omitempty"`
 }
 
+// LocalKnowledgeSyncer scans local knowledge source paths and writes runtime
+// status back to the registry. It deliberately does not import content into
+// Vault, Memory, or Knowledge Graph.
+type LocalKnowledgeSyncer struct {
+	store store.LocalKnowledgeSourceStore
+}
+
+func NewLocalKnowledgeSyncer(s store.LocalKnowledgeSourceStore) *LocalKnowledgeSyncer {
+	return &LocalKnowledgeSyncer{store: s}
+}
+
+func (s *LocalKnowledgeSyncer) SyncByKey(ctx context.Context, sourceKey string) (LocalKnowledgeSyncResult, error) {
+	source, err := s.store.GetSource(ctx, sourceKey)
+	if err != nil {
+		return LocalKnowledgeSyncResult{}, err
+	}
+	return s.SyncSource(ctx, source), nil
+}
+
+func (s *LocalKnowledgeSyncer) SyncScheduled(ctx context.Context) ([]LocalKnowledgeSyncResult, error) {
+	return s.SyncAll(ctx, func(source store.LocalKnowledgeSourceData) bool {
+		return source.Enabled && source.SyncMode == "scheduled"
+	})
+}
+
+func (s *LocalKnowledgeSyncer) SyncAll(ctx context.Context, filter func(store.LocalKnowledgeSourceData) bool) ([]LocalKnowledgeSyncResult, error) {
+	sources, err := s.store.ListSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]LocalKnowledgeSyncResult, 0, len(sources))
+	for i := range sources {
+		if filter != nil && !filter(sources[i]) {
+			continue
+		}
+		src := sources[i]
+		results = append(results, s.SyncSource(ctx, &src))
+	}
+	return results, nil
+}
+
 type localKnowledgeScanStats struct {
 	Path        string
 	FileCount   int64
@@ -182,9 +227,9 @@ type localKnowledgeScanStats struct {
 	ContentHash string
 }
 
-func (h *LocalKnowledgeHandler) syncSource(r *http.Request, source *store.LocalKnowledgeSourceData) localKnowledgeSyncResult {
+func (s *LocalKnowledgeSyncer) SyncSource(ctx context.Context, source *store.LocalKnowledgeSourceData) LocalKnowledgeSyncResult {
 	now := time.Now().UTC()
-	result := localKnowledgeSyncResult{
+	result := LocalKnowledgeSyncResult{
 		SourceKey:  source.SourceKey,
 		Name:       source.Name,
 		LastSyncAt: now.Format(time.RFC3339Nano),
@@ -214,7 +259,7 @@ func (h *LocalKnowledgeHandler) syncSource(r *http.Request, source *store.LocalK
 		status.ContentHash = stats.ContentHash
 	}
 
-	if err := h.store.UpdateSourceStatus(r.Context(), source.SourceKey, status); err != nil {
+	if err := s.store.UpdateSourceStatus(ctx, source.SourceKey, status); err != nil {
 		if result.Error != "" {
 			result.Error = result.Error + "; status update failed: " + err.Error()
 		} else {
@@ -224,7 +269,7 @@ func (h *LocalKnowledgeHandler) syncSource(r *http.Request, source *store.LocalK
 	return result
 }
 
-func statusForSyncResults(results []localKnowledgeSyncResult) int {
+func statusForSyncResults(results []LocalKnowledgeSyncResult) int {
 	for _, r := range results {
 		if r.Error != "" {
 			return http.StatusMultiStatus
