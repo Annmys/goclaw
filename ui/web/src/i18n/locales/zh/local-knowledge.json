@@ -12,7 +12,12 @@
     "paths": "路径",
     "mode": "模式 / 目标",
     "counts": "文件 / 记录",
-    "lastSync": "最后同步"
+    "lastSync": "最后同步",
+    "actions": "操作"
+  },
+  "actions": {
+    "sync": "同步",
+    "syncAll": "同步全部"
   },
   "status": {
     "enabled": "启用",
@@ -33,4 +38,3 @@
     "description": "后端还没有登记本地知识源。"
   }
 }
-

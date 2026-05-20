@@ -63,7 +63,7 @@ func DefaultLocalKnowledgeSourceSeeds() []LocalKnowledgeSourceSeed {
 			Name:          "GoClaw 操作记录",
 			Description:   "GoClaw 项目续接记录、规则和本地备份资料。",
 			PathWindows:   `D:\goclaw操作记录`,
-			PathContainer: "",
+			PathContainer: "/mnt/operation-log",
 			TenantScope:   "system",
 			SyncMode:      "manual",
 			IndexTarget:   "registry",

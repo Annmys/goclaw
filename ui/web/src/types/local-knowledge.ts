@@ -24,3 +24,18 @@ export interface LocalKnowledgeSourcesResponse {
   sources: LocalKnowledgeSource[];
 }
 
+export interface LocalKnowledgeSyncResult {
+  source_key: string;
+  name: string;
+  path: string;
+  file_count: number;
+  record_count: number;
+  content_hash: string;
+  last_sync_at: string;
+  last_success_at?: string | null;
+  error?: string | null;
+}
+
+export interface LocalKnowledgeSyncAllResponse {
+  results: LocalKnowledgeSyncResult[];
+}
