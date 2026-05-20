@@ -552,6 +552,11 @@ func (s *Server) SetSystemConfigsHandler(h *httpapi.SystemConfigsHandler) {
 	s.handlers = append(s.handlers, h)
 }
 
+// SetLocalKnowledgeHandler sets the local knowledge source registry handler.
+func (s *Server) SetLocalKnowledgeHandler(h *httpapi.LocalKnowledgeHandler) {
+	s.handlers = append(s.handlers, h)
+}
+
 // SetUsageHandler sets the usage analytics handler.
 func (s *Server) SetUsageHandler(h *httpapi.UsageHandler) { s.handlers = append(s.handlers, h) }
 

@@ -72,6 +72,42 @@ CREATE INDEX IF NOT EXISTS idx_tenant_users_user ON tenant_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant ON tenant_users(tenant_id);
 
 -- ============================================================
+-- Table: local_knowledge_sources
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS local_knowledge_sources (
+    id              TEXT NOT NULL PRIMARY KEY,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    source_key      VARCHAR(100) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    path_windows    TEXT NOT NULL DEFAULT '',
+    path_container  TEXT NOT NULL DEFAULT '',
+    tenant_scope    VARCHAR(20) NOT NULL DEFAULT 'tenant'
+                    CHECK (tenant_scope IN ('system', 'tenant', 'shared')),
+    sync_mode       VARCHAR(20) NOT NULL DEFAULT 'manual'
+                    CHECK (sync_mode IN ('manual', 'scheduled', 'watch')),
+    index_target    VARCHAR(20) NOT NULL DEFAULT 'registry'
+                    CHECK (index_target IN ('registry', 'vault', 'memory', 'knowledge_graph', 'tool_cache')),
+    enabled         BOOLEAN NOT NULL DEFAULT 1,
+    last_sync_at    TEXT,
+    last_success_at TEXT,
+    last_error      TEXT,
+    file_count      INTEGER NOT NULL DEFAULT 0,
+    record_count    INTEGER NOT NULL DEFAULT 0,
+    content_hash    VARCHAR(128) NOT NULL DEFAULT '',
+    metadata        TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_tenant
+    ON local_knowledge_sources(tenant_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_target
+    ON local_knowledge_sources(tenant_id, index_target);
+
+-- ============================================================
 -- Table: llm_providers
 -- ============================================================
 
