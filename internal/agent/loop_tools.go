@@ -110,9 +110,10 @@ func (l *Loop) processToolResult(
 		rs.deliverables = append(rs.deliverables, result.Deliverable)
 	}
 
+	contentForLLM := compressToolResultForNextTurn(registryName, result.ForLLM)
 	toolMsg = providers.Message{
 		Role:       "tool",
-		Content:    result.ForLLM,
+		Content:    contentForLLM,
 		ToolCallID: tc.ID,
 		IsError:    result.IsError,
 	}
