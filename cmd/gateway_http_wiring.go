@@ -206,6 +206,13 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 		d.server.SetEpisodicHandler(httpapi.NewEpisodicHandler(d.pgStores.Episodic))
 	}
 
+	// Local knowledge source registry API. This is metadata/status only; sync
+	// workers and business skill readers stay independent.
+	if d.pgStores != nil && d.pgStores.LocalKnowledgeSources != nil {
+		seedLocalKnowledgeSources(context.Background(), d.pgStores.LocalKnowledgeSources)
+		d.server.SetLocalKnowledgeHandler(httpapi.NewLocalKnowledgeHandler(d.pgStores.LocalKnowledgeSources))
+	}
+
 	// V3: Orchestration mode API (read-only)
 	if d.pgStores != nil && d.pgStores.Agents != nil {
 		d.server.SetOrchestrationHandler(httpapi.NewOrchestrationHandler(d.pgStores.Agents, d.pgStores.Teams, d.pgStores.AgentLinks))

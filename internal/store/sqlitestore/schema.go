@@ -16,7 +16,7 @@ var schemaSQL string
 
 // SchemaVersion is the current SQLite schema version.
 // Bump this when adding new migration steps below.
-const SchemaVersion = 26
+const SchemaVersion = 27
 
 // migrations maps version → SQL to apply when upgrading FROM that version.
 // schema.sql always represents the LATEST full schema (for fresh DBs).
@@ -561,7 +561,44 @@ ALTER TABLE agent_heartbeats_new RENAME TO agent_heartbeats;
 CREATE INDEX IF NOT EXISTS idx_heartbeats_due
   ON agent_heartbeats(next_run_at)
   WHERE enabled = 1 AND next_run_at IS NOT NULL;`,
+
+	// Version 26 → 27: local knowledge source registry.
+	26: localKnowledgeSourcesSchema,
 }
+
+const localKnowledgeSourcesSchema = `
+CREATE TABLE IF NOT EXISTS local_knowledge_sources (
+    id              TEXT NOT NULL PRIMARY KEY,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    source_key      VARCHAR(100) NOT NULL,
+    name            VARCHAR(255) NOT NULL,
+    description     TEXT NOT NULL DEFAULT '',
+    path_windows    TEXT NOT NULL DEFAULT '',
+    path_container  TEXT NOT NULL DEFAULT '',
+    tenant_scope    VARCHAR(20) NOT NULL DEFAULT 'tenant'
+                    CHECK (tenant_scope IN ('system', 'tenant', 'shared')),
+    sync_mode       VARCHAR(20) NOT NULL DEFAULT 'manual'
+                    CHECK (sync_mode IN ('manual', 'scheduled', 'watch')),
+    index_target    VARCHAR(20) NOT NULL DEFAULT 'registry'
+                    CHECK (index_target IN ('registry', 'vault', 'memory', 'knowledge_graph', 'tool_cache')),
+    enabled         BOOLEAN NOT NULL DEFAULT 1,
+    last_sync_at    TEXT,
+    last_success_at TEXT,
+    last_error      TEXT,
+    file_count      INTEGER NOT NULL DEFAULT 0,
+    record_count    INTEGER NOT NULL DEFAULT 0,
+    content_hash    VARCHAR(128) NOT NULL DEFAULT '',
+    metadata        TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, source_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_tenant
+    ON local_knowledge_sources(tenant_id, enabled);
+CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_target
+    ON local_knowledge_sources(tenant_id, index_target);
+`
 
 // addHooksTables is the SQLite incremental migration for schema v19 → v20.
 // Mirrors PG migrations 000052–000055 (consolidated — desktop never shipped
