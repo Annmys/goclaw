@@ -12,7 +12,12 @@
     "paths": "Đường dẫn",
     "mode": "Chế độ / Đích",
     "counts": "Tệp / Bản ghi",
-    "lastSync": "Lần đồng bộ cuối"
+    "lastSync": "Lần đồng bộ cuối",
+    "actions": "Thao tác"
+  },
+  "actions": {
+    "sync": "Đồng bộ",
+    "syncAll": "Đồng bộ tất cả"
   },
   "status": {
     "enabled": "Bật",
@@ -33,4 +38,3 @@
     "description": "Backend chưa đăng ký nguồn tri thức cục bộ nào."
   }
 }
-

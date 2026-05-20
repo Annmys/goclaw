@@ -35,8 +35,9 @@ function PathBlock({ label, value }: { label: string; value?: string }) {
 export function LocalKnowledgePage() {
   const { t } = useTranslation("local-knowledge");
   const { t: tc } = useTranslation("common");
-  const { sources, loading, fetching, refresh } = useLocalKnowledgeSources();
-  const spinning = useMinLoading(fetching || loading);
+  const { sources, loading, fetching, syncingKey, refresh, syncOne, syncAll } = useLocalKnowledgeSources();
+  const syncingAll = syncingKey === "__all__";
+  const spinning = useMinLoading(fetching || loading || syncingAll);
   const showSkeleton = useDeferredLoading(loading && sources.length === 0);
 
   const enabledCount = sources.filter((s) => s.enabled).length;
@@ -48,10 +49,16 @@ export function LocalKnowledgePage() {
         title={t("title")}
         description={t("description")}
         actions={
-          <Button variant="outline" size="sm" onClick={() => refresh({ silent: true })} disabled={spinning} className="gap-1">
-            <RefreshCw className={cn("h-3.5 w-3.5", spinning && "animate-spin")} />
-            {tc("refresh", "刷新")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => refresh({ silent: true })} disabled={spinning} className="gap-1">
+              <RefreshCw className={cn("h-3.5 w-3.5", (fetching || loading) && "animate-spin")} />
+              {tc("refresh", "刷新")}
+            </Button>
+            <Button size="sm" onClick={() => syncAll()} disabled={spinning} className="gap-1">
+              <RefreshCw className={cn("h-3.5 w-3.5", syncingAll && "animate-spin")} />
+              {t("actions.syncAll")}
+            </Button>
+          </div>
         }
       />
 
@@ -94,6 +101,7 @@ export function LocalKnowledgePage() {
                   <th className="px-4 py-3 text-left font-medium">{t("table.mode")}</th>
                   <th className="px-4 py-3 text-left font-medium">{t("table.counts")}</th>
                   <th className="px-4 py-3 text-left font-medium">{t("table.lastSync")}</th>
+                  <th className="px-4 py-3 text-right font-medium">{t("table.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -149,6 +157,18 @@ export function LocalKnowledgePage() {
                         </div>
                       )}
                     </td>
+                    <td className="px-4 py-3 align-top text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => syncOne(source.source_key)}
+                        disabled={!!syncingKey}
+                        className="gap-1"
+                      >
+                        <RefreshCw className={cn("h-3.5 w-3.5", syncingKey === source.source_key && "animate-spin")} />
+                        {t("actions.sync")}
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -159,4 +179,3 @@ export function LocalKnowledgePage() {
     </div>
   );
 }
-

@@ -68,6 +68,10 @@ services:
         source: D:\数据\包装资料
         target: /mnt/package-materials
       - type: bind
+        source: D:\goclaw操作记录
+        target: /mnt/operation-log
+        read_only: true
+      - type: bind
         source: D:\数据\测试数据\包装计算
         target: /mnt/package-calc-tests
         read_only: true
