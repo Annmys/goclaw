@@ -13,7 +13,46 @@ const (
 	minRetrievalQueries = 50
 	minToolCalls        = 20
 	highToolCallsWeek   = 100
+	maxSafeSkillScore   = 70
 )
+
+// SkillQualityRepairRule suggests a reviewed repair plan for high-risk skills.
+// It never auto-edits a skill; it creates a reviewable repair suggestion.
+type SkillQualityRepairRule struct{}
+
+func (r *SkillQualityRepairRule) Name() string { return "skill_quality_repair" }
+
+func (r *SkillQualityRepairRule) Evaluate(_ context.Context, _ uuid.UUID, input AnalysisInput) (*store.EvolutionSuggestion, error) {
+	for _, score := range input.SkillQualityScores {
+		if score.RiskLevel != "high" && score.QualityScore >= maxSafeSkillScore {
+			continue
+		}
+		return &store.EvolutionSuggestion{
+			SuggestionType: store.SuggestSkillRepair,
+			Suggestion:     fmt.Sprintf("Skill %q quality score is %d — create a repair plan before further automatic evolution", score.SkillName, score.QualityScore),
+			Rationale: fmt.Sprintf(
+				"%d calls, %.1f%% success rate, %d correction/negative feedback items, %d regression failures",
+				score.CallCount,
+				score.SuccessRate*100,
+				score.FeedbackCorrections,
+				score.RegressionFailures,
+			),
+			Parameters: marshalParams(map[string]any{
+				"skill":                score.SkillName,
+				"quality_score":        score.QualityScore,
+				"risk_level":           score.RiskLevel,
+				"call_count":           score.CallCount,
+				"success_rate":         score.SuccessRate,
+				"avg_duration_ms":      score.AvgDurationMs,
+				"feedback_corrections": score.FeedbackCorrections,
+				"regression_failures":  score.RegressionFailures,
+				"requires_manual_fix":  true,
+				"recommended_action":   "review user corrections, run business regression, then create a versioned skill patch",
+			}),
+		}, nil
+	}
+	return nil, nil
+}
 
 // LowRetrievalUsageRule suggests raising retrieval threshold when usage rate is low.
 // Triggers: usage_rate < 0.2 over 50+ queries for any source.

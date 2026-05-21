@@ -106,6 +106,7 @@ const suggestionTypeText: Record<string, string> = {
   tool_order: "工具策略",
   skill_add: "新增 skill 草稿",
   feedback_correction: "用户纠错",
+  skill_repair: "skill 修复建议",
 };
 
 const regressionScopeText: Record<EvolutionRegressionScope, string> = {

@@ -30,7 +30,7 @@ export interface SkillQualityScore {
 export interface EvolutionSuggestion {
   id: string;
   agent_id: string;
-  suggestion_type: "threshold" | "tool_order" | "skill_add" | "feedback_correction";
+  suggestion_type: "threshold" | "tool_order" | "skill_add" | "feedback_correction" | "skill_repair";
   suggestion: string;
   rationale: string;
   parameters: Record<string, unknown> | null;
