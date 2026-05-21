@@ -31,6 +31,7 @@ import type {
   EvolutionFeedback,
   EvolutionRegressionRun,
   EvolutionSuggestion,
+  SkillQualityScore,
 } from "@/types/evolution";
 
 const pipelineSteps = [
@@ -133,6 +134,18 @@ function roadmapVariant(status: string) {
   if (status === "已接入") return "outline";
   if (status === "部分完成" || status === "进行中") return "secondary";
   return "default";
+}
+
+function riskLabel(risk: string) {
+  if (risk === "high") return "高风险";
+  if (risk === "medium") return "中风险";
+  return "低风险";
+}
+
+function riskVariant(risk: string) {
+  if (risk === "high") return "destructive";
+  if (risk === "medium") return "secondary";
+  return "outline";
 }
 
 function SuggestionCard({
@@ -376,6 +389,40 @@ function MetricList({ title, empty, items }: {
   );
 }
 
+function SkillQualityList({ items }: { items: SkillQualityScore[] }) {
+  return (
+    <div>
+      <p className="mb-2 text-sm font-medium">skill 质量评分</p>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">暂无 skill 质量评分。需要先产生 skill 调用、反馈或回归记录。</p>
+      ) : (
+        <div className="space-y-2">
+          {items.slice(0, 8).map((item) => (
+            <div key={item.skill_name} className="rounded-md border px-3 py-2 text-sm">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{item.skill_name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    调用 {item.call_count} 次 / 成功率 {(item.success_rate * 100).toFixed(1)}% / 平均 {Math.round(item.avg_duration_ms)}ms
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant={riskVariant(item.risk_level)}>{riskLabel(item.risk_level)}</Badge>
+                  <span className="text-lg font-semibold">{item.quality_score}</span>
+                </div>
+              </div>
+              <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+                <span>纠错/负面反馈：{item.feedback_corrections}</span>
+                <span>回归失败：{item.regression_failures}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function EvolutionCenterPage() {
   const { agents, loading: agentsLoading, refresh } = useAgents();
   const [agentId, setAgentId] = useState("");
@@ -386,7 +433,7 @@ export function EvolutionCenterPage() {
     [agents, agentId],
   );
 
-  const { toolAggs, retrievalAggs, loading: metricsLoading } = useEvolutionMetrics(agentId, timeRange);
+  const { toolAggs, retrievalAggs, skillQualityScores, loading: metricsLoading } = useEvolutionMetrics(agentId, timeRange);
   const { suggestions, loading: suggestionsLoading, analyzing: suggestionsAnalyzing, analyzeNow, updateStatus } = useEvolutionSuggestions(agentId);
   const { feedback, loading: feedbackLoading } = useEvolutionFeedback(agentId, timeRange);
   const { latestRun, loading: regressionLoading, running: regressionRunning, runRegression } = useEvolutionRegression(agentId);
@@ -525,6 +572,7 @@ export function EvolutionCenterPage() {
                     <TableSkeleton rows={4} />
                   ) : (
                     <div className="space-y-4">
+                      <SkillQualityList items={skillQualityScores} />
                       <MetricList
                         title="业务 skill 指标"
                         empty="暂无业务 skill 指标。Agent 调用 use_skill 后会按具体 skill 单独统计。"
