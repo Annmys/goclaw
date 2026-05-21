@@ -32,6 +32,7 @@ export function useEvolutionMetrics(agentId: string, timeRange: string) {
   return {
     toolAggs: data?.tool_aggregates ?? [],
     retrievalAggs: data?.retrieval_aggregates ?? [],
+    skillQualityScores: data?.skill_quality_scores ?? [],
     loading: isLoading,
   };
 }

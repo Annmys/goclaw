@@ -39,6 +39,18 @@ type ToolAggregate struct {
 	AvgDurationMs float64 `json:"avg_duration_ms"` // milliseconds (not time.Duration — JSON-friendly)
 }
 
+// SkillQualityScore combines skill calls, feedback, and regression signals.
+type SkillQualityScore struct {
+	SkillName           string  `json:"skill_name"`
+	CallCount           int     `json:"call_count"`
+	SuccessRate         float64 `json:"success_rate"`
+	AvgDurationMs       float64 `json:"avg_duration_ms"`
+	FeedbackCorrections int     `json:"feedback_corrections"`
+	RegressionFailures  int     `json:"regression_failures"`
+	QualityScore        int     `json:"quality_score"`
+	RiskLevel           string  `json:"risk_level"`
+}
+
 // RetrievalAggregate summarizes per-source retrieval metrics.
 type RetrievalAggregate struct {
 	Source     string  `json:"source"`
