@@ -62,6 +62,9 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 		// Tool disabling can remove capabilities and break business workflows.
 		// Keep it as a reviewed suggestion even in automatic mode.
 		return false, "tool_order_requires_review", nil
+	case store.SuggestSkillRepair:
+		// Repairing a business skill must produce a versioned patch and human review.
+		return false, "skill_repair_requires_review", nil
 	default:
 		return false, "unsupported_suggestion_type", nil
 	}
