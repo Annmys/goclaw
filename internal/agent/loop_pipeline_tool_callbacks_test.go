@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/pipeline"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
@@ -18,11 +22,54 @@ type stubExecutor struct{}
 func (s *stubExecutor) ExecuteWithContext(_ context.Context, _ string, _ map[string]any, _, _, _, _ string, _ tools.AsyncCallback) *tools.Result {
 	return &tools.Result{ForLLM: "ok", IsError: false}
 }
-func (s *stubExecutor) TryActivateDeferred(string) bool         { return false }
+func (s *stubExecutor) TryActivateDeferred(string) bool          { return false }
 func (s *stubExecutor) ProviderDefs() []providers.ToolDefinition { return nil }
-func (s *stubExecutor) Get(string) (tools.Tool, bool)             { return nil, false }
-func (s *stubExecutor) List() []string                            { return nil }
-func (s *stubExecutor) Aliases() map[string]string                { return nil }
+func (s *stubExecutor) Get(string) (tools.Tool, bool)            { return nil, false }
+func (s *stubExecutor) List() []string                           { return nil }
+func (s *stubExecutor) Aliases() map[string]string               { return nil }
+
+type metricRecorder struct {
+	mu      sync.Mutex
+	metrics []store.EvolutionMetric
+}
+
+func (m *metricRecorder) RecordMetric(_ context.Context, metric store.EvolutionMetric) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metrics = append(m.metrics, metric)
+	return nil
+}
+
+func (m *metricRecorder) QueryMetrics(context.Context, uuid.UUID, store.MetricType, time.Time, int) ([]store.EvolutionMetric, error) {
+	return nil, nil
+}
+
+func (m *metricRecorder) AggregateToolMetrics(context.Context, uuid.UUID, time.Time) ([]store.ToolAggregate, error) {
+	return nil, nil
+}
+
+func (m *metricRecorder) AggregateRetrievalMetrics(context.Context, uuid.UUID, time.Time) ([]store.RetrievalAggregate, error) {
+	return nil, nil
+}
+
+func (m *metricRecorder) Cleanup(context.Context, time.Time) (int64, error) { return 0, nil }
+
+func (m *metricRecorder) latest(t *testing.T) store.EvolutionMetric {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		if len(m.metrics) > 0 {
+			metric := m.metrics[len(m.metrics)-1]
+			m.mu.Unlock()
+			return metric
+		}
+		m.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for metric")
+	return store.EvolutionMetric{}
+}
 
 // eventCollector buffers AgentEvents for inspection in tests.
 // Safe for concurrent appends from parallel goroutines.
@@ -155,6 +202,44 @@ func TestMakeExecuteToolRaw_ConcurrentCallsEmitAllEvents(t *testing.T) {
 	calls := col.filter(protocol.AgentEventToolCall)
 	if len(calls) != n {
 		t.Fatalf("expected %d tool.call events, got %d", n, len(calls))
+	}
+}
+
+func TestRecordToolMetric_UseSkillTracksConcreteSkill(t *testing.T) {
+	recorder := &metricRecorder{}
+	agentID := uuid.New()
+	l := &Loop{
+		id:                    "test-agent",
+		agentUUID:             agentID,
+		evolutionMetricsStore: recorder,
+	}
+	tenantID := uuid.New()
+	ctx := store.WithTenantID(context.Background(), tenantID)
+
+	l.recordToolMetric(ctx, "session-1", "use_skill", map[string]any{"name": "shipping-doc-processing"}, &tools.Result{ForLLM: "ok"}, 25*time.Millisecond)
+
+	metric := recorder.latest(t)
+	if metric.AgentID != agentID {
+		t.Fatalf("AgentID = %s, want %s", metric.AgentID, agentID)
+	}
+	if metric.MetricType != store.MetricTool {
+		t.Fatalf("MetricType = %s, want tool", metric.MetricType)
+	}
+	if metric.MetricKey != "skill:shipping-doc-processing" {
+		t.Fatalf("MetricKey = %q, want skill:shipping-doc-processing", metric.MetricKey)
+	}
+	var value map[string]any
+	if err := json.Unmarshal(metric.Value, &value); err != nil {
+		t.Fatalf("metric value is not JSON: %v", err)
+	}
+	if value["tool"] != "use_skill" {
+		t.Fatalf("tool = %v, want use_skill", value["tool"])
+	}
+	if value["skill"] != "shipping-doc-processing" {
+		t.Fatalf("skill = %v, want shipping-doc-processing", value["skill"])
+	}
+	if value["success"] != true {
+		t.Fatalf("success = %v, want true", value["success"])
 	}
 }
 

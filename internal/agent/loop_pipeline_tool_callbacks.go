@@ -51,7 +51,7 @@ func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx
 		l.emitToolSpanEnd(ctx, toolSpanID, toolStart, result)
 
 		// v3 evolution metrics: record tool execution non-blocking (best-effort).
-		l.recordToolMetric(ctx, req.SessionKey, registryName, !result.IsError, toolDuration)
+		l.recordToolMetric(ctx, req.SessionKey, registryName, tc.Arguments, result, toolDuration)
 
 		toolMsg, warningMsgs, action := l.processToolResult(ctx, bridgeRS, req, emitRun, tc, registryName, result, state.Context.HadBootstrap)
 		syncBridgeToState(bridgeRS, state, action)
@@ -128,29 +128,29 @@ func (l *Loop) makeProcessToolResult(req *RunRequest, bridgeRS *runState) func(c
 		registryName := l.resolveToolCallName(tc.Name)
 
 		// Extract result and timing from toolRawResult wrapper.
-	var result *tools.Result
-	var dur time.Duration
-	var compression toolResultCompressionInfo
-	if raw, ok := rawData.(*toolRawResult); ok && raw != nil {
-		result = raw.result
-		dur = raw.duration
-		compression = raw.compression
-	} else if r, ok := rawData.(*tools.Result); ok {
-		result = r // backward compat
-	}
-	if result == nil {
-		return []providers.Message{rawMsg}
-	}
-	if compression.Compressed {
-		bridgeRS.toolCompressionEvents = append(bridgeRS.toolCompressionEvents, toolCompressionEvent{
-			ToolName:        registryName,
-			OriginalChars:   compression.OriginalChars,
-			CompressedChars: compression.CompressedChars,
-		})
-	}
+		var result *tools.Result
+		var dur time.Duration
+		var compression toolResultCompressionInfo
+		if raw, ok := rawData.(*toolRawResult); ok && raw != nil {
+			result = raw.result
+			dur = raw.duration
+			compression = raw.compression
+		} else if r, ok := rawData.(*tools.Result); ok {
+			result = r // backward compat
+		}
+		if result == nil {
+			return []providers.Message{rawMsg}
+		}
+		if compression.Compressed {
+			bridgeRS.toolCompressionEvents = append(bridgeRS.toolCompressionEvents, toolCompressionEvent{
+				ToolName:        registryName,
+				OriginalChars:   compression.OriginalChars,
+				CompressedChars: compression.CompressedChars,
+			})
+		}
 
 		// Record tool metrics (non-blocking, best-effort).
-		l.recordToolMetric(ctx, req.SessionKey, registryName, !result.IsError, dur)
+		l.recordToolMetric(ctx, req.SessionKey, registryName, tc.Arguments, result, dur)
 
 		toolMsg, warningMsgs, action := l.processToolResult(ctx, bridgeRS, req, emitRun, tc, registryName, result, state.Context.HadBootstrap)
 		syncBridgeToState(bridgeRS, state, action)
@@ -206,17 +206,33 @@ func syncBridgeToState(bridgeRS *runState, state *pipeline.RunState, action tool
 
 // recordToolMetric records a tool execution metric non-blocking (best-effort).
 // No-op when evolution metrics store is not configured.
-func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string, success bool, duration time.Duration) {
+func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string, args map[string]any, result *tools.Result, duration time.Duration) {
 	if l.evolutionMetricsStore == nil {
 		return
 	}
 	tenantID := store.TenantIDFromContext(ctx)
+	metricKey := toolName
+	skillName := ""
+	if toolName == "use_skill" {
+		if raw, _ := args["name"].(string); raw != "" {
+			skillName = raw
+			metricKey = "skill:" + raw
+		}
+	}
+	success := result != nil && !result.IsError
+	errorPreview := ""
+	if result != nil && result.IsError {
+		errorPreview = truncateStr(result.ForLLM, 300)
+	}
 	go func() {
 		bgCtx, cancel := context.WithTimeout(store.WithTenantID(context.Background(), tenantID), 5*time.Second)
 		defer cancel()
 		value, _ := json.Marshal(map[string]any{
+			"tool":        toolName,
+			"skill":       skillName,
 			"success":     success,
 			"duration_ms": duration.Milliseconds(),
+			"error":       errorPreview,
 		})
 		if err := l.evolutionMetricsStore.RecordMetric(bgCtx, store.EvolutionMetric{
 			ID:         uuid.New(),
@@ -224,10 +240,10 @@ func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string
 			AgentID:    l.agentUUID,
 			SessionKey: sessionKey,
 			MetricType: store.MetricTool,
-			MetricKey:  toolName,
+			MetricKey:  metricKey,
 			Value:      value,
 		}); err != nil {
-			slog.Debug("evolution.metric.record_failed", "tool", toolName, "error", err)
+			slog.Debug("evolution.metric.record_failed", "tool", toolName, "metric_key", metricKey, "error", err)
 		}
 	}()
 }
