@@ -114,6 +114,15 @@ const regressionScopeText: Record<EvolutionRegressionScope, string> = {
   business_output_golden: "业务输出 golden 回归",
 };
 
+function formatMetricName(name: string) {
+  if (name.startsWith("skill:")) return name.slice("skill:".length);
+  return name;
+}
+
+function formatMetricRight(callCount: number, successRate: number, avgDurationMs: number) {
+  return `${callCount} 次 / ${(successRate * 100).toFixed(1)}% / ${Math.round(avgDurationMs)}ms`;
+}
+
 function statusVariant(status: string) {
   if (status === "passed" || status === "applied" || status === "approved") return "outline";
   if (status === "failed" || status === "rejected" || status === "rolled_back") return "destructive";
@@ -383,6 +392,14 @@ export function EvolutionCenterPage() {
   const { latestRun, loading: regressionLoading, running: regressionRunning, runRegression } = useEvolutionRegression(agentId);
   const { events: auditEvents, loading: auditLoading } = useEvolutionAudit(agentId);
 
+  const skillAggs = useMemo(
+    () => toolAggs.filter((item) => item.tool_name.startsWith("skill:")),
+    [toolAggs],
+  );
+  const ordinaryToolAggs = useMemo(
+    () => toolAggs.filter((item) => !item.tool_name.startsWith("skill:")),
+    [toolAggs],
+  );
   const pendingCount = suggestions.filter((item) => item.status === "pending").length;
   const appliedCount = suggestions.filter((item) => item.status === "applied" || item.status === "approved").length;
   const correctionCount = feedback.filter((item) => item.value.feedback_type === "correction").length;
@@ -509,12 +526,21 @@ export function EvolutionCenterPage() {
                   ) : (
                     <div className="space-y-4">
                       <MetricList
+                        title="业务 skill 指标"
+                        empty="暂无业务 skill 指标。Agent 调用 use_skill 后会按具体 skill 单独统计。"
+                        items={skillAggs.slice(0, 8).map((item) => ({
+                          key: item.tool_name,
+                          left: formatMetricName(item.tool_name),
+                          right: formatMetricRight(item.call_count, item.success_rate, item.avg_duration_ms),
+                        }))}
+                      />
+                      <MetricList
                         title="工具指标"
                         empty="暂无工具指标。"
-                        items={toolAggs.slice(0, 8).map((item) => ({
+                        items={ordinaryToolAggs.slice(0, 8).map((item) => ({
                           key: item.tool_name,
                           left: item.tool_name,
-                          right: `${item.call_count} 次 / ${(item.success_rate * 100).toFixed(1)}%`,
+                          right: formatMetricRight(item.call_count, item.success_rate, item.avg_duration_ms),
                         }))}
                       />
                       <MetricList
