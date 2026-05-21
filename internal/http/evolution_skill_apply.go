@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
@@ -85,6 +86,17 @@ func (h *EvolutionHandler) applySkillDraft(ctx context.Context, sg store.Evoluti
 	})
 	if err != nil {
 		return fmt.Errorf("register skill: %w", err)
+	}
+
+	// Auto-grant generated custom skills to the affected agent so the next run can use them.
+	if sg.AgentID != uuid.Nil {
+		pinnedVersion := version
+		if info, ok := h.skillStore.GetSkillByID(ctx, id); ok && info.Version > 0 {
+			pinnedVersion = info.Version
+		}
+		if err := h.skillStore.GrantToAgent(ctx, id, sg.AgentID, pinnedVersion, reviewedBy); err != nil {
+			return fmt.Errorf("grant generated skill to agent: %w", err)
+		}
 	}
 
 	// Bump loader to pick up new skill.

@@ -101,6 +101,8 @@ func (h *EvolutionHandler) handleCreateFeedback(w http.ResponseWriter, r *http.R
 	if body.FeedbackType != "useful" {
 		if err := h.createFeedbackSuggestion(r.Context(), agentID, metricID, body.FeedbackType, body.SessionKey, body.MessageRef, body.MessageContent, body.Correction, userID); err != nil {
 			slog.Warn("evolution.feedback.suggestion_failed", "error", err)
+		} else if err := h.autoApplyFeedbackCorrections(r, agentID); err != nil {
+			slog.Warn("evolution.feedback.auto_apply_failed", "error", err)
 		}
 	}
 	h.recordAuditEvent(r, agentID, "feedback_received", "", body.FeedbackType, "ok", "chat feedback recorded")
@@ -176,7 +178,7 @@ func (h *EvolutionHandler) createFeedbackSuggestion(ctx context.Context, agentID
 	if feedbackType == "correction" {
 		label = "User correction requires review"
 	}
-	rationale := "Created from chat feedback. This suggestion only enters the review queue and does not automatically modify core skills, models, tools, or source code."
+	rationale := "Created from chat feedback. Automatic evolution may consolidate this into an agent-scoped custom feedback skill after regression checks pass. It does not directly modify core skills, models, tools, or source code."
 	if correction != "" {
 		rationale = fmt.Sprintf("%s User correction: %s", rationale, truncateString(correction, 300))
 	}

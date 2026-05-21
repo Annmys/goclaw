@@ -230,8 +230,9 @@ func (h *EvolutionHandler) handleAnalyzeSuggestions(w http.ResponseWriter, r *ht
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	h.autoApplyPendingSuggestions(r, agentID, 100)
 	h.recordAuditEvent(r, agentID, "suggestions_analyze", "", "pending", "ok",
-		fmt.Sprintf("manual analysis created %d pending suggestions", len(created)))
+		fmt.Sprintf("manual analysis created %d suggestions and triggered auto-evolution", len(created)))
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"status":  "ok",
 		"created": len(created),
