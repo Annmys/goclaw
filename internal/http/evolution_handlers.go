@@ -326,12 +326,29 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 			return
 
 		case store.SuggestSkillRepair:
-			if err := h.suggestions.UpdateSuggestionStatus(r.Context(), suggestionID, "approved", reviewedBy); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			if err := h.applySkillRepair(r.Context(), *existing, reviewedBy); err != nil {
+				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "approved", "ok", "skill repair approved for manual versioned patch")
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "skill_repair_approved"})
+			postflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", suggestionID.String())
+			if err := h.recordRegressionRun(r, agentID, postflight); err != nil {
+				slog.Warn("evolution.skill_repair.postflight.record_failed", "suggestion", suggestionID, "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record skill repair postflight regression"})
+				return
+			}
+			if postflight.Status != "passed" {
+				if err := h.rollbackSkillRepair(r.Context(), *existing, reviewedBy); err != nil {
+					h.recordAuditEvent(r, agentID, "skill_repair_postflight_rollback_failed", suggestionID.String(), "applied", "failed", err.Error())
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed and rollback failed: " + err.Error()})
+					return
+				}
+				h.recordAuditEvent(r, agentID, "skill_repair_postflight_failed", suggestionID.String(), "rolled_back", "failed", "business_workflow_smoke failed after skill repair; rollback version published")
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed; rollback version published"})
+				return
+			}
+			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "skill repair version published")
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "skill_repair_applied"})
 			return
 
 		case store.SuggestSkillAdd:

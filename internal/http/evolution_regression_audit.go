@@ -502,6 +502,9 @@ func (h *EvolutionHandler) rollbackSuggestion(r *http.Request, sg store.Evolutio
 		}
 		return nil
 	}
+	if sg.Status == "applied" && sg.SuggestionType == store.SuggestSkillRepair {
+		return h.rollbackSkillRepair(r.Context(), sg, reviewedBy)
+	}
 	return h.suggestions.UpdateSuggestionStatus(r.Context(), sg.ID, "rolled_back", reviewedBy)
 }
 
