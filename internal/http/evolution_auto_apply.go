@@ -63,8 +63,27 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 		// Keep it as a reviewed suggestion even in automatic mode.
 		return false, "tool_order_requires_review", nil
 	case store.SuggestSkillRepair:
-		// Repairing a business skill must produce a versioned patch and human review.
-		return false, "skill_repair_requires_review", nil
+		preflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", sg.ID.String())
+		if err := h.recordRegressionRun(r, agentID, preflight); err != nil {
+			return false, "skill_repair_preflight_record_failed", err
+		}
+		if preflight.Status != "passed" {
+			return false, "skill_repair_preflight_failed", nil
+		}
+		if err := h.applySkillRepair(r.Context(), sg, "auto-evolution"); err != nil {
+			return false, "skill_repair_apply_failed", err
+		}
+		postflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", sg.ID.String())
+		if err := h.recordRegressionRun(r, agentID, postflight); err != nil {
+			return false, "skill_repair_postflight_record_failed", err
+		}
+		if postflight.Status != "passed" {
+			if rollbackErr := h.rollbackSkillRepair(r.Context(), sg, "auto-evolution"); rollbackErr != nil {
+				return false, "skill_repair_postflight_failed_rollback_failed", rollbackErr
+			}
+			return false, "skill_repair_postflight_failed_rolled_back", nil
+		}
+		return true, "skill_repair_applied", nil
 	default:
 		return false, "unsupported_suggestion_type", nil
 	}
