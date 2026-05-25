@@ -165,15 +165,15 @@ func (m *TeamToolManager) dispatchTaskToAgent(ctx context.Context, task *store.T
 	}
 
 	meta := map[string]string{
-		MetaOriginChannel:   originChannel,
-		MetaOriginPeerKind:  originPeerKind,
-		MetaOriginChatID:    originChatID,
-		MetaOriginUserID:    originUserID,
-		MetaFromAgent:       fromAgent,
-		MetaToAgent:         ag.AgentKey,
-		MetaToAgentDisplay:  ag.DisplayName,
-		MetaTeamTaskID:      task.ID.String(),
-		MetaTeamID:          teamID.String(),
+		MetaOriginChannel:  originChannel,
+		MetaOriginPeerKind: originPeerKind,
+		MetaOriginChatID:   originChatID,
+		MetaOriginUserID:   originUserID,
+		MetaFromAgent:      fromAgent,
+		MetaToAgent:        ag.AgentKey,
+		MetaToAgentDisplay: ag.DisplayName,
+		MetaTeamTaskID:     task.ID.String(),
+		MetaTeamID:         teamID.String(),
 	}
 	if originSenderID != "" {
 		meta[MetaOriginSenderID] = originSenderID
@@ -377,6 +377,14 @@ func (m *TeamToolManager) DispatchUnblockedTasks(ctx context.Context, teamID uui
 		}
 		if dispatched[ownerID] {
 			continue // skip — this owner already has a higher-priority task dispatched
+		}
+		hasActive, err := m.teamStore.HasActiveInProgressTaskForAgent(ctx, teamID, ownerID)
+		if err != nil {
+			slog.Warn("DispatchUnblockedTasks: active-task check failed", "task_id", task.ID, "agent_id", ownerID, "error", err)
+			continue
+		}
+		if hasActive {
+			continue
 		}
 		// Assign (pending → in_progress + lock) so consumer can auto-complete.
 		if err := m.teamStore.AssignTask(ctx, task.ID, ownerID, teamID); err != nil {

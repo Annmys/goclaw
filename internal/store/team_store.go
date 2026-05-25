@@ -50,12 +50,11 @@ const (
 
 // Team task list filter constants (for ListTasks statusFilter parameter).
 const (
-	TeamTaskFilterActive    = "active" // pending + in_progress + blocked
+	TeamTaskFilterActive    = "active"    // pending + in_progress + blocked
 	TeamTaskFilterInReview  = "in_review" // only in_review tasks
 	TeamTaskFilterCompleted = "completed" // only completed tasks
 	TeamTaskFilterAll       = "all"       // all statuses (default when "" passed)
 )
-
 
 // TeamData represents an agent team.
 type TeamData struct {
@@ -233,6 +232,7 @@ type TaskStore interface {
 	DeleteTasks(ctx context.Context, taskIDs []uuid.UUID, teamID uuid.UUID) ([]uuid.UUID, error)
 	ClaimTask(ctx context.Context, taskID, agentID, teamID uuid.UUID) error
 	AssignTask(ctx context.Context, taskID, agentID, teamID uuid.UUID) error
+	HasActiveInProgressTaskForAgent(ctx context.Context, teamID, agentID uuid.UUID) (bool, error)
 	CompleteTask(ctx context.Context, taskID, teamID uuid.UUID, result string) error
 	CancelTask(ctx context.Context, taskID, teamID uuid.UUID, reason string) error
 	FailTask(ctx context.Context, taskID, teamID uuid.UUID, errMsg string) error
