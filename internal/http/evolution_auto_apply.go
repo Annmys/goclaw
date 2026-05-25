@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -9,6 +10,57 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
+
+// StartAutoApplyLoop continuously scans active agents for pending evolution
+// suggestions and runs the existing guarded auto-apply pipeline.
+func (h *EvolutionHandler) StartAutoApplyLoop(ctx context.Context, interval time.Duration, limit int) {
+	if h == nil || h.agentStore == nil || h.suggestions == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	go func() {
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				h.autoApplyPendingSuggestionsForActiveAgents(ctx, limit)
+				timer.Reset(interval)
+			}
+		}
+	}()
+}
+
+func (h *EvolutionHandler) autoApplyPendingSuggestionsForActiveAgents(ctx context.Context, limit int) {
+	agents, err := h.agentStore.List(ctx, "")
+	if err != nil {
+		return
+	}
+	for _, ag := range agents {
+		if ag.Status != store.AgentStatusActive {
+			continue
+		}
+		flags := ag.ParseV3Flags()
+		if !flags.EvolutionMetrics || !flags.EvolutionSuggest {
+			continue
+		}
+		agentCtx := store.WithTenantID(ctx, ag.TenantID)
+		agentCtx = store.WithUserID(agentCtx, "auto-evolution")
+		req, err := http.NewRequestWithContext(agentCtx, http.MethodPost, "/internal/evolution/auto-apply", nil)
+		if err != nil {
+			continue
+		}
+		h.autoApplyPendingSuggestions(req, ag.ID, limit)
+	}
+}
 
 func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUID, sg store.EvolutionSuggestion) (bool, string, error) {
 	switch sg.SuggestionType {

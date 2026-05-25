@@ -100,9 +100,15 @@ func (e *SuggestionEngine) Analyze(ctx context.Context, agentID uuid.UUID) ([]st
 	input.SkillQualityScores = skillScores
 
 	// Load existing pending suggestions to avoid duplicates (composite key: type + metric key).
-	existing, _ := e.suggestions.ListSuggestions(ctx, agentID, "pending", 100)
+	existing, _ := e.suggestions.ListSuggestions(ctx, agentID, "", 500)
 	existingKeys := make(map[dedupKey]bool, len(existing))
 	for _, sg := range existing {
+		if sg.Status == "rejected" || sg.Status == "rolled_back" {
+			continue
+		}
+		if sg.Status == "applied" && time.Since(sg.CreatedAt) > 7*24*time.Hour {
+			continue
+		}
 		mk := extractMetricKey(sg.Parameters, sg.SuggestionType)
 		existingKeys[dedupKey{sg.SuggestionType, mk}] = true
 	}

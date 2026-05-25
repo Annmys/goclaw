@@ -149,7 +149,19 @@ func (h *EvolutionHandler) applySkillRepair(ctx context.Context, sg store.Evolut
 		return err
 	}
 	if repaired == current {
-		return fmt.Errorf("repair content produced no change")
+		params["auto_applied"] = true
+		params["no_change"] = true
+		params["applied_by"] = reviewedBy
+		params["applied_at"] = time.Now().UTC().Format(time.RFC3339)
+		updatedParams, _ := json.Marshal(params)
+		if err := h.suggestions.UpdateSuggestionParameters(ctx, sg.ID, updatedParams); err != nil {
+			return fmt.Errorf("record no-change skill repair parameters: %w", err)
+		}
+		if err := h.suggestions.UpdateSuggestionStatus(ctx, sg.ID, "applied", reviewedBy); err != nil {
+			return fmt.Errorf("mark no-change skill repair applied: %w", err)
+		}
+		slog.Info("evolution.skill_repair: no_change", "skill", slug, "version", info.Version, "suggestion", sg.ID)
+		return nil
 	}
 	violations, safe := skills.GuardSkillContent(repaired)
 	if !safe {
