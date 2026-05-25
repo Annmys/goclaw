@@ -103,6 +103,8 @@ func (t *TeamTasksTool) executeRetry(ctx context.Context, args map[string]any) *
 		return ErrorResult("task does not belong to your team")
 	}
 	switch task.Status {
+	case store.TeamTaskStatusInProgress:
+		return NewResult(fmt.Sprintf("Task %s is already in progress; no retry needed.", taskID))
 	case store.TeamTaskStatusStale, store.TeamTaskStatusFailed, store.TeamTaskStatusCompleted:
 		// OK — can retry/reopen these statuses
 	default:

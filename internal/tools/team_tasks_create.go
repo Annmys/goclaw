@@ -418,7 +418,12 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 			ptd.Add(team.ID, task.ID)
 		} else {
 			// Fallback: assign (pending → in_progress + lock) then dispatch.
-			if err := t.manager.Store().AssignTask(ctx, task.ID, assigneeID, team.ID); err != nil {
+			hasActive, err := t.manager.Store().HasActiveInProgressTaskForAgent(ctx, team.ID, assigneeID)
+			if err != nil {
+				slog.Warn("executeCreate: active-task check failed", "task_id", task.ID, "agent_id", assigneeID, "error", err)
+			} else if hasActive {
+				slog.Info("executeCreate: fallback dispatch skipped because assignee is busy", "task_id", task.ID, "agent_id", assigneeID)
+			} else if err := t.manager.Store().AssignTask(ctx, task.ID, assigneeID, team.ID); err != nil {
 				slog.Warn("executeCreate: fallback assign failed", "task_id", task.ID, "error", err)
 			} else {
 				t.manager.BroadcastTeamEvent(ctx, protocol.EventTeamTaskDispatched, BuildTaskEventPayload(

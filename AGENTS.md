@@ -37,3 +37,9 @@
 # 自动提炼规则
 - ...` 的条目，才会被自动提炼到对应 `AGENTS.md`，普通日志不会自动写入规则文件。
 
+# 自动提炼规则
+- `D:\goclaw` 每次完成本地 git 版本管理提交后，都必须同步推送到 `https://github.com/Annmys/goclaw`，不要推送到 `nextlevelbuilder/goclaw`。
+
+# 自动提炼规则
+- 推送 `Annmys/goclaw` 时要避免新增其他 Contributors；必要时基于远端 `main` 创建 Annmys 作者信息的同步提交。
+
