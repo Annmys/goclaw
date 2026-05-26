@@ -60,6 +60,22 @@ func (s *SQLiteTeamStore) AssignTask(ctx context.Context, taskID, agentID, teamI
 	return nil
 }
 
+func (s *SQLiteTeamStore) HasActiveInProgressTaskForAgent(ctx context.Context, teamID, agentID uuid.UUID) (bool, error) {
+	tid := tenantIDForInsert(ctx)
+	var exists bool
+	err := s.db.QueryRowContext(ctx,
+		`SELECT EXISTS(
+			SELECT 1 FROM team_tasks
+			WHERE team_id = ?
+			  AND owner_agent_id = ?
+			  AND status = ?
+			  AND tenant_id = ?
+		)`,
+		teamID, agentID, store.TeamTaskStatusInProgress, tid,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (s *SQLiteTeamStore) CompleteTask(ctx context.Context, taskID, teamID uuid.UUID, result string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

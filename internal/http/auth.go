@@ -216,12 +216,13 @@ func resolveAuthWithBearer(r *http.Request, bearer string) authResult {
 	if senderID := r.Header.Get("X-GoClaw-Sender-Id"); senderID != "" && pkgPairingStore != nil {
 		paired, err := pkgPairingStore.IsPaired(r.Context(), senderID, "browser")
 		if err == nil && paired {
-			tenantID, allowed := resolveTenantHint(r.Context(), r.Header.Get("X-GoClaw-Tenant-Id"), extractUserID(r))
+			userID := extractUserID(r)
+			tenantID, allowed := resolveTenantHint(r.Context(), r.Header.Get("X-GoClaw-Tenant-Id"), userID)
 			if !allowed {
 				return authResult{}
 			}
 			return authResult{
-				Role:          permissions.RoleOperator,
+				Role:          httpRoleForTenantUser(r.Context(), tenantID, userID),
 				Authenticated: true,
 				TenantID:      tenantID,
 				TenantSlug:    resolveTenantSlug(r.Context(), tenantID),
@@ -269,6 +270,13 @@ func resolveTenantHint(ctx context.Context, hint, userID string) (uuid.UUID, boo
 	if hint == "" || pkgTenantCache == nil {
 		return store.MasterTenantID, true
 	}
+	if isHTTPOwnerID(userID, pkgOwnerIDs) {
+		tid := resolveScopedTenant(ctx, hint)
+		if tid == uuid.Nil {
+			return store.MasterTenantID, true
+		}
+		return tid, true
+	}
 	tid := resolveScopedTenant(ctx, hint)
 	if tid == uuid.Nil {
 		return store.MasterTenantID, true
@@ -298,6 +306,39 @@ func resolveTenantHint(ctx context.Context, hint, userID string) (uuid.UUID, boo
 		return uuid.Nil, false
 	}
 	return tid, true
+}
+
+func httpRoleForTenantUser(ctx context.Context, tenantID uuid.UUID, userID string) permissions.Role {
+	if isHTTPOwnerID(userID, pkgOwnerIDs) {
+		return permissions.RoleOwner
+	}
+	if pkgTenantCache == nil || userID == "" || tenantID == uuid.Nil {
+		return permissions.RoleOperator
+	}
+	role, err := pkgTenantCache.store.GetUserRole(ctx, tenantID, userID)
+	if err != nil || role == "" {
+		slog.Warn("security.http_browser_pairing_role_fallback",
+			"user", userID,
+			"tenant_id", tenantID,
+			"error", err,
+		)
+		return permissions.RoleOperator
+	}
+	switch role {
+	case store.TenantRoleOwner, store.TenantRoleAdmin:
+		return permissions.RoleAdmin
+	case store.TenantRoleOperator, store.TenantRoleMember:
+		return permissions.RoleOperator
+	case store.TenantRoleViewer:
+		return permissions.RoleViewer
+	default:
+		slog.Warn("security.http_browser_pairing_unknown_tenant_role",
+			"user", userID,
+			"tenant_id", tenantID,
+			"role", role,
+		)
+		return permissions.RoleOperator
+	}
 }
 
 // httpMinRole returns the minimum role required for an HTTP endpoint based on HTTP method.

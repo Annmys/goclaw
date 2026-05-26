@@ -247,7 +247,20 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 
 	// Path 3a: Reconnecting with a previously-paired sender_id
 	if ps != nil && params.SenderID != "" {
-		paired, pairErr := ps.IsPaired(ctx, params.SenderID, "browser")
+		hint := params.TenantID
+		if hint == "" {
+			hint = params.TenantHint
+		}
+		if hint == "" {
+			hint = params.TenantScope
+		}
+		tid, errCode := r.resolveTenantHint(ctx, hint, params.UserID)
+		if errCode != "" {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
+			return
+		}
+		pairingCtx := store.WithTenantID(ctx, tid)
+		paired, pairErr := ps.IsPaired(pairingCtx, params.SenderID, "browser")
 		if pairErr != nil {
 			slog.Warn("security.pairing_check_failed",
 				"sender_id", params.SenderID, "error", pairErr)
@@ -258,16 +271,11 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 			return
 		}
 		if paired {
-			client.role = permissions.RoleOperator
+			client.role = r.roleForTenantUser(ctx, tid, params.UserID)
 			client.authenticated = true
-		client.userID = params.UserID
+			client.userID = params.UserID
 			client.pairedSenderID = params.SenderID
 			client.pairedChannel = "browser"
-			tid, errCode := r.resolveTenantHint(ctx, params.TenantHint, params.UserID)
-			if errCode != "" {
-				client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
-				return
-			}
 			client.tenantID = tid
 			slog.Info("browser pairing authenticated", "sender_id", params.SenderID, "client", client.id, "tenant_id", client.tenantID)
 			r.sendConnectResponse(ctx, client, req.ID)
@@ -277,7 +285,30 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 
 	// Path 3b: No token, no valid pairing → initiate browser pairing (if service available)
 	if ps != nil && params.Token == "" {
-		code, err := ps.RequestPairing(ctx, client.id, "browser", "", "default", nil)
+		hint := params.TenantID
+		if hint == "" {
+			hint = params.TenantHint
+		}
+		if hint == "" {
+			hint = params.TenantScope
+		}
+		tid, errCode := r.resolveTenantHint(ctx, hint, params.UserID)
+		if errCode != "" {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
+			return
+		}
+		meta := map[string]string{}
+		if params.UserID != "" {
+			meta["user_id"] = params.UserID
+		}
+		if hint != "" {
+			meta["tenant_slug"] = hint
+		}
+		if tid != uuid.Nil {
+			meta["tenant_id"] = tid.String()
+		}
+		pairingCtx := store.WithTenantID(ctx, tid)
+		code, err := ps.RequestPairing(pairingCtx, client.id, "browser", "", "default", meta)
 		if err != nil {
 			slog.Warn("browser pairing request failed", "error", err, "client", client.id)
 			// Fall through to viewer role
@@ -415,6 +446,31 @@ func (r *MethodRouter) getUserTenantRole(ctx context.Context, tenantID uuid.UUID
 		r.permCache.SetTenantRole(ctx, tenantID, userID, role)
 	}
 	return role, nil
+}
+
+func (r *MethodRouter) roleForTenantUser(ctx context.Context, tenantID uuid.UUID, userID string) permissions.Role {
+	if isOwnerID(userID, r.server.cfg.Gateway.OwnerIDs) {
+		return permissions.RoleOwner
+	}
+	if r.tenantStore == nil || userID == "" || tenantID == uuid.Nil {
+		return permissions.RoleOperator
+	}
+	role, err := r.getUserTenantRole(ctx, tenantID, userID)
+	if err != nil || role == "" {
+		slog.Warn("security.browser_pairing_role_fallback", "user", userID, "tenant_id", tenantID, "error", err)
+		return permissions.RoleOperator
+	}
+	switch role {
+	case store.TenantRoleOwner, store.TenantRoleAdmin:
+		return permissions.RoleAdmin
+	case store.TenantRoleOperator, store.TenantRoleMember:
+		return permissions.RoleOperator
+	case store.TenantRoleViewer:
+		return permissions.RoleViewer
+	default:
+		slog.Warn("security.browser_pairing_unknown_tenant_role", "user", userID, "tenant_id", tenantID, "role", role)
+		return permissions.RoleOperator
+	}
 }
 
 // applyTenantScope narrows an owner client's data scope to a specific tenant.

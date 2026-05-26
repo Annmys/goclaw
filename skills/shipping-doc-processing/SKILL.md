@@ -1,6 +1,9 @@
 ---
 name: 船务清单处理
 slug: shipping-doc-processing
+family: epl-core-workflow
+display_name: 船务清单处理
+aliases: shipping-doc-processing, 船务清单
 description: 处理船务清单相关 Excel 文件，负责检查 CI 和 EPL/PL 是否完整，并根据流转单内容索引或订单映射表补全包装信息。用于已经确认属于船务清单的文件，不负责首轮文件类型识别。通常由核心 skill excel类型识别识别出船务清单后移交到这里继续执行。
 ---
 
@@ -55,6 +58,7 @@ description: 处理船务清单相关 Excel 文件，负责检查 CI 和 EPL/PL 
 - 如果是配件与上一主产品共箱：
   - 配件行的 `C/N / G.W. / Dimension` 可以留空
 - 本 skill 不负责首轮 Excel 类型识别
+- 同一业务域如果以后出现别名或升级版本，必须继续归入 `family: epl-core-workflow`，不要再新建平行 skill
 
 ## 输出要求
 

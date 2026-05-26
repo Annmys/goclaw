@@ -147,6 +147,14 @@ func (h *SkillsHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusConflict, map[string]string{"error": i18n.T(locale, i18n.MsgInvalidRequest, "slug conflicts with a system skill")})
 		return
 	}
+	if strings.TrimSpace(frontmatter["family"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": i18n.T(locale, i18n.MsgInvalidRequest, "SKILL.md frontmatter must include family")})
+		return
+	}
+	if existing := h.findCanonicalSkillByFamily(r.Context(), skillContent, slug); existing != nil {
+		writeJSON(w, http.StatusConflict, map[string]string{"error": i18n.T(locale, i18n.MsgInvalidRequest, fmt.Sprintf("skill family already has canonical skill %q; update that skill instead", existing.Slug))})
+		return
+	}
 
 	// Compute content hash of SKILL.md for idempotency check.
 	// Using SKILL.md content (not ZIP hash) so content-identical uploads are deduplicated
@@ -276,6 +284,33 @@ func (h *SkillsHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	depState.emit(h, slug)
 
 	writeJSON(w, http.StatusCreated, response)
+}
+
+func (h *SkillsHandler) findCanonicalSkillByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
+	meta := skills.ParseSkillGovernance(content)
+	family := meta.FamilyKey(slug)
+	if family == "" {
+		return nil
+	}
+	for _, sk := range h.skills.ListSkills(ctx) {
+		if sk.Status != "active" && sk.Status != "archived" {
+			continue
+		}
+		if sk.Slug == slug {
+			continue
+		}
+		skFamily := strings.TrimSpace(sk.Family)
+		if skFamily == "" {
+			skFamily = skills.Slugify(sk.Name)
+		} else {
+			skFamily = skills.Slugify(skFamily)
+		}
+		if skFamily == family {
+			skCopy := sk
+			return &skCopy
+		}
+	}
+	return nil
 }
 
 func canAutoInstallUploadedSkillDeps(ctx context.Context) bool {

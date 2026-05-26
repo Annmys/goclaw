@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -101,6 +102,7 @@ func (s *SQLiteSkillStore) ListSkills(ctx context.Context) []store.SkillInfo {
 		info.Enabled = enabled
 		info.MissingDeps = parseDepsColumn(depsRaw)
 		info.Author = parseFrontmatterAuthor(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
 		result = append(result, info)
 	}
 	if err := rows.Err(); err != nil {
@@ -121,7 +123,7 @@ func (s *SQLiteSkillStore) ListAllSkills(ctx context.Context) []store.SkillInfo 
 		tid = store.MasterTenantID
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, file_path
+		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
 		 FROM skills WHERE enabled = 1 AND status != 'deleted' AND (is_system = 1 OR tenant_id = ?)
 		 ORDER BY name`, tid)
 	if err != nil {
@@ -133,7 +135,7 @@ func (s *SQLiteSkillStore) ListAllSkills(ctx context.Context) []store.SkillInfo 
 
 func (s *SQLiteSkillStore) ListAllSystemSkills(ctx context.Context) []store.SkillInfo {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, file_path
+		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
 		 FROM skills WHERE is_system = 1 AND enabled = 1 AND status != 'deleted'
 		 ORDER BY name`)
 	if err != nil {
@@ -152,10 +154,10 @@ func (s *SQLiteSkillStore) scanSkillInfoList(rows *sql.Rows) []store.SkillInfo {
 		var tagsJSON []byte
 		var version int
 		var isSystem, enabled bool
-		var depsRaw []byte
+		var depsRaw, fmRaw []byte
 		var filePath *string
 		if err := rows.Scan(&id, &name, &slug, &desc, &visibility, &tagsJSON, &version,
-			&isSystem, &status, &enabled, &depsRaw, &filePath); err != nil {
+			&isSystem, &status, &enabled, &depsRaw, &fmRaw, &filePath); err != nil {
 			continue
 		}
 		info := buildSkillInfo(id.String(), name, slug, desc, version, s.baseDir, filePath)
@@ -165,6 +167,8 @@ func (s *SQLiteSkillStore) scanSkillInfoList(rows *sql.Rows) []store.SkillInfo {
 		info.Status = status
 		info.Enabled = enabled
 		info.MissingDeps = parseDepsColumn(depsRaw)
+		info.Author = parseFrontmatterAuthor(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
 		result = append(result, info)
 	}
 	if err := rows.Err(); err != nil {
@@ -254,6 +258,18 @@ func parseFrontmatterAuthor(raw []byte) string {
 		return ""
 	}
 	return fm["author"]
+}
+
+func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases []string) {
+	if len(raw) == 0 {
+		return "", "", false, nil, nil
+	}
+	var fm map[string]string
+	if err := json.Unmarshal(raw, &fm); err != nil {
+		return "", "", false, nil, nil
+	}
+	meta := skills.GovernanceFromFields(fm)
+	return meta.DisplayName, meta.Family, meta.Canonical, meta.Replaces, meta.Aliases
 }
 
 func marshalFrontmatter(fm map[string]string) []byte {

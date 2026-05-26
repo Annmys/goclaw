@@ -18,13 +18,21 @@ import { useDeferredLoading } from "@/hooks/use-deferred-loading";
 import { useContactResolver } from "@/hooks/use-contact-resolver";
 import { formatUserLabel } from "@/lib/format-user-label";
 
+function shortID(id?: string): string {
+  if (!id) return "";
+  if (id.length <= 12) return id;
+  return `${id.slice(0, 8)}...${id.slice(-4)}`;
+}
+
 export function NodesPage() {
   const { t } = useTranslation("nodes");
   const { pendingPairings, pairedDevices, loading, refresh, approvePairing, denyPairing, revokePairing } = useNodes();
   const spinning = useMinLoading(loading);
   const senderIds = useMemo(() => [
     ...pendingPairings.map((p) => p.sender_id),
+    ...pendingPairings.map((p) => p.user_id).filter(Boolean),
     ...pairedDevices.map((d) => d.sender_id),
+    ...pairedDevices.map((d) => d.user_id).filter(Boolean),
     ...pairedDevices.map((d) => d.paired_by).filter(Boolean),
   ].filter(Boolean) as string[], [pendingPairings, pairedDevices]);
   const { resolve } = useContactResolver(senderIds);
@@ -72,7 +80,10 @@ export function NodesPage() {
                           <span className="font-mono text-sm font-medium">{p.code}</span>
                         </div>
                         <div className="mt-1 text-xs text-muted-foreground">
+                          {t("requestUser", "User: ")}{p.user_id ? formatUserLabel(p.user_id, resolve) : "--"}
+                          {" | "}
                           {t("sender")}{formatUserLabel(p.sender_id, resolve)}
+                          {p.tenant_id && ` | ${t("tenant", "Tenant: ")}${shortID(p.tenant_id)}`}
                           {p.chat_id && ` | ${t("chat")}${p.chat_id}`}
                           {" | "}
                           {formatRelativeTime(new Date(p.created_at))}
@@ -108,11 +119,13 @@ export function NodesPage() {
                   {t("pairedDevices", { count: pairedDevices.length })}
                 </h3>
                 <div className="rounded-md border overflow-x-auto">
-                  <table className="w-full min-w-[600px] text-sm">
+                  <table className="w-full min-w-[900px] text-sm">
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="px-4 py-3 text-left font-medium">{t("columns.channel")}</th>
+                        <th className="px-4 py-3 text-left font-medium">{t("columns.user", "User")}</th>
                         <th className="px-4 py-3 text-left font-medium">{t("columns.senderId")}</th>
+                        <th className="px-4 py-3 text-left font-medium">{t("columns.tenant", "Tenant")}</th>
                         <th className="px-4 py-3 text-left font-medium">{t("columns.paired")}</th>
                         <th className="px-4 py-3 text-left font-medium">{t("columns.by")}</th>
                         <th className="px-4 py-3 text-right font-medium">{t("columns.actions")}</th>
@@ -124,7 +137,9 @@ export function NodesPage() {
                           <td className="px-4 py-3">
                             <Badge variant="outline">{d.channel}</Badge>
                           </td>
+                          <td className="px-4 py-3 font-medium">{d.user_id ? formatUserLabel(d.user_id, resolve) : "--"}</td>
                           <td className="px-4 py-3 font-medium">{formatUserLabel(d.sender_id, resolve)}</td>
+                          <td className="px-4 py-3 text-muted-foreground">{d.tenant_id ? shortID(d.tenant_id) : "--"}</td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {formatDate(new Date(d.paired_at))}
                           </td>

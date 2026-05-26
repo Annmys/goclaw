@@ -7,19 +7,25 @@ import { Methods, Events } from "@/api/protocol";
 export interface PendingPairing {
   code: string;
   sender_id: string;
+  user_id?: string;
   channel: string;
   chat_id: string;
   account_id: string;
+  tenant_id?: string;
+  metadata?: Record<string, string>;
   created_at: number;
   expires_at: number;
 }
 
 export interface PairedDevice {
   sender_id: string;
+  user_id?: string;
   channel: string;
   chat_id: string;
   paired_at: number;
   paired_by: string;
+  tenant_id?: string;
+  metadata?: Record<string, string>;
 }
 
 export function useNodes() {

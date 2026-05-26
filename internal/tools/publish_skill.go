@@ -104,6 +104,12 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	if t.skills.IsSystemSkill(slug) {
 		return ErrorResult(fmt.Sprintf("slug %q conflicts with a system skill", slug))
 	}
+	if strings.TrimSpace(frontmatter["family"]) == "" {
+		return ErrorResult("SKILL.md frontmatter must include 'family' to prevent unmanaged parallel skills")
+	}
+	if existing := t.findCanonicalByFamily(ctx, string(content), slug); existing != nil {
+		return ErrorResult(fmt.Sprintf("skill family already has canonical skill %q (%s). Patch that skill instead of publishing a parallel one", existing.Slug, existing.Name))
+	}
 
 	// Compute hash + size
 	hasher := sha256.New()
@@ -195,6 +201,28 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	}
 
 	return NewResult(result)
+}
+
+func (t *PublishSkillTool) findCanonicalByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
+	meta := skills.ParseSkillGovernance(content)
+	family := meta.FamilyKey(slug)
+	if family == "" {
+		return nil
+	}
+	for _, sk := range t.skills.ListSkills(ctx) {
+		if sk.Status != "active" && sk.Status != "archived" {
+			continue
+		}
+		if sk.Slug == slug {
+			continue
+		}
+		skFamily := skillFamilyKey(sk)
+		if skFamily == family {
+			skCopy := sk
+			return &skCopy
+		}
+	}
+	return nil
 }
 
 // copySkillDir recursively copies src to dst, skipping symlinks and system artifacts.

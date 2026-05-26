@@ -12,9 +12,10 @@ import (
 
 // AnalysisInput bundles aggregated metrics for rule evaluation.
 type AnalysisInput struct {
-	ToolAggs      []store.ToolAggregate
-	RetrievalAggs []store.RetrievalAggregate
-	Since         time.Time
+	ToolAggs           []store.ToolAggregate
+	RetrievalAggs      []store.RetrievalAggregate
+	SkillQualityScores []store.SkillQualityScore
+	Since              time.Time
 }
 
 // AnalysisRule evaluates aggregated metrics and optionally returns a suggestion.
@@ -38,6 +39,7 @@ func NewSuggestionEngine(metrics store.EvolutionMetricsStore, suggestions store.
 		metrics:     metrics,
 		suggestions: suggestions,
 		rules: []AnalysisRule{
+			&SkillQualityRepairRule{},
 			&LowRetrievalUsageRule{},
 			&ToolFailureRule{},
 			&RepeatedToolRule{},
@@ -64,6 +66,9 @@ func extractMetricKey(params json.RawMessage, st store.SuggestionType) string {
 	case store.SuggestToolOrder, store.SuggestSkillAdd:
 		s, _ := p["tool"].(string)
 		return s
+	case store.SuggestSkillRepair:
+		s, _ := p["skill"].(string)
+		return s
 	default:
 		return ""
 	}
@@ -88,11 +93,22 @@ func (e *SuggestionEngine) Analyze(ctx context.Context, agentID uuid.UUID) ([]st
 		RetrievalAggs: retrievalAggs,
 		Since:         since,
 	}
+	skillScores, err := BuildSkillQualityScores(ctx, e.metrics, agentID, since, toolAggs)
+	if err != nil {
+		return nil, err
+	}
+	input.SkillQualityScores = skillScores
 
 	// Load existing pending suggestions to avoid duplicates (composite key: type + metric key).
-	existing, _ := e.suggestions.ListSuggestions(ctx, agentID, "pending", 100)
+	existing, _ := e.suggestions.ListSuggestions(ctx, agentID, "", 500)
 	existingKeys := make(map[dedupKey]bool, len(existing))
 	for _, sg := range existing {
+		if sg.Status == "rejected" || sg.Status == "rolled_back" {
+			continue
+		}
+		if sg.Status == "applied" && time.Since(sg.CreatedAt) > 7*24*time.Hour {
+			continue
+		}
 		mk := extractMetricKey(sg.Parameters, sg.SuggestionType)
 		existingKeys[dedupKey{sg.SuggestionType, mk}] = true
 	}

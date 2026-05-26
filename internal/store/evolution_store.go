@@ -76,6 +76,7 @@ const (
 	SuggestToolOrder          SuggestionType = "tool_order"
 	SuggestSkillAdd           SuggestionType = "skill_add"
 	SuggestFeedbackCorrection SuggestionType = "feedback_correction"
+	SuggestSkillRepair        SuggestionType = "skill_repair"
 )
 
 // EvolutionSuggestion is a data-driven suggestion for agent improvement.

@@ -1,15 +1,11 @@
 package http
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/http"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -160,7 +156,7 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 		if retrievalAggs == nil {
 			retrievalAggs = []store.RetrievalAggregate{}
 		}
-		skillScores, err := h.buildSkillQualityScores(ctx, agentID, since, toolAggs)
+		skillScores, err := agent.BuildSkillQualityScores(ctx, h.metrics, agentID, since, toolAggs)
 		if err != nil {
 			slog.Warn("evolution.skill_quality_scores failed", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -192,181 +188,6 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 		metrics = []store.EvolutionMetric{}
 	}
 	writeJSON(w, http.StatusOK, metrics)
-}
-
-func (h *EvolutionHandler) buildSkillQualityScores(ctx context.Context, agentID uuid.UUID, since time.Time, toolAggs []store.ToolAggregate) ([]store.SkillQualityScore, error) {
-	bySkill := map[string]*store.SkillQualityScore{}
-	ensure := func(name string) *store.SkillQualityScore {
-		name = strings.TrimSpace(strings.TrimPrefix(name, "skill:"))
-		if name == "" {
-			name = "unknown"
-		}
-		if existing := bySkill[name]; existing != nil {
-			return existing
-		}
-		score := &store.SkillQualityScore{
-			SkillName:    name,
-			SuccessRate:  1,
-			QualityScore: 100,
-			RiskLevel:    "low",
-		}
-		bySkill[name] = score
-		return score
-	}
-
-	for _, agg := range toolAggs {
-		if !strings.HasPrefix(agg.ToolName, "skill:") {
-			continue
-		}
-		score := ensure(agg.ToolName)
-		score.CallCount = agg.CallCount
-		score.SuccessRate = agg.SuccessRate
-		score.AvgDurationMs = agg.AvgDurationMs
-	}
-
-	feedbackMetrics, err := h.metrics.QueryMetrics(ctx, agentID, store.MetricFeedback, since, 500)
-	if err != nil {
-		return nil, err
-	}
-	aliases := skillQualityAliases()
-	for _, metric := range feedbackMetrics {
-		var value evolutionFeedbackValue
-		if err := json.Unmarshal(metric.Value, &value); err != nil {
-			value.FeedbackType = metric.MetricKey
-		}
-		if value.FeedbackType != "correction" && value.FeedbackType != "not_useful" {
-			continue
-		}
-		text := normalizeSkillQualityText(strings.Join([]string{
-			metric.MetricKey,
-			value.MessageContent,
-			value.Correction,
-		}, " "))
-		for skill, names := range aliases {
-			if textMentionsAny(text, names) {
-				ensure(skill).FeedbackCorrections++
-			}
-		}
-	}
-
-	regressionMetrics, err := h.metrics.QueryMetrics(ctx, agentID, store.MetricRegression, since, 100)
-	if err != nil {
-		return nil, err
-	}
-	for _, metric := range regressionMetrics {
-		var run evolutionRegressionRun
-		if err := json.Unmarshal(metric.Value, &run); err != nil {
-			continue
-		}
-		for _, item := range run.Cases {
-			if item.Status != "failed" {
-				continue
-			}
-			if skill := skillFromRegressionCase(item.Name); skill != "" {
-				ensure(skill).RegressionFailures++
-			}
-		}
-	}
-
-	out := make([]store.SkillQualityScore, 0, len(bySkill))
-	for _, item := range bySkill {
-		score := 100
-		if item.CallCount > 0 {
-			score -= int(math.Round((1 - item.SuccessRate) * 60))
-		}
-		score -= min(item.FeedbackCorrections*8, 32)
-		score -= min(item.RegressionFailures*15, 45)
-		if score < 0 {
-			score = 0
-		}
-		item.QualityScore = score
-		switch {
-		case score < 70:
-			item.RiskLevel = "high"
-		case score < 85:
-			item.RiskLevel = "medium"
-		default:
-			item.RiskLevel = "low"
-		}
-		out = append(out, *item)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].RiskLevel != out[j].RiskLevel {
-			return riskRank(out[i].RiskLevel) > riskRank(out[j].RiskLevel)
-		}
-		if out[i].QualityScore != out[j].QualityScore {
-			return out[i].QualityScore < out[j].QualityScore
-		}
-		if out[i].RegressionFailures != out[j].RegressionFailures {
-			return out[i].RegressionFailures > out[j].RegressionFailures
-		}
-		if out[i].FeedbackCorrections != out[j].FeedbackCorrections {
-			return out[i].FeedbackCorrections > out[j].FeedbackCorrections
-		}
-		return out[i].CallCount > out[j].CallCount
-	})
-	return out, nil
-}
-
-func skillQualityAliases() map[string][]string {
-	return map[string][]string{
-		"excel-type-identify":     {"excel-type-identify", "excel类型识别", "excel 类型识别"},
-		"shipping-doc-processing": {"shipping-doc-processing", "船务清单处理", "船务清单", "ci", "epl"},
-		"flow-order-query":        {"flow-order-query", "流转单查询", "流转单"},
-		"package-weight-query":    {"package-weight-query", "产品包装重量查询", "产品包装重量", "重量表"},
-		"label-generate":          {"label-generate", "标签生成", "标签"},
-		"package-calculation":     {"package-calculation", "包装计算", "包装资料"},
-	}
-}
-
-func normalizeSkillQualityText(s string) string {
-	s = strings.ToLower(s)
-	s = strings.ReplaceAll(s, "_", "-")
-	return s
-}
-
-func textMentionsAny(text string, names []string) bool {
-	for _, name := range names {
-		if name == "" {
-			continue
-		}
-		if strings.Contains(text, normalizeSkillQualityText(name)) {
-			return true
-		}
-	}
-	return false
-}
-
-func skillFromRegressionCase(name string) string {
-	name = strings.TrimSpace(name)
-	if strings.HasPrefix(name, "core_skill_") {
-		return strings.TrimPrefix(name, "core_skill_")
-	}
-	switch {
-	case strings.HasPrefix(name, "shipping_doc_golden_"):
-		return "shipping-doc-processing"
-	case strings.HasPrefix(name, "flow_order_"):
-		return "flow-order-query"
-	case strings.HasPrefix(name, "package_weight_"):
-		return "package-weight-query"
-	case strings.HasPrefix(name, "package_materials_"):
-		return "package-calculation"
-	case strings.HasPrefix(name, "label_template_"):
-		return "label-generate"
-	default:
-		return ""
-	}
-}
-
-func riskRank(risk string) int {
-	switch risk {
-	case "high":
-		return 3
-	case "medium":
-		return 2
-	default:
-		return 1
-	}
 }
 
 // handleListSuggestions returns evolution suggestions for an agent.
@@ -504,6 +325,32 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "feedback_correction_approved"})
 			return
 
+		case store.SuggestSkillRepair:
+			if err := h.applySkillRepair(r.Context(), *existing, reviewedBy); err != nil {
+				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			postflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", suggestionID.String())
+			if err := h.recordRegressionRun(r, agentID, postflight); err != nil {
+				slog.Warn("evolution.skill_repair.postflight.record_failed", "suggestion", suggestionID, "error", err)
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record skill repair postflight regression"})
+				return
+			}
+			if postflight.Status != "passed" {
+				if err := h.rollbackSkillRepair(r.Context(), *existing, reviewedBy); err != nil {
+					h.recordAuditEvent(r, agentID, "skill_repair_postflight_rollback_failed", suggestionID.String(), "applied", "failed", err.Error())
+					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed and rollback failed: " + err.Error()})
+					return
+				}
+				h.recordAuditEvent(r, agentID, "skill_repair_postflight_failed", suggestionID.String(), "rolled_back", "failed", "business_workflow_smoke failed after skill repair; rollback version published")
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed; rollback version published"})
+				return
+			}
+			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "skill repair version published")
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "skill_repair_applied"})
+			return
+
 		case store.SuggestSkillAdd:
 			if err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy); err != nil {
 				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
@@ -591,6 +438,8 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 func approvalPreflightScope(suggestionType store.SuggestionType) string {
 	switch suggestionType {
 	case store.SuggestFeedbackCorrection:
+		return "business_workflow_smoke"
+	case store.SuggestSkillRepair:
 		return "business_workflow_smoke"
 	case store.SuggestSkillAdd:
 		return "core_skill_smoke"

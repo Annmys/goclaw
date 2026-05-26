@@ -1,6 +1,8 @@
 package http
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -9,6 +11,57 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
+
+// StartAutoApplyLoop continuously scans active agents for pending evolution
+// suggestions and runs the existing guarded auto-apply pipeline.
+func (h *EvolutionHandler) StartAutoApplyLoop(ctx context.Context, interval time.Duration, limit int) {
+	if h == nil || h.agentStore == nil || h.suggestions == nil {
+		return
+	}
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	go func() {
+		timer := time.NewTimer(30 * time.Second)
+		defer timer.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				h.autoApplyPendingSuggestionsForActiveAgents(ctx, limit)
+				timer.Reset(interval)
+			}
+		}
+	}()
+}
+
+func (h *EvolutionHandler) autoApplyPendingSuggestionsForActiveAgents(ctx context.Context, limit int) {
+	agents, err := h.agentStore.List(ctx, "")
+	if err != nil {
+		return
+	}
+	for _, ag := range agents {
+		if ag.Status != store.AgentStatusActive {
+			continue
+		}
+		flags := ag.ParseV3Flags()
+		if !flags.EvolutionMetrics || !flags.EvolutionSuggest {
+			continue
+		}
+		agentCtx := store.WithTenantID(ctx, ag.TenantID)
+		agentCtx = store.WithUserID(agentCtx, "auto-evolution")
+		req, err := http.NewRequestWithContext(agentCtx, http.MethodPost, "/internal/evolution/auto-apply", nil)
+		if err != nil {
+			continue
+		}
+		h.autoApplyPendingSuggestions(req, ag.ID, limit)
+	}
+}
 
 func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUID, sg store.EvolutionSuggestion) (bool, string, error) {
 	switch sg.SuggestionType {
@@ -36,6 +89,9 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 			return false, "skill_add_preflight_failed", nil
 		}
 		if err := h.applySkillDraft(r.Context(), sg, "", "auto-evolution"); err != nil {
+			if errors.Is(err, errSkillAddCoreFamilyCandidate) {
+				return false, "skill_add_core_family_candidate", nil
+			}
 			return false, "skill_add_apply_failed", err
 		}
 		return true, "skill_add_applied", nil
@@ -62,6 +118,28 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 		// Tool disabling can remove capabilities and break business workflows.
 		// Keep it as a reviewed suggestion even in automatic mode.
 		return false, "tool_order_requires_review", nil
+	case store.SuggestSkillRepair:
+		preflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", sg.ID.String())
+		if err := h.recordRegressionRun(r, agentID, preflight); err != nil {
+			return false, "skill_repair_preflight_record_failed", err
+		}
+		if preflight.Status != "passed" {
+			return false, "skill_repair_preflight_failed", nil
+		}
+		if err := h.applySkillRepair(r.Context(), sg, "auto-evolution"); err != nil {
+			return false, "skill_repair_apply_failed", err
+		}
+		postflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", sg.ID.String())
+		if err := h.recordRegressionRun(r, agentID, postflight); err != nil {
+			return false, "skill_repair_postflight_record_failed", err
+		}
+		if postflight.Status != "passed" {
+			if rollbackErr := h.rollbackSkillRepair(r.Context(), sg, "auto-evolution"); rollbackErr != nil {
+				return false, "skill_repair_postflight_failed_rollback_failed", rollbackErr
+			}
+			return false, "skill_repair_postflight_failed_rolled_back", nil
+		}
+		return true, "skill_repair_applied", nil
 	default:
 		return false, "unsupported_suggestion_type", nil
 	}

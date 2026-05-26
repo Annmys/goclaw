@@ -17,7 +17,6 @@ const (
 	codeAlphabet         = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	codeLength           = 8
 	codeTTL              = 60 * time.Minute
-	pairedDeviceTTL      = 30 * 24 * time.Hour // 30 days
 	maxPendingPerAccount = 3
 )
 
@@ -96,24 +95,33 @@ func (s *PGPairingStore) ApprovePairing(ctx context.Context, code, approvedBy st
 		return nil, fmt.Errorf("pairing code %s not found or expired", code)
 	}
 
+	var meta map[string]string
+	if len(metaJSON) > 0 {
+		json.Unmarshal(metaJSON, &meta)
+	}
+	if meta == nil {
+		meta = map[string]string{}
+	}
+	if approvedBy != "" {
+		meta["approved_by"] = approvedBy
+	}
+	if approverTenantID := store.TenantIDFromContext(ctx); approverTenantID != uuid.Nil {
+		meta["approved_by_tenant_id"] = approverTenantID.String()
+	}
+	updatedMetaJSON, _ := json.Marshal(meta)
+
 	// Remove from pending
 	s.db.ExecContext(ctx, "DELETE FROM pairing_requests WHERE id = $1", reqID)
 
 	// Add to paired — use the request's tenant (the channel that initiated pairing)
 	now := time.Now()
-	expiresAt := now.Add(pairedDeviceTTL)
 	_, err = s.db.ExecContext(ctx,
 		`INSERT INTO paired_devices (id, sender_id, channel, chat_id, paired_by, paired_at, metadata, expires_at, tenant_id)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, metaJSON, expiresAt, reqTenantID,
+		uuid.Must(uuid.NewV7()), senderID, channel, chatID, approvedBy, now, updatedMetaJSON, nil, reqTenantID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create paired device: %w", err)
-	}
-
-	var meta map[string]string
-	if len(metaJSON) > 0 {
-		json.Unmarshal(metaJSON, &meta)
 	}
 
 	return &store.PairedDeviceData{
@@ -122,6 +130,8 @@ func (s *PGPairingStore) ApprovePairing(ctx context.Context, code, approvedBy st
 		ChatID:   chatID,
 		PairedAt: now.UnixMilli(),
 		PairedBy: approvedBy,
+		TenantID: reqTenantID.String(),
+		UserID:   meta["user_id"],
 		Metadata: meta,
 	}, nil
 }
@@ -207,10 +217,17 @@ func (s *PGPairingStore) ListPending(ctx context.Context) []store.PairingRequest
 		result[i] = store.PairingRequestData{
 			Code: r.Code, SenderID: r.SenderID, Channel: r.Channel,
 			ChatID: r.ChatID, AccountID: r.AccountID,
+			TenantID:  tid.String(),
 			CreatedAt: r.CreatedAt.UnixMilli(), ExpiresAt: r.ExpiresAt.UnixMilli(),
 		}
 		if len(r.Metadata) > 0 {
 			json.Unmarshal(r.Metadata, &result[i].Metadata)
+		}
+		if result[i].Metadata == nil {
+			result[i].Metadata = map[string]string{}
+		}
+		if v, ok := result[i].Metadata["user_id"]; ok {
+			result[i].UserID = v
 		}
 	}
 	return result
@@ -234,10 +251,16 @@ func (s *PGPairingStore) ListPaired(ctx context.Context) []store.PairedDeviceDat
 	for i, r := range rows {
 		result[i] = store.PairedDeviceData{
 			SenderID: r.SenderID, Channel: r.Channel, ChatID: r.ChatID,
-			PairedBy: r.PairedBy, PairedAt: r.PairedAt.UnixMilli(),
+			PairedBy: r.PairedBy, TenantID: tid.String(), PairedAt: r.PairedAt.UnixMilli(),
 		}
 		if len(r.Metadata) > 0 {
 			json.Unmarshal(r.Metadata, &result[i].Metadata)
+		}
+		if result[i].Metadata == nil {
+			result[i].Metadata = map[string]string{}
+		}
+		if v, ok := result[i].Metadata["user_id"]; ok {
+			result[i].UserID = v
 		}
 	}
 	return result
