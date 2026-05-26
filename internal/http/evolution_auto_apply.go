@@ -2,6 +2,7 @@ package http
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
@@ -88,6 +89,9 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 			return false, "skill_add_preflight_failed", nil
 		}
 		if err := h.applySkillDraft(r.Context(), sg, "", "auto-evolution"); err != nil {
+			if errors.Is(err, errSkillAddCoreFamilyCandidate) {
+				return false, "skill_add_core_family_candidate", nil
+			}
 			return false, "skill_add_apply_failed", err
 		}
 		return true, "skill_add_applied", nil

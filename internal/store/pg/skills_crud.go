@@ -135,7 +135,7 @@ func (s *PGSkillStore) SaveSkillContentVersion(ctx context.Context, id uuid.UUID
 		return 0, fmt.Errorf("write SKILL.md: %w", err)
 	}
 
-	name, description, slug, _ := skills.ParseSkillFrontmatter(content)
+	name, description, slug, frontmatter := skills.ParseSkillFrontmatter(content)
 	if name == "" {
 		name = info.Name
 	}
@@ -153,6 +153,7 @@ func (s *PGSkillStore) SaveSkillContentVersion(ctx context.Context, id uuid.UUID
 		"name":        name,
 		"description": desc,
 		"version":     newVer,
+		"frontmatter": marshalFrontmatter(frontmatter),
 		"file_path":   destDir,
 		"file_size":   int64(len(contentBytes)),
 		"file_hash":   fileHash,

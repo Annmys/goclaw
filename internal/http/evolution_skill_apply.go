@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -16,6 +17,8 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
+
+var errSkillAddCoreFamilyCandidate = errors.New("skill family canonical is system-managed")
 
 // applySkillDraft creates a managed skill from a SuggestSkillAdd suggestion.
 // Uses draftOverride if provided, otherwise falls back to the suggestion's parameters.skill_draft.
@@ -54,7 +57,10 @@ func (h *EvolutionHandler) applySkillDraft(ctx context.Context, sg store.Evoluti
 		return fmt.Errorf("skill draft missing 'family' in frontmatter")
 	}
 	if existing := h.findCanonicalSkillByFamily(ctx, draft, slug); existing != nil {
-		return fmt.Errorf("skill family already has canonical skill %q; create a skill_repair suggestion for the canonical skill instead of adding a parallel skill", existing.Slug)
+		if existing.IsSystem {
+			return h.markSkillAddCoreFamilyCandidate(ctx, sg, *existing, reviewedBy)
+		}
+		return h.applySkillDraftToExistingCustomSkill(ctx, sg, draft, *existing, reviewedBy)
 	}
 
 	// Resolve tenant-scoped destination directory.
@@ -119,6 +125,131 @@ func (h *EvolutionHandler) applySkillDraft(ctx context.Context, sg store.Evoluti
 	return nil
 }
 
+func (h *EvolutionHandler) applySkillDraftToExistingCustomSkill(ctx context.Context, sg store.EvolutionSuggestion, draft string, existing store.SkillInfo, reviewedBy string) error {
+	if existing.IsSystem {
+		return h.markSkillAddCoreFamilyCandidate(ctx, sg, existing, reviewedBy)
+	}
+	skillID, err := uuid.Parse(existing.ID)
+	if err != nil {
+		return fmt.Errorf("invalid skill id for %q: %w", existing.Slug, err)
+	}
+	currentBytes, err := os.ReadFile(existing.Path)
+	if err != nil {
+		return fmt.Errorf("read canonical custom skill: %w", err)
+	}
+	current := string(currentBytes)
+	merged := mergeSkillAddDraftIntoCustomSkill(current, existing.Slug, draft)
+	if merged == current {
+		var params map[string]any
+		_ = json.Unmarshal(sg.Parameters, &params)
+		if params == nil {
+			params = map[string]any{}
+		}
+		params["auto_applied"] = true
+		params["no_change"] = true
+		params["merged_into_skill"] = existing.Slug
+		params["applied_by"] = reviewedBy
+		params["applied_at"] = time.Now().UTC().Format(time.RFC3339)
+		updatedParams, _ := json.Marshal(params)
+		if err := h.suggestions.UpdateSuggestionParameters(ctx, sg.ID, updatedParams); err != nil {
+			return fmt.Errorf("record no-change family merge parameters: %w", err)
+		}
+		if err := h.suggestions.UpdateSuggestionStatus(ctx, sg.ID, "applied", reviewedBy); err != nil {
+			return fmt.Errorf("mark no-change family merge applied: %w", err)
+		}
+		return nil
+	}
+	violations, safe := skills.GuardSkillContent(merged)
+	if !safe {
+		return fmt.Errorf("family skill merge failed security scan: %s", skills.FormatGuardViolations(violations))
+	}
+	oldVersion := existing.Version
+	oldPath := existing.Path
+	newVersion, err := h.skillStore.SaveSkillContentVersion(ctx, skillID, merged)
+	if err != nil {
+		return fmt.Errorf("save family canonical skill version: %w", err)
+	}
+	if h.skillLoader != nil {
+		h.skillLoader.BumpVersion()
+	}
+	if sg.AgentID != uuid.Nil {
+		if err := h.skillStore.GrantToAgent(ctx, skillID, sg.AgentID, newVersion, reviewedBy); err != nil {
+			return fmt.Errorf("grant merged canonical skill to agent: %w", err)
+		}
+	}
+	var params map[string]any
+	_ = json.Unmarshal(sg.Parameters, &params)
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["auto_applied"] = true
+	params["merged_into_skill"] = existing.Slug
+	params["skill_id"] = skillID.String()
+	params["old_version"] = oldVersion
+	params["new_version"] = newVersion
+	params["old_file_path"] = oldPath
+	params["applied_by"] = reviewedBy
+	params["applied_at"] = time.Now().UTC().Format(time.RFC3339)
+	updatedParams, _ := json.Marshal(params)
+	if err := h.suggestions.UpdateSuggestionParameters(ctx, sg.ID, updatedParams); err != nil {
+		return fmt.Errorf("record family merge parameters: %w", err)
+	}
+	if err := h.suggestions.UpdateSuggestionStatus(ctx, sg.ID, "applied", reviewedBy); err != nil {
+		return fmt.Errorf("mark family merge applied: %w", err)
+	}
+	slog.Info("evolution.skill_add: merged_into_family", "skill", existing.Slug, "old_version", oldVersion, "new_version", newVersion, "suggestion", sg.ID)
+	return nil
+}
+
+func (h *EvolutionHandler) markSkillAddCoreFamilyCandidate(ctx context.Context, sg store.EvolutionSuggestion, existing store.SkillInfo, reviewedBy string) error {
+	var params map[string]any
+	_ = json.Unmarshal(sg.Parameters, &params)
+	if params == nil {
+		params = map[string]any{}
+	}
+	params["auto_apply_blocked"] = true
+	params["requires_manual_review"] = true
+	params["blocked_reason"] = "family canonical skill is system-managed; automatic evolution only updates custom skills"
+	params["family_canonical_skill"] = existing.Slug
+	params["family_canonical_is_system"] = existing.IsSystem
+	params["reviewed_by"] = reviewedBy
+	params["reviewed_at"] = time.Now().UTC().Format(time.RFC3339)
+	updatedParams, _ := json.Marshal(params)
+	if err := h.suggestions.UpdateSuggestionParameters(ctx, sg.ID, updatedParams); err != nil {
+		return fmt.Errorf("record core-family candidate parameters: %w", err)
+	}
+	return errSkillAddCoreFamilyCandidate
+}
+
+func mergeSkillAddDraftIntoCustomSkill(current, skillSlug, draft string) string {
+	section := buildAutoEvolutionSection(skillSlug, draft)
+	start := "<!-- GOCLAW_AUTO_EVOLUTION_START -->"
+	end := "<!-- GOCLAW_AUTO_EVOLUTION_END -->"
+	startIdx := strings.Index(current, start)
+	endIdx := strings.Index(current, end)
+	if startIdx >= 0 && endIdx > startIdx {
+		endIdx += len(end)
+		return strings.TrimRight(current[:startIdx], "\n") + "\n\n" + section + strings.TrimLeft(current[endIdx:], "\n")
+	}
+	return strings.TrimRight(current, "\n") + "\n\n" + section
+}
+
+func buildAutoEvolutionSection(skillSlug, draft string) string {
+	var b strings.Builder
+	b.WriteString("<!-- GOCLAW_AUTO_EVOLUTION_START -->\n")
+	b.WriteString("## GoClaw Auto Evolution Notes\n\n")
+	b.WriteString("This section is maintained automatically by GoClaw self-evolution for custom skills only. Keep the original workflow above and use these notes to improve the same family skill instead of creating parallel skills.\n\n")
+	fmt.Fprintf(&b, "- Canonical custom skill: `%s`\n", skillSlug)
+	b.WriteString("- Apply this family-level improvement before producing final output.\n")
+	b.WriteString("- Do not create another skill for the same family unless no canonical custom skill exists.\n\n")
+	b.WriteString("### Candidate Capability Draft\n\n")
+	b.WriteString("```markdown\n")
+	b.WriteString(strings.TrimSpace(draft))
+	b.WriteString("\n```\n")
+	b.WriteString("\n<!-- GOCLAW_AUTO_EVOLUTION_END -->\n")
+	return b.String()
+}
+
 func (h *EvolutionHandler) findCanonicalSkillByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
 	if h.skillStore == nil {
 		return nil
@@ -128,11 +259,10 @@ func (h *EvolutionHandler) findCanonicalSkillByFamily(ctx context.Context, conte
 	if family == "" {
 		return nil
 	}
+	var systemCandidate *store.SkillInfo
+	var customCandidate *store.SkillInfo
 	for _, sk := range h.skillStore.ListSkills(ctx) {
 		if sk.Status != "active" && sk.Status != "archived" {
-			continue
-		}
-		if sk.Slug == slug {
 			continue
 		}
 		skFamily := strings.TrimSpace(sk.Family)
@@ -143,10 +273,17 @@ func (h *EvolutionHandler) findCanonicalSkillByFamily(ctx context.Context, conte
 		}
 		if skFamily == family {
 			skCopy := sk
-			return &skCopy
+			if !sk.IsSystem {
+				customCandidate = &skCopy
+				continue
+			}
+			systemCandidate = &skCopy
 		}
 	}
-	return nil
+	if customCandidate != nil {
+		return customCandidate
+	}
+	return systemCandidate
 }
 
 func (h *EvolutionHandler) applySkillRepair(ctx context.Context, sg store.EvolutionSuggestion, reviewedBy string) error {

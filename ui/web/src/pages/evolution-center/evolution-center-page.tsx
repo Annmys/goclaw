@@ -38,7 +38,7 @@ const pipelineSteps = [
   {
     name: "反馈采集",
     state: "已接入",
-    detail: "聊天回复下方的有用、没用、纠错会写入进化指标；负面反馈和纠错会生成待审核建议，不直接修改线上能力。",
+    detail: "聊天回复下方的有用、没用、纠错会写入进化指标；负面反馈和纠错会自动进入自定义 skill 优化链路。",
   },
   {
     name: "指标沉淀",
@@ -48,7 +48,7 @@ const pipelineSteps = [
   {
     name: "建议生成",
     state: "部分完成",
-    detail: "当前支持阈值、工具策略、新增自定义 skill 草稿、用户纠错类建议；核心 skill 修改仍需要人工复核。",
+    detail: "当前支持阈值、工具策略、自定义 skill 草稿、用户纠错类建议；核心 skill 只生成候选，不自动改写。",
   },
   {
     name: "沙箱回归",
@@ -58,7 +58,7 @@ const pipelineSteps = [
   {
     name: "审批发布",
     state: "部分完成",
-    detail: "建议必须由管理员批准后才能应用。新增自定义 skill 可由建议草稿创建；核心 skill、模型、工具、源码仍不允许自动覆盖。",
+    detail: "自定义 skill 可在回归通过后自动发布；核心 skill、模型、工具、源码仍只保留候选和人工确认。",
   },
   {
     name: "审计回滚",
@@ -71,7 +71,7 @@ const pendingSteps = [
   {
     name: "候选版本生成",
     state: "待开发",
-    detail: "把纠错反馈自动整理成候选 skill 版本或候选规则包，只进入审核区，不直接替换线上版本。",
+    detail: "把纠错反馈自动整理成候选 skill 版本或候选规则包，自定义 skill 可直接进入自动发布链。",
   },
   {
     name: "业务评分器扩展",
@@ -81,12 +81,12 @@ const pendingSteps = [
   {
     name: "核心 skill 审批链",
     state: "待开发",
-    detail: "核心 skill 修改需要候选版本、差异查看、回归结果、人工批准、版本发布、可回滚全链路。",
+    detail: "核心 skill 只保留候选版本、差异查看、回归结果和人工确认，不进入自动发布链。",
   },
   {
     name: "自动回滚策略",
     state: "待开发",
-    detail: "后续根据失败率、纠错率、业务评分下降触发自动回滚建议，仍保留管理员最终确认。",
+    detail: "后续根据失败率、纠错率、业务评分下降触发自动回滚；自定义 skill 可自动回退，核心 skill 只出建议。",
   },
 ];
 
@@ -456,7 +456,7 @@ export function EvolutionCenterPage() {
     <div className="p-4 sm:p-6 pb-10">
       <PageHeader
         title="智能进化中心"
-        description="集中查看用户反馈、进化指标、待审建议、沙箱回归、审批发布和审计回滚。目标是受控进化：先收集问题，再生成建议，再回归验证，最后人工批准发布。"
+        description="集中查看用户反馈、进化指标、待审建议、沙箱回归、发布和审计回滚。目标是自定义 skill 自动进化、核心 skill 只保留候选。"
         actions={
           <div className="flex items-center gap-2">
             <Badge variant="secondary">管理员可见</Badge>
@@ -475,9 +475,9 @@ export function EvolutionCenterPage() {
               <Sparkles className="h-5 w-5 text-amber-500" />
               <CardTitle>自治进化闭环</CardTitle>
             </div>
-            <CardDescription>
-              反馈采集、指标沉淀、建议生成、沙箱回归、审批发布、审计回滚已经整合到同一条路线中，避免分散在多个孤立卡片里。
-            </CardDescription>
+              <CardDescription>
+                反馈采集、指标沉淀、建议生成、沙箱回归、发布和审计回滚已经整合到同一条路线中。自定义 skill 可自动闭环，核心 skill 只保留候选。
+              </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-4">
             <div className="rounded-lg border p-3">
@@ -643,7 +643,7 @@ export function EvolutionCenterPage() {
                       <CardTitle>进化建议审批</CardTitle>
                     </div>
                     <CardDescription className="mt-1">
-                      批准前会先跑对应回归。新增自定义 skill 可以通过草稿创建；核心 skill、模型、工具、数据库和源码级改动必须人工复核。
+                      自定义 skill 回归通过后可自动发布；核心 skill、模型、工具、数据库和源码级改动只保留候选和人工复核。
                     </CardDescription>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => void analyzeNow()} disabled={!agentId || suggestionsAnalyzing}>
@@ -688,7 +688,7 @@ export function EvolutionCenterPage() {
                     <p className="text-sm font-medium">安全边界</p>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    自定义 skill 可以走轻量审批；核心 skill、模型配置、工具权限、租户权限、数据库和源码改动必须人工审核并保留回滚记录。
+                    自定义 skill 走自动回归和版本发布；核心 skill、模型配置、工具权限、租户权限、数据库和源码改动只保留候选和回滚记录。
                   </p>
                 </div>
                 <RoadmapList title="已接入和建设中" items={pipelineSteps} />
