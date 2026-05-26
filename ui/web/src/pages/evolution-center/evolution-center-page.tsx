@@ -53,17 +53,17 @@ const pipelineSteps = [
   {
     name: "沙箱回归",
     state: "已接入",
-    detail: "审批前会自动跑回归。支持 Agent 安全回归、核心 skill 冒烟、业务依赖检查、船务清单 golden 输出评分。",
+    detail: "应用前会自动跑回归。支持 Agent 安全回归、核心 skill 冒烟、业务依赖检查、船务清单 golden 输出评分。",
   },
   {
-    name: "审批发布",
+    name: "发布确认",
     state: "部分完成",
     detail: "自定义 skill 可在回归通过后自动发布；核心 skill、模型、工具、源码仍只保留候选和人工确认。",
   },
   {
     name: "审计回滚",
     state: "已接入",
-    detail: "反馈、审批、回归、应用、回滚动作都会进入审计记录；阈值类建议支持按 baseline 回滚。",
+    detail: "反馈、确认、回归、应用、回滚动作都会进入审计记录；阈值类建议支持按 baseline 回滚。",
   },
 ];
 
@@ -79,7 +79,7 @@ const pendingSteps = [
     detail: "船务清单已有 golden 评分基础；还需要补齐标签生成、包装计算、Excel 类型识别等业务回归评分器。",
   },
   {
-    name: "核心 skill 审批链",
+    name: "核心 skill 候选链",
     state: "待开发",
     detail: "核心 skill 只保留候选版本、差异查看、回归结果和人工确认，不进入自动发布链。",
   },
@@ -92,7 +92,7 @@ const pendingSteps = [
 
 const statusText: Record<string, string> = {
   pending: "待审",
-  approved: "已批准",
+  approved: "已确认",
   rejected: "已拒绝",
   applied: "已应用",
   rolled_back: "已回滚",
@@ -182,7 +182,7 @@ function SuggestionCard({
           {isPending && (
             <>
               <Button size="sm" onClick={() => onUpdateStatus(suggestion.id, "approved")}>
-                批准并执行
+                确认并应用
               </Button>
               <Button size="sm" variant="outline" onClick={() => onUpdateStatus(suggestion.id, "rejected")}>
                 拒绝
@@ -266,7 +266,7 @@ function RegressionCard({
           </div>
         </div>
         <CardDescription>
-          审批前会自动跑对应回归；也可以在这里手动执行。业务输出 golden 回归会生成测试输出并记录评分。
+          应用前会自动跑对应回归；也可以在这里手动执行。业务输出 golden 回归会生成测试输出并记录评分。
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -314,13 +314,13 @@ function AuditCard({ events, loading }: { events: EvolutionAuditEvent[]; loading
           <Activity className="h-5 w-5 text-primary" />
           <CardTitle>审计记录</CardTitle>
         </div>
-        <CardDescription>记录反馈、审批、回归测试和回滚动作，方便追溯谁在什么时候改了什么。</CardDescription>
+        <CardDescription>记录反馈、确认、回归测试和回滚动作，方便追溯谁在什么时候改了什么。</CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
           <TableSkeleton rows={5} />
         ) : events.length === 0 ? (
-          <EmptyState icon={Activity} title="暂无审计记录" description="产生反馈、审批或测试后会显示在这里。" />
+          <EmptyState icon={Activity} title="暂无审计记录" description="产生反馈、确认或测试后会显示在这里。" />
         ) : (
           <div className="space-y-2">
             {events.map((event, index) => (
@@ -485,7 +485,7 @@ export function EvolutionCenterPage() {
               <p className="mt-1 text-2xl font-semibold">{pendingCount}</p>
             </div>
             <div className="rounded-lg border p-3">
-              <p className="text-xs text-muted-foreground">已批准/应用</p>
+              <p className="text-xs text-muted-foreground">已确认/应用</p>
               <p className="mt-1 text-2xl font-semibold">{appliedCount}</p>
             </div>
             <div className="rounded-lg border p-3">
@@ -537,7 +537,7 @@ export function EvolutionCenterPage() {
           <TabsList className="flex h-auto w-full flex-wrap justify-start">
             <TabsTrigger value="control">测试与审计</TabsTrigger>
             <TabsTrigger value="signals">指标与反馈</TabsTrigger>
-            <TabsTrigger value="suggestions">建议审批</TabsTrigger>
+            <TabsTrigger value="suggestions">建议处理</TabsTrigger>
             <TabsTrigger value="roadmap">自治路线</TabsTrigger>
           </TabsList>
 
@@ -640,10 +640,10 @@ export function EvolutionCenterPage() {
                   <div>
                     <div className="flex items-center gap-2">
                       <GitBranch className="h-5 w-5 text-primary" />
-                      <CardTitle>进化建议审批</CardTitle>
+                      <CardTitle>进化建议处理</CardTitle>
                     </div>
                     <CardDescription className="mt-1">
-                      自定义 skill 回归通过后可自动发布；核心 skill、模型、工具、数据库和源码级改动只保留候选和人工复核。
+                      自定义 skill 回归通过后可自动发布；核心 skill、模型、工具、数据库和源码级改动只保留候选和人工确认。
                     </CardDescription>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => void analyzeNow()} disabled={!agentId || suggestionsAnalyzing}>
@@ -678,7 +678,7 @@ export function EvolutionCenterPage() {
                   <CardTitle>完整自治进化路线</CardTitle>
                 </div>
                 <CardDescription>
-                  把反馈采集、指标沉淀、建议生成、沙箱回归、审批发布、审计回滚放到同一条路线中，便于判断哪些已完成、哪些还要继续开发。
+                  把反馈采集、指标沉淀、建议生成、沙箱回归、发布确认、审计回滚放到同一条路线中，便于判断哪些已完成、哪些还要继续开发。
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
