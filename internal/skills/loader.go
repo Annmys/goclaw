@@ -27,8 +27,14 @@ import (
 
 // Metadata holds parsed SKILL.md frontmatter.
 type Metadata struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
+	Name        string
+	Description string
+	Slug        string
+	DisplayName string
+	Family      string
+	Canonical   bool
+	Replaces    []string
+	Aliases     []string
 }
 
 // Info describes a discovered skill.
@@ -39,6 +45,11 @@ type Info struct {
 	BaseDir     string `json:"baseDir"` // skill directory (parent of SKILL.md)
 	Source      string `json:"source"`  // "workspace", "global", "builtin"
 	Description string `json:"description"`
+	DisplayName string `json:"displayName,omitempty"`
+	Family      string `json:"family,omitempty"`
+	Canonical   bool   `json:"canonical,omitempty"`
+	Replaces    []string `json:"replaces,omitempty"`
+	Aliases     []string `json:"aliases,omitempty"`
 }
 
 // Loader discovers and loads SKILL.md files from multiple directories.
@@ -149,6 +160,13 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 				if meta.Name != "" {
 					info.Name = meta.Name
 				}
+				if hasMetadataGovernance(meta) {
+					info.DisplayName = meta.DisplayName
+					info.Family = meta.Family
+					info.Canonical = meta.Canonical
+					info.Replaces = append([]string(nil), meta.Replaces...)
+					info.Aliases = append([]string(nil), meta.Aliases...)
+				}
 			}
 			skills = append(skills, info)
 			seen[d.Name()] = true
@@ -191,6 +209,13 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 					info.Description = meta.Description
 					if meta.Name != "" {
 						info.Name = meta.Name
+					}
+					if hasMetadataGovernance(meta) {
+						info.DisplayName = meta.DisplayName
+						info.Family = meta.Family
+						info.Canonical = meta.Canonical
+						info.Replaces = append([]string(nil), meta.Replaces...)
+						info.Aliases = append([]string(nil), meta.Aliases...)
 					}
 				}
 				skills = append(skills, info)
@@ -242,10 +267,25 @@ func (l *Loader) listManagedSkills() []Info {
 			if meta.Name != "" {
 				info.Name = meta.Name
 			}
+			if hasMetadataGovernance(meta) {
+				info.DisplayName = meta.DisplayName
+				info.Family = meta.Family
+				info.Canonical = meta.Canonical
+				info.Replaces = append([]string(nil), meta.Replaces...)
+				info.Aliases = append([]string(nil), meta.Aliases...)
+			}
 		}
 		skills = append(skills, info)
 	}
 	return skills
+}
+
+func hasMetadataGovernance(meta *Metadata) bool {
+	return meta != nil && (strings.TrimSpace(meta.DisplayName) != "" ||
+		strings.TrimSpace(meta.Family) != "" ||
+		meta.Canonical ||
+		len(meta.Replaces) > 0 ||
+		len(meta.Aliases) > 0)
 }
 
 // findLatestVersion finds the highest-numbered version subdirectory for a skill slug.
@@ -397,12 +437,25 @@ func (l *Loader) BuildSummary(ctx context.Context, allowList []string) string {
 	for _, s := range filtered {
 		lines = append(lines, "  <skill>")
 		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapeXML(s.Name)))
+		if s.DisplayName != "" || s.Family != "" {
+			display := s.DisplayName
+			if display == "" {
+				display = s.Name
+			}
+			lines = append(lines, fmt.Sprintf("    <display>%s（%s）</display>", escapeXML(s.Slug), escapeXML(display)))
+		}
 		desc := s.Description
 		if len([]rune(desc)) > skillDescMaxLen {
 			desc = string([]rune(desc)[:skillDescMaxLen]) + "…"
 		}
 		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapeXML(desc)))
 		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapeXML(s.Path)))
+		if s.Family != "" {
+			lines = append(lines, fmt.Sprintf("    <family>%s</family>", escapeXML(s.Family)))
+		}
+		if s.Canonical {
+			lines = append(lines, "    <canonical>true</canonical>")
+		}
 		lines = append(lines, "  </skill>")
 	}
 	lines = append(lines, "</available_skills>")
@@ -492,16 +545,29 @@ func parseMetadata(path string) *Metadata {
 	}
 
 	// Try JSON first
-	var jm Metadata
-	if json.Unmarshal([]byte(fm), &jm) == nil && jm.Name != "" {
-		return &jm
+	var jm map[string]string
+	if json.Unmarshal([]byte(fm), &jm) == nil && jm["name"] != "" {
+		m := metadataFromFields(jm)
+		return &m
 	}
 
 	// Fall back to simple YAML key: value
 	kv := parseSimpleYAML(fm)
-	return &Metadata{
-		Name:        kv["name"],
-		Description: kv["description"],
+	m := metadataFromFields(kv)
+	return &m
+}
+
+func metadataFromFields(fields map[string]string) Metadata {
+	g := GovernanceFromFields(fields)
+	return Metadata{
+		Name:        fields["name"],
+		Description: fields["description"],
+		Slug:        fields["slug"],
+		DisplayName: g.DisplayName,
+		Family:      g.Family,
+		Canonical:   g.Canonical,
+		Replaces:    g.Replaces,
+		Aliases:     g.Aliases,
 	}
 }
 

@@ -79,9 +79,19 @@ func (s *SQLiteSkillStore) BuildSummary(ctx context.Context, allowList []string)
 		result.WriteString("  <skill>\n")
 		result.WriteString(fmt.Sprintf("    <slug>%s</slug>\n", sk.Slug))
 		result.WriteString(fmt.Sprintf("    <name>%s</name>\n", sk.Name))
-		result.WriteString(fmt.Sprintf("    <display>%s（%s）V%d</display>\n", sk.Slug, sk.Name, sk.Version))
+		displayName := sk.Name
+		if sk.DisplayName != "" {
+			displayName = sk.DisplayName
+		}
+		result.WriteString(fmt.Sprintf("    <display>%s（%s）V%d</display>\n", sk.Slug, displayName, sk.Version))
 		result.WriteString(fmt.Sprintf("    <description>%s</description>\n", sk.Description))
 		result.WriteString(fmt.Sprintf("    <location>%s</location>\n", sk.Path))
+		if sk.Family != "" {
+			result.WriteString(fmt.Sprintf("    <family>%s</family>\n", sk.Family))
+		}
+		if sk.Canonical {
+			result.WriteString("    <canonical>true</canonical>\n")
+		}
 		result.WriteString("  </skill>\n")
 	}
 	result.WriteString("</available_skills>")
@@ -92,11 +102,11 @@ func (s *SQLiteSkillStore) GetSkill(ctx context.Context, name string) (*store.Sk
 	var id uuid.UUID
 	var skillName, slug, visibility string
 	var desc *string
-	var tagsJSON []byte
+	var tagsJSON, fmRaw []byte
 	var version int
 	var isSystem bool
 	var filePath *string
-	q := `SELECT id, name, slug, description, visibility, tags, version, is_system, file_path FROM skills
+	q := `SELECT id, name, slug, description, visibility, tags, version, is_system, frontmatter, file_path FROM skills
 		WHERE (slug = ? OR lower(slug) = lower(?) OR name = ?) AND status = 'active'`
 	args := []any{name, name, name}
 	if !store.IsCrossTenant(ctx) {
@@ -109,13 +119,15 @@ func (s *SQLiteSkillStore) GetSkill(ctx context.Context, name string) (*store.Sk
 	}
 	q += " ORDER BY CASE WHEN slug = ? THEN 0 WHEN lower(slug) = lower(?) THEN 1 WHEN name = ? THEN 2 ELSE 3 END LIMIT 1"
 	args = append(args, name, name, name)
-	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&id, &skillName, &slug, &desc, &visibility, &tagsJSON, &version, &isSystem, &filePath); err != nil {
+	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&id, &skillName, &slug, &desc, &visibility, &tagsJSON, &version, &isSystem, &fmRaw, &filePath); err != nil {
 		return nil, false
 	}
 	info := buildSkillInfo(id.String(), skillName, slug, desc, version, s.baseDir, filePath)
 	info.Visibility = visibility
 	scanJSONStringArray(tagsJSON, &info.Tags)
 	info.IsSystem = isSystem
+	info.Author = parseFrontmatterAuthor(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
 	return &info, true
 }
 
@@ -149,11 +161,11 @@ func (s *SQLiteSkillStore) FilterSkills(ctx context.Context, allowList []string)
 func (s *SQLiteSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (store.SkillInfo, bool) {
 	var name, slug, visibility, status string
 	var desc *string
-	var tagsJSON, depsRaw []byte
+	var tagsJSON, depsRaw, fmRaw []byte
 	var version int
 	var isSystem, enabled bool
 	var filePath *string
-	q := `SELECT name, slug, description, visibility, tags, version, is_system, status, enabled, deps, file_path
+	q := `SELECT name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
 		 FROM skills WHERE id = ?`
 	args := []any{id}
 	if !store.IsCrossTenant(ctx) {
@@ -165,7 +177,7 @@ func (s *SQLiteSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (stor
 		args = append(args, tid)
 	}
 	if err := s.db.QueryRowContext(ctx, q, args...).Scan(&name, &slug, &desc, &visibility, &tagsJSON,
-		&version, &isSystem, &status, &enabled, &depsRaw, &filePath); err != nil {
+		&version, &isSystem, &status, &enabled, &depsRaw, &fmRaw, &filePath); err != nil {
 		return store.SkillInfo{}, false
 	}
 	info := buildSkillInfo(id.String(), name, slug, desc, version, s.baseDir, filePath)
@@ -175,6 +187,8 @@ func (s *SQLiteSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (stor
 	info.Status = status
 	info.Enabled = enabled
 	info.MissingDeps = parseDepsColumn(depsRaw)
+	info.Author = parseFrontmatterAuthor(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
 	return info, true
 }
 

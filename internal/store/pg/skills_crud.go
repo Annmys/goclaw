@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -411,6 +412,53 @@ func parseFrontmatterAuthor(raw []byte) string {
 		return ""
 	}
 	return fm["author"]
+}
+
+func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases []string) {
+	if len(raw) == 0 {
+		return "", "", false, nil, nil
+	}
+	var fm map[string]string
+	if err := json.Unmarshal(raw, &fm); err != nil {
+		return "", "", false, nil, nil
+	}
+	displayName = firstNonEmpty(fm["display_name"], fm["display-name"], fm["display"])
+	family = fm["family"]
+	switch strings.ToLower(strings.TrimSpace(fm["canonical"])) {
+	case "1", "true", "yes", "y", "on":
+		canonical = true
+	}
+	replaces = splitCSVFrontmatterList(fm["replaces"])
+	aliases = splitCSVFrontmatterList(fm["aliases"])
+	return
+}
+
+func splitCSVFrontmatterList(v string) []string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	v = strings.Trim(v, "[]")
+	parts := strings.FieldsFunc(v, func(r rune) bool {
+		return r == ',' || r == '\n' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(strings.Trim(p, `"'`))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func marshalFrontmatter(fm map[string]string) []byte {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/nextlevelbuilder/goclaw/internal/skills"
 )
 
 // GenerateSkillDraft creates a SKILL.md template from repeated tool usage data.
@@ -12,6 +14,9 @@ func GenerateSkillDraft(toolName string, callCount int, successRate float64) str
 	return fmt.Sprintf(`---
 name: %s-patterns
 description: Skill auto-generated from repeated %s tool usage (%d calls/week, %.0f%% success)
+family: %s
+display_name: %s Patterns
+canonical: true
 ---
 
 # %s Usage Patterns
@@ -29,7 +34,7 @@ Provide specific instructions for using %s effectively based on observed pattern
 ## Constraints
 
 List any constraints or guardrails for this tool usage.
-`, toolName, toolName, callCount, successRate*100, toolName, toolName)
+`, toolName, toolName, callCount, successRate*100, skills.Slugify(toolName), toolName, toolName, toolName)
 }
 
 // FeedbackInsight captures one user feedback item for an auto-evolving skill draft.
@@ -56,6 +61,9 @@ func GenerateFeedbackSkillDraft(agentKey, displayName, slug string, items []Feed
 name: %s 反馈记忆
 description: Auto-generated feedback memory skill for %s (%s)
 slug: %s
+family: %s
+display_name: %s 反馈记忆
+canonical: true
 ---
 
 # %s 反馈记忆
@@ -70,7 +78,7 @@ This skill is maintained automatically from user feedback. Use the latest correc
 
 ## Recent Feedback
 
-`, title, title, agentKey, slug, title)
+`, title, title, agentKey, slug, skills.Slugify(slug), title, title)
 
 	if len(items) == 0 {
 		b.WriteString("- No feedback has been recorded yet.\n")

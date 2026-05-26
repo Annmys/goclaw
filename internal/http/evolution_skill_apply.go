@@ -50,6 +50,12 @@ func (h *EvolutionHandler) applySkillDraft(ctx context.Context, sg store.Evoluti
 	if slug == "" {
 		slug = skills.Slugify(name)
 	}
+	if strings.TrimSpace(frontmatter["family"]) == "" {
+		return fmt.Errorf("skill draft missing 'family' in frontmatter")
+	}
+	if existing := h.findCanonicalSkillByFamily(ctx, draft, slug); existing != nil {
+		return fmt.Errorf("skill family already has canonical skill %q; create a skill_repair suggestion for the canonical skill instead of adding a parallel skill", existing.Slug)
+	}
 
 	// Resolve tenant-scoped destination directory.
 	tenantID := store.TenantIDFromContext(ctx)
@@ -110,6 +116,36 @@ func (h *EvolutionHandler) applySkillDraft(ctx context.Context, sg store.Evoluti
 	}
 
 	slog.Info("evolution.skill_apply: created", "skill_id", id, "slug", slug, "version", version, "suggestion", sg.ID)
+	return nil
+}
+
+func (h *EvolutionHandler) findCanonicalSkillByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
+	if h.skillStore == nil {
+		return nil
+	}
+	meta := skills.ParseSkillGovernance(content)
+	family := meta.FamilyKey(slug)
+	if family == "" {
+		return nil
+	}
+	for _, sk := range h.skillStore.ListSkills(ctx) {
+		if sk.Status != "active" && sk.Status != "archived" {
+			continue
+		}
+		if sk.Slug == slug {
+			continue
+		}
+		skFamily := strings.TrimSpace(sk.Family)
+		if skFamily == "" {
+			skFamily = skills.Slugify(sk.Name)
+		} else {
+			skFamily = skills.Slugify(skFamily)
+		}
+		if skFamily == family {
+			skCopy := sk
+			return &skCopy
+		}
+	}
 	return nil
 }
 

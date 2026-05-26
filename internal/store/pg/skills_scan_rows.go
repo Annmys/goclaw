@@ -27,7 +27,8 @@ type skillInfoRow struct {
 	FilePath   *string        `db:"file_path"`
 }
 
-// skillInfoRowWithFrontmatter extends skillInfoRow with the frontmatter column.
+// skillInfoRowWithFrontmatter is kept for callers that explicitly want the
+// frontmatter-enabled row shape. The embedded row already carries FmRaw.
 type skillInfoRowWithFrontmatter struct {
 	skillInfoRow
 	FmRaw []byte `db:"frontmatter"`
@@ -49,6 +50,7 @@ func (r *skillInfoRow) toSkillInfo(baseDir string) store.SkillInfo {
 func (r *skillInfoRowWithFrontmatter) toSkillInfo(baseDir string) store.SkillInfo {
 	info := r.skillInfoRow.toSkillInfo(baseDir)
 	info.Author = parseFrontmatterAuthor(r.FmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(r.FmRaw)
 	return info
 }
 
@@ -65,6 +67,7 @@ type skillEmbeddingSearchRow struct {
 	Name     string  `db:"name"`
 	Slug     string  `db:"slug"`
 	Desc     string  `db:"description"`
+	FmRaw    []byte  `db:"frontmatter"`
 	Version  int     `db:"version"`
 	FilePath *string `db:"file_path"`
 	Score    float64 `db:"score"`

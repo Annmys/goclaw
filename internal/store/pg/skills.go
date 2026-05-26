@@ -105,7 +105,7 @@ func (s *PGSkillStore) ListAllSkills(ctx context.Context) []store.SkillInfo {
 	}
 	var scanned []skillInfoRow
 	if err := pkgSqlxDB.SelectContext(ctx, &scanned,
-		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, file_path
+		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
 		 FROM skills WHERE enabled = true AND status != 'deleted' AND (is_system = true OR tenant_id = $1)
 		 ORDER BY name`, tid); err != nil {
 		return nil
@@ -118,7 +118,7 @@ func (s *PGSkillStore) ListAllSkills(ctx context.Context) []store.SkillInfo {
 func (s *PGSkillStore) ListAllSystemSkills(ctx context.Context) []store.SkillInfo {
 	var scanned []skillInfoRow
 	if err := pkgSqlxDB.SelectContext(ctx, &scanned,
-		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, file_path
+		`SELECT id, name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
 		 FROM skills WHERE is_system = true AND enabled = true AND status != 'deleted'
 		 ORDER BY name`); err != nil {
 		return nil

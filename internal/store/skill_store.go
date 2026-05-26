@@ -11,6 +11,7 @@ type SkillInfo struct {
 	ID          string   `json:"id,omitempty" db:"id"` // DB UUID
 	Name        string   `json:"name" db:"name"`
 	Slug        string   `json:"slug" db:"slug"`
+	DisplayName string   `json:"display_name,omitempty" db:"-"`
 	Path        string   `json:"path" db:"path"`
 	BaseDir     string   `json:"baseDir" db:"-"`
 	Source      string   `json:"source" db:"-"`
@@ -23,15 +24,22 @@ type SkillInfo struct {
 	Enabled     bool     `json:"enabled" db:"enabled"`
 	Author      string   `json:"author,omitempty" db:"author"`
 	MissingDeps []string `json:"missing_deps,omitempty" db:"missing_deps"`
+	Family      string   `json:"family,omitempty" db:"-"`
+	Canonical   bool     `json:"canonical,omitempty" db:"-"`
+	Replaces    []string `json:"replaces,omitempty" db:"-"`
+	Aliases     []string `json:"aliases,omitempty" db:"-"`
 }
 
 // SkillSearchResult is a scored skill returned from embedding search.
 type SkillSearchResult struct {
 	Name        string  `json:"name" db:"name"`
 	Slug        string  `json:"slug" db:"slug"`
+	DisplayName string  `json:"display_name,omitempty" db:"-"`
 	Description string  `json:"description" db:"description"`
 	Path        string  `json:"path" db:"path"`
 	Score       float64 `json:"score" db:"score"`
+	Family      string  `json:"family,omitempty" db:"-"`
+	Canonical   bool    `json:"canonical,omitempty" db:"-"`
 }
 
 // SkillStore manages skill discovery and loading.

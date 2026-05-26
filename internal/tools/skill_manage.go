@@ -150,6 +150,12 @@ func (t *SkillManageTool) executeCreate(ctx context.Context, args map[string]any
 	if t.skills.IsSystemSkill(slug) {
 		return ErrorResult(fmt.Sprintf("cannot manage system skill %q", slug))
 	}
+	if strings.TrimSpace(frontmatter["family"]) == "" {
+		return ErrorResult("SKILL.md frontmatter must include 'family' to prevent unmanaged parallel skills. For a new business workflow, set family to the stable workflow slug and canonical: true.")
+	}
+	if existing := t.findCanonicalByFamily(ctx, content, slug); existing != nil {
+		return ErrorResult(fmt.Sprintf("skill family already has canonical skill %q (%s). Patch that skill instead of creating a parallel one", existing.Slug, existing.Name))
+	}
 
 	// Version + destination (tenant-scoped)
 	version := t.skills.GetNextVersion(ctx, slug)
@@ -231,6 +237,41 @@ func (t *SkillManageTool) executeCreate(ctx context.Context, args map[string]any
 		result += fmt.Sprintf("\n\n⚠ Missing dependencies: %s", depsWarning)
 	}
 	return NewResult(result)
+}
+
+func (t *SkillManageTool) findCanonicalByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
+	meta := skills.ParseSkillGovernance(content)
+	family := meta.FamilyKey(slug)
+	if family == "" {
+		return nil
+	}
+	for _, sk := range t.skills.ListSkills(ctx) {
+		if sk.Status != "active" && sk.Status != "archived" {
+			continue
+		}
+		if sk.Slug == slug {
+			continue
+		}
+		skFamily := skillFamilyKey(sk)
+		if skFamily == family {
+			skCopy := sk
+			return &skCopy
+		}
+	}
+	return nil
+}
+
+func skillFamilyKey(sk store.SkillInfo) string {
+	if strings.TrimSpace(sk.Family) != "" {
+		return skills.Slugify(sk.Family)
+	}
+	if strings.TrimSpace(sk.DisplayName) != "" {
+		return skills.Slugify(sk.DisplayName)
+	}
+	if strings.TrimSpace(sk.Name) != "" {
+		return skills.Slugify(sk.Name)
+	}
+	return skills.Slugify(sk.Slug)
 }
 
 // executePatch applies a find/replace to the latest version and saves as a new version.

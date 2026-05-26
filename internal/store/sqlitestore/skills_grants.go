@@ -162,7 +162,7 @@ func (s *SQLiteSkillStore) ListAccessible(ctx context.Context, agentID uuid.UUID
 	_ = tClause
 
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT DISTINCT s.name, s.slug, s.description, s.version, s.file_path FROM skills s
+		`SELECT DISTINCT s.name, s.slug, s.description, s.version, s.frontmatter, s.file_path FROM skills s
 		LEFT JOIN skill_agent_grants sag ON s.id = sag.skill_id AND sag.agent_id = ?
 		LEFT JOIN skill_user_grants sug ON s.id = sug.skill_id AND (sug.user_id = ? OR sug.user_id = ?)`+stcJoin+`
 		WHERE s.status = 'active'`+tenantCond+stcFilter+` AND (
@@ -184,12 +184,16 @@ func (s *SQLiteSkillStore) ListAccessible(ctx context.Context, agentID uuid.UUID
 		var name, slug string
 		var desc *string
 		var version int
+		var fmRaw []byte
 		var filePath *string
-		if err := rows.Scan(&name, &slug, &desc, &version, &filePath); err != nil {
+		if err := rows.Scan(&name, &slug, &desc, &version, &fmRaw, &filePath); err != nil {
 			slog.Warn("skill_grants: scan error in ListAccessible", "error", err)
 			continue
 		}
-		result = append(result, buildSkillInfo("", name, slug, desc, version, s.baseDir, filePath))
+		info := buildSkillInfo("", name, slug, desc, version, s.baseDir, filePath)
+		info.Author = parseFrontmatterAuthor(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+		result = append(result, info)
 	}
 	return result, rows.Err()
 }
