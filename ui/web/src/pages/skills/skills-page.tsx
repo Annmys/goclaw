@@ -210,6 +210,7 @@ export function SkillsPage() {
           getSkillVersions={getSkillVersions}
           getSkillFiles={getSkillFiles}
           getSkillFileContent={getSkillFileContent}
+          updateSkill={updateSkill}
         />
       )}
 

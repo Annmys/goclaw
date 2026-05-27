@@ -1,12 +1,18 @@
 export interface SkillInfo {
   id?: string;
   name: string;
+  display_name?: string;
   slug?: string;
   description: string;
   source: string;
   visibility?: string;
   tags?: string[];
   version?: number;
+  family?: string;
+  canonical?: boolean;
+  replaces?: string[];
+  aliases?: string[];
+  regression_prefixes?: string[];
   is_system?: boolean;
   status?: string;
   enabled?: boolean;

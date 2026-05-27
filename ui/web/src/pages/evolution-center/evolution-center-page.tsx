@@ -70,23 +70,46 @@ const pipelineSteps = [
 const pendingSteps = [
   {
     name: "候选版本生成",
-    state: "待开发",
-    detail: "把纠错反馈自动整理成候选 skill 版本或候选规则包，自定义 skill 可直接进入自动发布链。",
+    state: "已接入",
+    detail: "纠错反馈会优先定位到同一 skill family，生成候选修复或候选规则包，避免同类业务重复创建新 skill。",
   },
   {
     name: "业务评分器扩展",
     state: "进行中",
-    detail: "船务清单已有 golden 评分基础；还需要补齐标签生成、包装计算、Excel 类型识别等业务回归评分器。",
+    detail: "评分器已支持 metadata 驱动。新业务只要在 skill 元数据声明 family、aliases、regression_prefixes，就能接入质量评分。",
   },
   {
     name: "核心 skill 候选链",
-    state: "待开发",
+    state: "部分完成",
     detail: "核心 skill 只保留候选版本、差异查看、回归结果和人工确认，不进入自动发布链。",
   },
   {
     name: "自动回滚策略",
     state: "待开发",
     detail: "后续根据失败率、纠错率、业务评分下降触发自动回滚；自定义 skill 可自动回退，核心 skill 只出建议。",
+  },
+];
+
+const governanceSteps = [
+  {
+    name: "family 归属",
+    state: "已接入",
+    detail: "同一业务能力必须归入同一个 family。反馈、评分、建议和回归都优先围绕 family 聚合，避免 shipping/epl/ci-to-epl 这类重复分裂。",
+  },
+  {
+    name: "canonical 主版本",
+    state: "已接入",
+    detail: "每个 family 只能有一个主执行 skill。非主版本用于历史兼容、候选验证或清理，不再抢占同类任务。",
+  },
+  {
+    name: "aliases 别名识别",
+    state: "已接入",
+    detail: "中文名、历史名、用户口语化叫法进入 aliases。用户说中文 skill 名时，系统仍能定位到正确内部 skill。",
+  },
+  {
+    name: "regression_prefixes 回归入口",
+    state: "已接入",
+    detail: "新业务不再写死评分逻辑。通过 regression_prefixes 声明回归匹配前缀，后续指标和自动修复可以按业务扩展。",
   },
 ];
 
@@ -476,7 +499,7 @@ export function EvolutionCenterPage() {
               <CardTitle>自治进化闭环</CardTitle>
             </div>
               <CardDescription>
-                反馈采集、指标沉淀、建议生成、沙箱回归、发布和审计回滚已经整合到同一条路线中。自定义 skill 可自动闭环，核心 skill 只保留候选。
+                反馈采集、指标沉淀、建议生成、沙箱回归、发布和审计回滚已经整合到同一条路线中。自定义 skill 在同一 family 内自动闭环，核心 skill 只保留候选。
               </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-4">
@@ -643,7 +666,7 @@ export function EvolutionCenterPage() {
                       <CardTitle>进化建议处理</CardTitle>
                     </div>
                     <CardDescription className="mt-1">
-                      自定义 skill 回归通过后可自动发布；核心 skill、模型、工具、数据库和源码级改动只保留候选和人工确认。
+                      自定义 skill 回归通过后可在所属 family 内自动发布新版本；核心 skill、模型、工具、数据库和源码级改动只保留候选和人工确认。
                     </CardDescription>
                   </div>
                   <Button size="sm" variant="outline" onClick={() => void analyzeNow()} disabled={!agentId || suggestionsAnalyzing}>
@@ -688,9 +711,10 @@ export function EvolutionCenterPage() {
                     <p className="text-sm font-medium">安全边界</p>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    自定义 skill 走自动回归和版本发布；核心 skill、模型配置、工具权限、租户权限、数据库和源码改动只保留候选和回滚记录。
+                    自定义 skill 走同 family 自动回归、版本发布和必要回滚；核心 skill、模型配置、工具权限、租户权限、数据库和源码改动只保留候选和回滚记录。
                   </p>
                 </div>
+                <RoadmapList title="Skill 家族治理" items={governanceSteps} />
                 <RoadmapList title="已接入和建设中" items={pipelineSteps} />
                 <RoadmapList title="还需要继续开发" items={pendingSteps} />
               </CardContent>
