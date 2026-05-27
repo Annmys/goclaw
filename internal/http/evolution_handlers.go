@@ -352,9 +352,15 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 			return
 
 		case store.SuggestSkillAdd:
-			if err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy); err != nil {
+			result, err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy)
+			if err != nil {
 				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+				return
+			}
+			if action, err := h.postflightSkillAddApplication(r, agentID, *existing, result, reviewedBy); err != nil {
+				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
+				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "action": action})
 				return
 			}
 			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "skill draft created")
