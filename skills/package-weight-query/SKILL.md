@@ -1,6 +1,10 @@
 ---
 name: 产品包装重量查询
 slug: package-weight-query
+family: package-weight-query
+display_name: 产品包装重量查询
+aliases: package-weight-query, 产品包装重量查询, 产品包装重量, 重量表
+regression_prefixes: package_weight_
 description: 查询产品包装重量表。用于用户询问产品编码、材料码、系统编码、产品型号、规格型号、材料名称、包装重量、单个重量、外箱尺寸、装箱数量或包装类型时。优先使用产品包装重量表.sqlite 精确查询，不要凭记忆回答。
 ---
 

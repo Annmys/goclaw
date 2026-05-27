@@ -192,7 +192,7 @@ func (s *SQLiteSkillStore) ListAccessible(ctx context.Context, agentID uuid.UUID
 		}
 		info := buildSkillInfo("", name, slug, desc, version, s.baseDir, filePath)
 		info.Author = parseFrontmatterAuthor(fmRaw)
-		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 		result = append(result, info)
 	}
 	return result, rows.Err()

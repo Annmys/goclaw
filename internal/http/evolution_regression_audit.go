@@ -219,35 +219,64 @@ func (h *EvolutionHandler) addCoreSkillSmokeCases(r *http.Request, addCase func(
 		addCase("core_skill_reader", "failed", "skill store is not configured")
 		return
 	}
-	required := []string{
-		"excel-type-identify",
-		"shipping-doc-processing",
-		"flow-order-query",
-		"package-weight-query",
-		"label-generate",
-		"package-calculation",
+	all := h.skillReader.ListSkills(r.Context())
+	if len(all) == 0 {
+		addCase("core_skill_catalog", "failed", "no skills available for smoke regression")
+		return
 	}
-	for _, slug := range required {
-		info, ok := h.skillReader.GetSkill(r.Context(), slug)
-		if !ok || info == nil {
-			addCase("core_skill_"+slug, "failed", "skill is not active or not visible in this tenant")
+	seen := make(map[string]struct{})
+	for _, info := range all {
+		slug := strings.TrimSpace(info.Slug)
+		if slug == "" {
 			continue
 		}
-		if info.Path == "" {
-			addCase("core_skill_"+slug, "failed", fmt.Sprintf("skill %s has empty file path", slug))
+		if _, ok := seen[slug]; ok {
 			continue
 		}
-		stat, err := os.Stat(info.Path)
-		if err != nil {
-			addCase("core_skill_"+slug, "failed", fmt.Sprintf("SKILL.md not readable: %v", err))
+		seen[slug] = struct{}{}
+		if !shouldIncludeInCoreSkillSmoke(info) {
 			continue
 		}
-		if stat.Size() == 0 {
-			addCase("core_skill_"+slug, "failed", "SKILL.md is empty")
-			continue
-		}
-		addCase("core_skill_"+slug, "passed", fmt.Sprintf("%s v%d is readable", info.Name, info.Version))
+		h.addSkillFileSmokeCase(r, slug, addCase)
 	}
+}
+
+func shouldIncludeInCoreSkillSmoke(info store.SkillInfo) bool {
+	if info.Status != "active" && info.Status != "archived" {
+		return false
+	}
+	if strings.TrimSpace(info.Path) == "" {
+		return false
+	}
+	if strings.TrimSpace(info.Slug) == "" {
+		return false
+	}
+	if !info.IsSystem && strings.TrimSpace(info.Family) == "" {
+		return false
+	}
+	return true
+}
+
+func (h *EvolutionHandler) addSkillFileSmokeCase(r *http.Request, slug string, addCase func(name, status, message string)) {
+	info, ok := h.skillReader.GetSkill(r.Context(), slug)
+	if !ok || info == nil {
+		addCase("core_skill_"+slug, "failed", "skill is not active or not visible in this tenant")
+		return
+	}
+	if info.Path == "" {
+		addCase("core_skill_"+slug, "failed", fmt.Sprintf("skill %s has empty file path", slug))
+		return
+	}
+	stat, err := os.Stat(info.Path)
+	if err != nil {
+		addCase("core_skill_"+slug, "failed", fmt.Sprintf("SKILL.md not readable: %v", err))
+		return
+	}
+	if stat.Size() == 0 {
+		addCase("core_skill_"+slug, "failed", "SKILL.md is empty")
+		return
+	}
+	addCase("core_skill_"+slug, "passed", fmt.Sprintf("%s v%d is readable", info.Name, info.Version))
 }
 
 func (h *EvolutionHandler) addBusinessWorkflowSmokeCases(addCase func(name, status, message string)) {

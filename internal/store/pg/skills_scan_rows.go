@@ -50,7 +50,7 @@ func (r *skillInfoRow) toSkillInfo(baseDir string) store.SkillInfo {
 func (r *skillInfoRowWithFrontmatter) toSkillInfo(baseDir string) store.SkillInfo {
 	info := r.skillInfoRow.toSkillInfo(baseDir)
 	info.Author = parseFrontmatterAuthor(r.FmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(r.FmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(r.FmRaw)
 	return info
 }
 

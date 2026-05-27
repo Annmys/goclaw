@@ -1,6 +1,10 @@
 ---
 name: excel类型识别
 slug: excel-type-identify
+family: excel-type-identify
+display_name: excel类型识别
+aliases: excel-type-identify, excel类型识别, Excel 类型识别, 文件类型识别
+regression_prefixes: excel_type_, excel_detect_
 description: 识别用户上传的 Excel 文件属于什么业务类型，并判断下一步应该交给哪个专门的核心 skill 或处理流程。用于 .xls、.xlsx、.csv 文件的首轮分流，不直接执行复杂业务补全。遇到船务清单时，只负责识别并移交给核心 skill 船务清单处理，不在本 skill 内直接补全 EPL/PL。
 ---
 

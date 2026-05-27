@@ -30,6 +30,7 @@ type AnalysisRule interface {
 type SuggestionEngine struct {
 	metrics     store.EvolutionMetricsStore
 	suggestions store.EvolutionSuggestionStore
+	skillStore  store.SkillStore
 	rules       []AnalysisRule
 }
 
@@ -45,6 +46,15 @@ func NewSuggestionEngine(metrics store.EvolutionMetricsStore, suggestions store.
 			&RepeatedToolRule{},
 		},
 	}
+}
+
+// WithSkillStore lets the engine attribute feedback/regression signals to the
+// current skill catalog instead of relying on static business names.
+func (e *SuggestionEngine) WithSkillStore(skillStore store.SkillStore) *SuggestionEngine {
+	if e != nil {
+		e.skillStore = skillStore
+	}
+	return e
 }
 
 // dedupKey uniquely identifies a suggestion by type + metric key (e.g., tool name or source).
@@ -93,7 +103,7 @@ func (e *SuggestionEngine) Analyze(ctx context.Context, agentID uuid.UUID) ([]st
 		RetrievalAggs: retrievalAggs,
 		Since:         since,
 	}
-	skillScores, err := BuildSkillQualityScores(ctx, e.metrics, agentID, since, toolAggs)
+	skillScores, err := BuildSkillQualityScores(ctx, e.metrics, e.skillStore, agentID, since, toolAggs)
 	if err != nil {
 		return nil, err
 	}

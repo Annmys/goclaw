@@ -156,7 +156,7 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 		if retrievalAggs == nil {
 			retrievalAggs = []store.RetrievalAggregate{}
 		}
-		skillScores, err := agent.BuildSkillQualityScores(ctx, h.metrics, agentID, since, toolAggs)
+		skillScores, err := agent.BuildSkillQualityScores(ctx, h.metrics, h.skillReader, agentID, since, toolAggs)
 		if err != nil {
 			slog.Warn("evolution.skill_quality_scores failed", "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})

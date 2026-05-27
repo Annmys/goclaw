@@ -27,27 +27,28 @@ import (
 
 // Metadata holds parsed SKILL.md frontmatter.
 type Metadata struct {
-	Name        string
-	Description string
-	Slug        string
-	DisplayName string
-	Family      string
-	Canonical   bool
-	Replaces    []string
-	Aliases     []string
+	Name               string
+	Description        string
+	Slug               string
+	DisplayName        string
+	Family             string
+	Canonical          bool
+	Replaces           []string
+	Aliases            []string
+	RegressionPrefixes []string
 }
 
 // Info describes a discovered skill.
 type Info struct {
-	Name        string `json:"name"`
-	Slug        string `json:"slug"`    // directory name (unique identifier)
-	Path        string `json:"path"`    // absolute path to SKILL.md
-	BaseDir     string `json:"baseDir"` // skill directory (parent of SKILL.md)
-	Source      string `json:"source"`  // "workspace", "global", "builtin"
-	Description string `json:"description"`
-	DisplayName string `json:"displayName,omitempty"`
-	Family      string `json:"family,omitempty"`
-	Canonical   bool   `json:"canonical,omitempty"`
+	Name        string   `json:"name"`
+	Slug        string   `json:"slug"`    // directory name (unique identifier)
+	Path        string   `json:"path"`    // absolute path to SKILL.md
+	BaseDir     string   `json:"baseDir"` // skill directory (parent of SKILL.md)
+	Source      string   `json:"source"`  // "workspace", "global", "builtin"
+	Description string   `json:"description"`
+	DisplayName string   `json:"displayName,omitempty"`
+	Family      string   `json:"family,omitempty"`
+	Canonical   bool     `json:"canonical,omitempty"`
 	Replaces    []string `json:"replaces,omitempty"`
 	Aliases     []string `json:"aliases,omitempty"`
 }
@@ -560,14 +561,15 @@ func parseMetadata(path string) *Metadata {
 func metadataFromFields(fields map[string]string) Metadata {
 	g := GovernanceFromFields(fields)
 	return Metadata{
-		Name:        fields["name"],
-		Description: fields["description"],
-		Slug:        fields["slug"],
-		DisplayName: g.DisplayName,
-		Family:      g.Family,
-		Canonical:   g.Canonical,
-		Replaces:    g.Replaces,
-		Aliases:     g.Aliases,
+		Name:               fields["name"],
+		Description:        fields["description"],
+		Slug:               fields["slug"],
+		DisplayName:        g.DisplayName,
+		Family:             g.Family,
+		Canonical:          g.Canonical,
+		Replaces:           g.Replaces,
+		Aliases:            g.Aliases,
+		RegressionPrefixes: g.RegressionPrefixes,
 	}
 }
 
