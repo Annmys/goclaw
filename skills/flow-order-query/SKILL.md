@@ -1,6 +1,10 @@
 ---
 name: 流转单查询
 slug: flow-order-query
+family: flow-order-query
+display_name: 流转单查询
+aliases: flow-order-query, 流转单查询, 流转单
+regression_prefixes: flow_order_
 description: 查询包装流转单订单索引。用于用户询问 XS 订单号对应的流转单位置、sheet、外箱规格、外箱数量、EPL/PL 应填 C/N 或 Dimension，或需要根据订单号补全船务清单包装信息时。优先使用 sqlite 精确查询，不要凭记忆回答。
 ---
 

@@ -415,13 +415,13 @@ func parseFrontmatterAuthor(raw []byte) string {
 	return fm["author"]
 }
 
-func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases []string) {
+func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases, regressionPrefixes []string) {
 	if len(raw) == 0 {
-		return "", "", false, nil, nil
+		return "", "", false, nil, nil, nil
 	}
 	var fm map[string]string
 	if err := json.Unmarshal(raw, &fm); err != nil {
-		return "", "", false, nil, nil
+		return "", "", false, nil, nil, nil
 	}
 	displayName = firstNonEmpty(fm["display_name"], fm["display-name"], fm["display"])
 	family = fm["family"]
@@ -431,6 +431,7 @@ func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonic
 	}
 	replaces = splitCSVFrontmatterList(fm["replaces"])
 	aliases = splitCSVFrontmatterList(fm["aliases"])
+	regressionPrefixes = splitCSVFrontmatterList(firstNonEmpty(fm["regression_prefixes"], fm["regression-prefixes"]))
 	return
 }
 

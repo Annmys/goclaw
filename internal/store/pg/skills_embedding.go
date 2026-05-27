@@ -53,7 +53,7 @@ func (s *PGSkillStore) SearchByEmbedding(ctx context.Context, embedding []float3
 			Description: row.Desc,
 			Score:       row.Score,
 		}
-		r.DisplayName, r.Family, r.Canonical, _, _ = parseFrontmatterGovernance(row.FmRaw)
+		r.DisplayName, r.Family, r.Canonical, _, _, _ = parseFrontmatterGovernance(row.FmRaw)
 		// Use DB file_path when available; fall back to baseDir construction.
 		if row.FilePath != nil && *row.FilePath != "" {
 			r.Path = *row.FilePath + "/SKILL.md"
@@ -64,7 +64,6 @@ func (s *PGSkillStore) SearchByEmbedding(ctx context.Context, embedding []float3
 	}
 	return results, nil
 }
-
 
 func buildSkillEmbeddingTenantCond(scope string) string {
 	if scope == "" {

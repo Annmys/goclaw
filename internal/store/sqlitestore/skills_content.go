@@ -127,7 +127,7 @@ func (s *SQLiteSkillStore) GetSkill(ctx context.Context, name string) (*store.Sk
 	scanJSONStringArray(tagsJSON, &info.Tags)
 	info.IsSystem = isSystem
 	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 	return &info, true
 }
 
@@ -188,7 +188,7 @@ func (s *SQLiteSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (stor
 	info.Enabled = enabled
 	info.MissingDeps = parseDepsColumn(depsRaw)
 	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 	return info, true
 }
 

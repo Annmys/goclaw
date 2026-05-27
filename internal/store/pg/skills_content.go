@@ -132,7 +132,7 @@ func (s *PGSkillStore) GetSkill(ctx context.Context, name string) (*store.SkillI
 	info.Tags = tags
 	info.IsSystem = isSystem
 	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 	return &info, true
 }
 
@@ -197,7 +197,7 @@ func (s *PGSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (store.Sk
 	info.Enabled = enabled
 	info.MissingDeps = parseDepsColumn(depsRaw)
 	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 	return info, true
 }
 

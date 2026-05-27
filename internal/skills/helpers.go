@@ -31,14 +31,15 @@ func ParseSkillFrontmatter(content string) (name, description, slug string, allF
 // GovernanceMetadata describes how a skill participates in a business skill family.
 // Explicit frontmatter fields keep this tenant configurable without a schema migration.
 type GovernanceMetadata struct {
-	Name        string
-	Description string
-	Slug        string
-	DisplayName string
-	Family      string
-	Canonical   bool
-	Replaces    []string
-	Aliases     []string
+	Name               string
+	Description        string
+	Slug               string
+	DisplayName        string
+	Family             string
+	Canonical          bool
+	Replaces           []string
+	Aliases            []string
+	RegressionPrefixes []string
 }
 
 // ParseSkillGovernance extracts optional skill governance fields from SKILL.md frontmatter.
@@ -53,14 +54,15 @@ func GovernanceFromFields(fields map[string]string) GovernanceMetadata {
 		fields = map[string]string{}
 	}
 	return GovernanceMetadata{
-		Name:        fields["name"],
-		Description: fields["description"],
-		Slug:        fields["slug"],
-		DisplayName: firstNonEmpty(fields["display_name"], fields["display-name"], fields["display"]),
-		Family:      fields["family"],
-		Canonical:   parseFrontmatterBool(fields["canonical"]),
-		Replaces:    splitFrontmatterList(fields["replaces"]),
-		Aliases:     splitFrontmatterList(fields["aliases"]),
+		Name:               fields["name"],
+		Description:        fields["description"],
+		Slug:               fields["slug"],
+		DisplayName:        firstNonEmpty(fields["display_name"], fields["display-name"], fields["display"]),
+		Family:             fields["family"],
+		Canonical:          parseFrontmatterBool(fields["canonical"]),
+		Replaces:           splitFrontmatterList(fields["replaces"]),
+		Aliases:            splitFrontmatterList(fields["aliases"]),
+		RegressionPrefixes: splitFrontmatterList(firstNonEmpty(fields["regression_prefixes"], fields["regression-prefixes"])),
 	}
 }
 
@@ -92,6 +94,9 @@ func InjectGovernanceFields(fields map[string]string, meta GovernanceMetadata) m
 	}
 	if len(meta.Aliases) > 0 {
 		fields["aliases"] = strings.Join(meta.Aliases, ", ")
+	}
+	if len(meta.RegressionPrefixes) > 0 {
+		fields["regression_prefixes"] = strings.Join(meta.RegressionPrefixes, ", ")
 	}
 	return fields
 }

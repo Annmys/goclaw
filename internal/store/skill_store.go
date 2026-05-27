@@ -8,26 +8,27 @@ import (
 
 // SkillInfo describes a discovered skill.
 type SkillInfo struct {
-	ID          string   `json:"id,omitempty" db:"id"` // DB UUID
-	Name        string   `json:"name" db:"name"`
-	Slug        string   `json:"slug" db:"slug"`
-	DisplayName string   `json:"display_name,omitempty" db:"-"`
-	Path        string   `json:"path" db:"path"`
-	BaseDir     string   `json:"baseDir" db:"-"`
-	Source      string   `json:"source" db:"-"`
-	Description string   `json:"description" db:"description"`
-	Visibility  string   `json:"visibility,omitempty" db:"visibility"`
-	Tags        []string `json:"tags,omitempty" db:"tags"`
-	Version     int      `json:"version,omitempty" db:"version"`
-	IsSystem    bool     `json:"is_system,omitempty" db:"is_system"`
-	Status      string   `json:"status,omitempty" db:"status"`
-	Enabled     bool     `json:"enabled" db:"enabled"`
-	Author      string   `json:"author,omitempty" db:"author"`
-	MissingDeps []string `json:"missing_deps,omitempty" db:"missing_deps"`
-	Family      string   `json:"family,omitempty" db:"-"`
-	Canonical   bool     `json:"canonical,omitempty" db:"-"`
-	Replaces    []string `json:"replaces,omitempty" db:"-"`
-	Aliases     []string `json:"aliases,omitempty" db:"-"`
+	ID                 string   `json:"id,omitempty" db:"id"` // DB UUID
+	Name               string   `json:"name" db:"name"`
+	Slug               string   `json:"slug" db:"slug"`
+	DisplayName        string   `json:"display_name,omitempty" db:"-"`
+	Path               string   `json:"path" db:"path"`
+	BaseDir            string   `json:"baseDir" db:"-"`
+	Source             string   `json:"source" db:"-"`
+	Description        string   `json:"description" db:"description"`
+	Visibility         string   `json:"visibility,omitempty" db:"visibility"`
+	Tags               []string `json:"tags,omitempty" db:"tags"`
+	Version            int      `json:"version,omitempty" db:"version"`
+	IsSystem           bool     `json:"is_system,omitempty" db:"is_system"`
+	Status             string   `json:"status,omitempty" db:"status"`
+	Enabled            bool     `json:"enabled" db:"enabled"`
+	Author             string   `json:"author,omitempty" db:"author"`
+	MissingDeps        []string `json:"missing_deps,omitempty" db:"missing_deps"`
+	Family             string   `json:"family,omitempty" db:"-"`
+	Canonical          bool     `json:"canonical,omitempty" db:"-"`
+	Replaces           []string `json:"replaces,omitempty" db:"-"`
+	Aliases            []string `json:"aliases,omitempty" db:"-"`
+	RegressionPrefixes []string `json:"regression_prefixes,omitempty" db:"-"`
 }
 
 // SkillSearchResult is a scored skill returned from embedding search.

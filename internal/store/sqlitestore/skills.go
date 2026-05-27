@@ -102,7 +102,7 @@ func (s *SQLiteSkillStore) ListSkills(ctx context.Context) []store.SkillInfo {
 		info.Enabled = enabled
 		info.MissingDeps = parseDepsColumn(depsRaw)
 		info.Author = parseFrontmatterAuthor(fmRaw)
-		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 		result = append(result, info)
 	}
 	if err := rows.Err(); err != nil {
@@ -168,7 +168,7 @@ func (s *SQLiteSkillStore) scanSkillInfoList(rows *sql.Rows) []store.SkillInfo {
 		info.Enabled = enabled
 		info.MissingDeps = parseDepsColumn(depsRaw)
 		info.Author = parseFrontmatterAuthor(fmRaw)
-		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases = parseFrontmatterGovernance(fmRaw)
+		info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 		result = append(result, info)
 	}
 	if err := rows.Err(); err != nil {
@@ -260,16 +260,16 @@ func parseFrontmatterAuthor(raw []byte) string {
 	return fm["author"]
 }
 
-func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases []string) {
+func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases, regressionPrefixes []string) {
 	if len(raw) == 0 {
-		return "", "", false, nil, nil
+		return "", "", false, nil, nil, nil
 	}
 	var fm map[string]string
 	if err := json.Unmarshal(raw, &fm); err != nil {
-		return "", "", false, nil, nil
+		return "", "", false, nil, nil, nil
 	}
 	meta := skills.GovernanceFromFields(fm)
-	return meta.DisplayName, meta.Family, meta.Canonical, meta.Replaces, meta.Aliases
+	return meta.DisplayName, meta.Family, meta.Canonical, meta.Replaces, meta.Aliases, meta.RegressionPrefixes
 }
 
 func marshalFrontmatter(fm map[string]string) []byte {
