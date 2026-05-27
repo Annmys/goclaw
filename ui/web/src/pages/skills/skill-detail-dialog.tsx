@@ -58,6 +58,7 @@ export function SkillDetailDialog({
   const [rollingBack, setRollingBack] = useState(false);
 
   const tree = useMemo(() => buildTree(files), [files]);
+  const effectiveFamily = skill.family || skill.slug || skill.name;
   const selectedIsCurrent = versions != null && selectedVersion === versions.current;
   const selectedVersionLabel = selectedVersion == null ? "未选择" : `v${selectedVersion}`;
 
@@ -159,12 +160,13 @@ export function SkillDetailDialog({
               <p className="text-sm font-medium">Skill 家族治理</p>
               <div>
                 <span className="text-muted-foreground">所属家族：</span>
-                <span className="font-medium">{skill.family || "未配置"}</span>
+                <span className="font-medium">{effectiveFamily}</span>
+                {!skill.family && <span className="ml-1 text-muted-foreground">（未显式配置，默认按英文名称归属）</span>}
               </div>
               <div>
                 <span className="text-muted-foreground">是否家族主版本：</span>
                 {skill.canonical == null ? (
-                  <span>未配置</span>
+                  <span>未显式配置，默认作为本家族可用版本</span>
                 ) : (
                   <Badge variant={skill.canonical ? "outline" : "secondary"}>{skill.canonical ? "是" : "否"}</Badge>
                 )}

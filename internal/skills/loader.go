@@ -51,6 +51,8 @@ type Info struct {
 	Canonical   bool     `json:"canonical,omitempty"`
 	Replaces    []string `json:"replaces,omitempty"`
 	Aliases     []string `json:"aliases,omitempty"`
+	RegressionPrefixes []string `json:"regressionPrefixes,omitempty"`
+	Version             int      `json:"version,omitempty"`
 }
 
 // Loader discovers and loads SKILL.md files from multiple directories.
@@ -167,6 +169,7 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 					info.Canonical = meta.Canonical
 					info.Replaces = append([]string(nil), meta.Replaces...)
 					info.Aliases = append([]string(nil), meta.Aliases...)
+					info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
 				}
 			}
 			skills = append(skills, info)
@@ -217,6 +220,7 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 						info.Canonical = meta.Canonical
 						info.Replaces = append([]string(nil), meta.Replaces...)
 						info.Aliases = append([]string(nil), meta.Aliases...)
+						info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
 					}
 				}
 				skills = append(skills, info)
@@ -262,6 +266,7 @@ func (l *Loader) listManagedSkills() []Info {
 			Path:    skillFile,
 			BaseDir: latestDir,
 			Source:  "managed",
+			Version: latestVersion,
 		}
 		if meta := parseMetadata(skillFile); meta != nil {
 			info.Description = meta.Description
@@ -271,11 +276,12 @@ func (l *Loader) listManagedSkills() []Info {
 			if hasMetadataGovernance(meta) {
 				info.DisplayName = meta.DisplayName
 				info.Family = meta.Family
-				info.Canonical = meta.Canonical
-				info.Replaces = append([]string(nil), meta.Replaces...)
-				info.Aliases = append([]string(nil), meta.Aliases...)
-			}
+			info.Canonical = meta.Canonical
+			info.Replaces = append([]string(nil), meta.Replaces...)
+			info.Aliases = append([]string(nil), meta.Aliases...)
+			info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
 		}
+	}
 		skills = append(skills, info)
 	}
 	return skills
@@ -438,24 +444,33 @@ func (l *Loader) BuildSummary(ctx context.Context, allowList []string) string {
 	for _, s := range filtered {
 		lines = append(lines, "  <skill>")
 		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapeXML(s.Name)))
-		if s.DisplayName != "" || s.Family != "" {
-			display := s.DisplayName
-			if display == "" {
-				display = s.Name
-			}
-			lines = append(lines, fmt.Sprintf("    <display>%s（%s）</display>", escapeXML(s.Slug), escapeXML(display)))
+		display := s.DisplayName
+		if display == "" {
+			display = s.Name
 		}
+		lines = append(lines, fmt.Sprintf("    <display>%s（%s）V%d</display>", escapeXML(s.Slug), escapeXML(display), s.Version))
 		desc := s.Description
 		if len([]rune(desc)) > skillDescMaxLen {
 			desc = string([]rune(desc)[:skillDescMaxLen]) + "…"
 		}
 		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapeXML(desc)))
 		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapeXML(s.Path)))
-		if s.Family != "" {
-			lines = append(lines, fmt.Sprintf("    <family>%s</family>", escapeXML(s.Family)))
+		family := s.Family
+		if strings.TrimSpace(family) == "" {
+			family = s.Slug
 		}
+		lines = append(lines, fmt.Sprintf("    <family>%s</family>", escapeXML(family)))
 		if s.Canonical {
 			lines = append(lines, "    <canonical>true</canonical>")
+		}
+		if len(s.Aliases) > 0 {
+			lines = append(lines, fmt.Sprintf("    <aliases>%s</aliases>", escapeXML(strings.Join(s.Aliases, ", "))))
+		}
+		if len(s.Replaces) > 0 {
+			lines = append(lines, fmt.Sprintf("    <replaces>%s</replaces>", escapeXML(strings.Join(s.Replaces, ", "))))
+		}
+		if len(s.RegressionPrefixes) > 0 {
+			lines = append(lines, fmt.Sprintf("    <regression_prefixes>%s</regression_prefixes>", escapeXML(strings.Join(s.RegressionPrefixes, ", "))))
 		}
 		lines = append(lines, "  </skill>")
 	}
