@@ -154,3 +154,15 @@ func TestMarkSkillAddCoreFamilyCandidate(t *testing.T) {
 		t.Fatalf("expected core family candidate error, got %v", err)
 	}
 }
+
+func TestSkillAddApplyResultNeedsPostflight(t *testing.T) {
+	if !(skillAddApplyResult{Kind: "created"}.needsPostflight()) {
+		t.Fatal("created result should require postflight")
+	}
+	if !(skillAddApplyResult{Kind: "merged"}.needsPostflight()) {
+		t.Fatal("merged result should require postflight")
+	}
+	if (skillAddApplyResult{Kind: "no_change"}.needsPostflight()) {
+		t.Fatal("no_change result should not require postflight")
+	}
+}

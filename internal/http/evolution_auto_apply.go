@@ -88,13 +88,18 @@ func (h *EvolutionHandler) autoApplySuggestion(r *http.Request, agentID uuid.UUI
 		if preflight.Status != "passed" {
 			return false, "skill_add_preflight_failed", nil
 		}
-		if err := h.applySkillDraft(r.Context(), sg, "", "auto-evolution"); err != nil {
+		result, err := h.applySkillDraft(r.Context(), sg, "", "auto-evolution")
+		if err != nil {
 			if errors.Is(err, errSkillAddCoreFamilyCandidate) {
 				return false, "skill_add_core_family_candidate", nil
 			}
 			return false, "skill_add_apply_failed", err
 		}
-		return true, "skill_add_applied", nil
+		action, err := h.postflightSkillAddApplication(r, agentID, sg, result, "auto-evolution")
+		if err != nil {
+			return false, action, err
+		}
+		return true, action, nil
 
 	case store.SuggestThreshold:
 		if h.agentStore == nil {

@@ -77,9 +77,14 @@ func (h *EvolutionHandler) autoApplyFeedbackCorrections(r *http.Request, agentID
 	_ = h.suggestions.UpdateSuggestionParameters(r.Context(), anchor.ID, updatedParams)
 	anchor.Parameters = updatedParams
 
-	if err := h.applySkillDraft(r.Context(), anchor, draft, "auto-feedback"); err != nil {
+	result, err := h.applySkillDraft(r.Context(), anchor, draft, "auto-feedback")
+	if err != nil {
 		h.recordAuditEvent(r, agentID, "feedback_auto_apply_failed", anchor.ID.String(), "pending", "failed", err.Error())
 		return err
+	}
+	if action, err := h.postflightSkillAddApplication(r, agentID, anchor, result, "auto-feedback"); err != nil {
+		h.recordAuditEvent(r, agentID, "feedback_auto_apply_failed", anchor.ID.String(), "pending", "failed", err.Error())
+		return fmt.Errorf("%s: %w", action, err)
 	}
 
 	applied := 0
