@@ -20,6 +20,62 @@ function isContainer(n: Node<AnyNodeData>): n is Node<ContainerNodeData> {
   return n.type === "container";
 }
 
+// normalizeParams maps the config-form's simplified fields to the exact param
+// shape each backend handler reads (see internal/workflow/handlers).
+//   - condition: form stores `expr`; handler reads conditions[].value
+//   - tool:      form stores `__args` (JSON string); handler reads flat args
+//   - human:     form stores `fields` (comma string); handler reads string[]
+//   - knowledge: form stores `maxResults` (string); handler reads number
+// Other types pass params through unchanged.
+function normalizeParams(type: string, params: Record<string, unknown>): Record<string, unknown> {
+  const p = { ...params };
+  switch (type) {
+    case "condition": {
+      const expr = typeof p.expr === "string" ? p.expr : "";
+      const out: Record<string, unknown> = { ...p };
+      delete out.expr;
+      out.conditions = [{ id: "c1", title: "if", value: expr }];
+      return out;
+    }
+    case "tool": {
+      const out: Record<string, unknown> = {};
+      // copy any explicit params except the JSON blob field
+      for (const [k, v] of Object.entries(p)) {
+        if (k !== "__args") out[k] = v;
+      }
+      if (typeof p.__args === "string" && p.__args.trim()) {
+        try {
+          Object.assign(out, JSON.parse(p.__args));
+        } catch {
+          // leave raw string so the failure is visible at run time
+          out.__args_raw = p.__args;
+        }
+      }
+      return out;
+    }
+    case "human-in-the-loop": {
+      const out = { ...p };
+      if (typeof p.fields === "string") {
+        out.fields = p.fields
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+      return out;
+    }
+    case "knowledge": {
+      const out = { ...p };
+      if (typeof p.maxResults === "string" && p.maxResults.trim()) {
+        const n = Number(p.maxResults);
+        if (!Number.isNaN(n)) out.maxResults = n;
+      }
+      return out;
+    }
+    default:
+      return p;
+  }
+}
+
 // toGraph converts the reactflow canvas (block nodes, container nodes, edges)
 // into the backend's serialized WorkflowGraph. Container nodes do NOT become
 // blocks; instead each contributes a loops[]/parallels[] entry whose `nodes`
@@ -69,7 +125,7 @@ export function toGraph(nodes: Node<AnyNodeData>[], edges: Edge[]): WorkflowGrap
       position: { x: b.position.x, y: b.position.y },
       config: {
         tool: (b.data as any).tool ?? undefined,
-        params: (b.data as any).params ?? {},
+        params: normalizeParams(b.data.type, (b.data.params as Record<string, unknown>) ?? {}),
       },
       metadata: { id: b.data.type, name: b.data.label },
       enabled: true,

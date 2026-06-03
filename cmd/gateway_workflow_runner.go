@@ -32,6 +32,9 @@ func (d *gatewayDeps) buildWorkflowNodeRunner() *workflow.NodeRunner {
 			}
 			return loop.Run(ctx, req)
 		}
+		r.ListAgents = func() []string {
+			return d.agentRouter.List()
+		}
 	}
 
 	if d.toolsReg != nil {

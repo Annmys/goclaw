@@ -34,6 +34,11 @@ type NodeRunner struct {
 	// KnowledgeSearch performs semantic retrieval. Backed by
 	// vault.VaultSearchService.Search.
 	KnowledgeSearch func(ctx context.Context, opts vault.UnifiedSearchOptions) ([]vault.UnifiedSearchResult, error)
+
+	// ListAgents returns the available agent ids. Backed by Router.List. Used by
+	// the AI generator to fall back to an available agent when no specific one
+	// is requested.
+	ListAgents func() []string
 }
 
 // HasAgent reports whether agent nodes can run.

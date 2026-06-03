@@ -80,6 +80,19 @@ export function useGraphDefinitions() {
     [http],
   );
 
+  // generateGraph asks the backend AI copilot (goclaw agent) to author or edit a
+  // workflow graph from a natural-language prompt. `current` enables incremental
+  // edits of the on-canvas graph.
+  const generateGraph = useCallback(
+    async (prompt: string, current?: WorkflowGraph): Promise<{ graph: WorkflowGraph; explanation: string }> => {
+      return http.post<{ graph: WorkflowGraph; explanation: string }>("/v1/workflow-generate", {
+        prompt,
+        current,
+      });
+    },
+    [http],
+  );
+
   return {
     definitions: definitionsQuery.data ?? [],
     isLoading: definitionsQuery.isLoading,
@@ -88,5 +101,6 @@ export function useGraphDefinitions() {
     saveDefinition,
     deleteDefinition,
     runDefinition,
+    generateGraph,
   };
 }

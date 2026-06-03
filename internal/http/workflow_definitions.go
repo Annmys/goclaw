@@ -84,3 +84,33 @@ func (h *WorkflowHandler) handleRunDefinition(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusCreated, map[string]any{"run": run})
 }
+
+// generateRequest is the body for AI workflow generation.
+type generateRequest struct {
+	Prompt  string        `json:"prompt"`
+	AgentID string        `json:"agent_id,omitempty"`
+	Current *graphPayload `json:"current,omitempty"`
+}
+
+// graphPayload mirrors the engine's graph.Graph for request binding; we decode
+// into the engine type via re-marshal to avoid importing the graph package here.
+type graphPayload = map[string]any
+
+// handleGenerate is the AI "copilot": natural language → workflow graph, via
+// goclaw's own agent runtime (no external dependency).
+func (h *WorkflowHandler) handleGenerate(w http.ResponseWriter, r *http.Request) {
+	var req generateRequest
+	if !bindJSON(w, r, extractLocale(r), &req) {
+		return
+	}
+	var current map[string]any
+	if req.Current != nil {
+		current = *req.Current
+	}
+	res, err := h.engine.GenerateGraphJSON(r.Context(), req.Prompt, req.AgentID, current)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, res)
+}

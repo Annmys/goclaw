@@ -20,6 +20,8 @@ const TYPE_COLORS: Record<string, string> = {
 export interface BlockNodeData {
   type: string;
   label: string;
+  tool?: string;
+  params?: Record<string, unknown>;
   selected?: boolean;
 }
 
