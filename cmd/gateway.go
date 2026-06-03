@@ -245,6 +245,7 @@ func runGateway() {
 	}
 
 	loadBootstrapFiles(pgStores, workspace, agentCfg)
+	seedWorkflowAgents(context.Background(), pgStores.Agents, pgStores.Tenants, agentCfg, dataDir)
 
 	// Backfill CAPABILITIES.md for pre-v3 agents that don't have it yet.
 	if count, err := bootstrap.BackfillCapabilities(context.Background(), pgStores.DB); err != nil {

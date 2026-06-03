@@ -1,6 +1,7 @@
 {
   "groups": {
     "core": "Chính",
+    "workflow": "Quy trình",
     "conversations": "Hội thoại",
     "connectivity": "Kết nối",
     "capabilities": "Khả năng",
@@ -11,6 +12,10 @@
   "nav": {
     "overview": "Tổng quan",
     "chat": "Trò chuyện",
+    "workflow": "Workflow",
+    "workflowBuilder": "Trình tạo",
+    "workflowDefinitions": "Quy trình",
+    "workflowRuns": "Lần chạy",
     "agents": "Agent",
     "agentTeams": "Agent Link & Team",
     "sessions": "Session",

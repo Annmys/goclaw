@@ -32,6 +32,7 @@ import {
   Webhook,
   Sparkles,
   FolderSync,
+  Workflow,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { SidebarGroup } from "./sidebar-group";
@@ -90,6 +91,12 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           <SidebarItem to={ROUTES.AGENTS} icon={Bot} label={t("nav.agents")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.TEAMS} icon={Users} label={t("nav.agentTeams")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.OVERVIEW} icon={LayoutDashboard} label={t("nav.overview")} collapsed={collapsed} />
+        </SidebarGroup>
+
+        <SidebarGroup label={t("groups.workflow")} collapsed={collapsed}>
+          <SidebarItem to={ROUTES.WORKFLOW_DEFINITIONS} icon={Workflow} label={t("nav.workflowDefinitions")} collapsed={collapsed} />
+          <SidebarItem to={ROUTES.WORKFLOW_BUILDER} icon={Blocks} label={t("nav.workflowBuilder")} collapsed={collapsed} />
+          <SidebarItem to={ROUTES.WORKFLOW} icon={ClipboardList} label={t("nav.workflowRuns")} collapsed={collapsed} />
         </SidebarGroup>
 
         <SidebarGroup label={t("groups.conversations")} collapsed={collapsed}>

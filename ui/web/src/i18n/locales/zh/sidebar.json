@@ -1,6 +1,7 @@
 ﻿{
   "groups": {
     "core": "核心",
+    "workflow": "工作流",
     "conversations": "会话",
     "connectivity": "连接",
     "capabilities": "能力",
@@ -17,6 +18,10 @@
     "channels": "Channel",
     "contacts": "联系人",
     "chat": "对话",
+    "workflow": "Workflow",
+    "workflowBuilder": "流程画布",
+    "workflowDefinitions": "流程库",
+    "workflowRuns": "运行记录",
     "config": "配置",
     "cron": "定时任务",
     "hooks": "Hooks",

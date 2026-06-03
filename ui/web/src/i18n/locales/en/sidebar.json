@@ -1,6 +1,7 @@
 {
   "groups": {
     "core": "Core",
+    "workflow": "Workflow",
     "conversations": "Conversations",
     "connectivity": "Connectivity",
     "capabilities": "Capabilities",
@@ -11,6 +12,10 @@
   "nav": {
     "overview": "Overview",
     "chat": "Chat",
+    "workflow": "Workflow",
+    "workflowBuilder": "Builder",
+    "workflowDefinitions": "Workflows",
+    "workflowRuns": "Runs",
     "agents": "Agents",
     "agentTeams": "Agent Link & Team",
     "sessions": "Sessions",

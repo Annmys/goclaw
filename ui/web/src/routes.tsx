@@ -18,6 +18,15 @@ const OverviewPage = lazyWithRetry(() =>
 const ChatPage = lazyWithRetry(() =>
   import("@/pages/chat/chat-page").then((m) => ({ default: m.ChatPage })),
 );
+const WorkflowPage = lazyWithRetry(() =>
+  import("@/pages/workflow/workflow-page").then((m) => ({ default: m.WorkflowPage })),
+);
+const WorkflowBuilderPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-builder-page").then((m) => ({ default: m.WorkflowBuilderPage })),
+);
+const WorkflowDefinitionsPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-definitions-page").then((m) => ({ default: m.WorkflowDefinitionsPage })),
+);
 const AgentsPage = lazyWithRetry(() =>
   import("@/pages/agents/agents-page").then((m) => ({ default: m.AgentsPage })),
 );
@@ -168,6 +177,10 @@ export function AppRoutes() {
           <Route index element={<Navigate to={ROUTES.CHAT} replace />} />
           <Route path={ROUTES.OVERVIEW} element={<OverviewPage />} />
           <Route path={ROUTES.CHAT_PATTERN} element={<ChatPage />} />
+          <Route path={ROUTES.WORKFLOW} element={<WorkflowPage />} />
+          <Route path={ROUTES.WORKFLOW_DEFINITIONS} element={<WorkflowDefinitionsPage />} />
+          <Route path={ROUTES.WORKFLOW_BUILDER} element={<WorkflowBuilderPage />} />
+          <Route path={ROUTES.WORKFLOW_BUILDER_EDIT} element={<WorkflowBuilderPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage key="list" />} />
           <Route path={ROUTES.IMPORT_EXPORT} element={<RequireAdmin><ImportExportPage /></RequireAdmin>} />
           <Route path={ROUTES.BACKUP_RESTORE} element={<RequireAdmin><BackupRestorePage /></RequireAdmin>} />

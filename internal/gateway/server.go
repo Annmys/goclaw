@@ -542,6 +542,9 @@ func (s *Server) SetOrchestrationHandler(h *httpapi.OrchestrationHandler) {
 // SetV3FlagsHandler sets the per-agent v3 feature flag handler.
 func (s *Server) SetV3FlagsHandler(h *httpapi.V3FlagsHandler) { s.handlers = append(s.handlers, h) }
 
+// SetWorkflowHandler sets the deterministic workflow engine handler.
+func (s *Server) SetWorkflowHandler(h *httpapi.WorkflowHandler) { s.handlers = append(s.handlers, h) }
+
 // SetActivityHandler sets the activity audit log handler.
 func (s *Server) SetActivityHandler(h *httpapi.ActivityHandler) {
 	s.handlers = append(s.handlers, h)

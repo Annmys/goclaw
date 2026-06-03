@@ -15,6 +15,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/store/pg"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
+	"github.com/nextlevelbuilder/goclaw/internal/workflow"
 )
 
 // httpHandlers bundles the results of wireHTTP() for passing to wireHTTPHandlersOnServer.
@@ -225,6 +226,16 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 	if d.pgStores != nil && d.pgStores.Agents != nil {
 		d.server.SetV3FlagsHandler(httpapi.NewV3FlagsHandler(d.pgStores.Agents))
 	}
+
+	// Workflow engine API. This is a deterministic standard engine layer; it is
+	// intentionally separate from chat and agent loops.
+	//
+	// The engine also serves sim-style graph workflows whose nodes call back
+	// into goclaw's existing subsystems (agent loop, tool registry, knowledge
+	// search) via an injected NodeRunner — no subsystem is reimplemented.
+	wfEngine := workflow.NewEngineWithDB(workflow.NewDefaultRegistry(), d.pgStores.DB)
+	wfEngine.SetNodeRunner(d.buildWorkflowNodeRunner())
+	d.server.SetWorkflowHandler(httpapi.NewWorkflowHandler(wfEngine))
 
 	// Workspace file serving endpoint — serves files by absolute path, auth-token protected.
 	d.server.SetFilesHandler(httpapi.NewFilesHandler(d.workspace, d.dataDir))
