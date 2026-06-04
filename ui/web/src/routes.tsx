@@ -27,6 +27,12 @@ const WorkflowBuilderPage = lazyWithRetry(() =>
 const WorkflowDefinitionsPage = lazyWithRetry(() =>
   import("@/pages/workflow-builder/workflow-definitions-page").then((m) => ({ default: m.WorkflowDefinitionsPage })),
 );
+const WorkflowAIPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-ai-page").then((m) => ({ default: m.WorkflowAIPage })),
+);
+const WorkflowChatRunPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-chat-run-page").then((m) => ({ default: m.WorkflowChatRunPage })),
+);
 const AgentsPage = lazyWithRetry(() =>
   import("@/pages/agents/agents-page").then((m) => ({ default: m.AgentsPage })),
 );
@@ -179,6 +185,8 @@ export function AppRoutes() {
           <Route path={ROUTES.CHAT_PATTERN} element={<ChatPage />} />
           <Route path={ROUTES.WORKFLOW} element={<WorkflowPage />} />
           <Route path={ROUTES.WORKFLOW_DEFINITIONS} element={<WorkflowDefinitionsPage />} />
+          <Route path={ROUTES.WORKFLOW_AI} element={<WorkflowAIPage />} />
+          <Route path={ROUTES.WORKFLOW_CHAT_RUN} element={<WorkflowChatRunPage />} />
           <Route path={ROUTES.WORKFLOW_BUILDER} element={<WorkflowBuilderPage />} />
           <Route path={ROUTES.WORKFLOW_BUILDER_EDIT} element={<WorkflowBuilderPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage key="list" />} />

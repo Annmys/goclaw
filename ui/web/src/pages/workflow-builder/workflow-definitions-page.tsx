@@ -10,10 +10,11 @@ import { useGraphDefinitions } from "./hooks/use-graph-definitions";
 // edit / run / delete actions, and a button to create a new one in the builder.
 export function WorkflowDefinitionsPage() {
   const navigate = useNavigate();
-  const { definitions, isLoading, deleteDefinition, runDefinition } = useGraphDefinitions();
+  const { definitions, isLoading, deleteDefinition } = useGraphDefinitions();
 
   const openNew = () => navigate(ROUTES.WORKFLOW_BUILDER);
   const openEdit = (id: string) => navigate(ROUTES.WORKFLOW_BUILDER_EDIT.replace(":id", id));
+  const openRun = (id: string) => navigate(ROUTES.WORKFLOW_CHAT_RUN.replace(":id", id));
 
   return (
     <div className="flex h-full flex-col">
@@ -40,7 +41,7 @@ export function WorkflowDefinitionsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => runDefinition(d.id, {})} title="运行">
+                  <Button size="sm" variant="ghost" onClick={() => openRun(d.id)} title="运行(对话)">
                     <Play className="h-4 w-4" />
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => openEdit(d.id)} title="编辑">

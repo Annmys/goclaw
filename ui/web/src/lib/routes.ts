@@ -8,6 +8,8 @@ export const ROUTES = {
   WORKFLOW_BUILDER_EDIT: "/workflow/builder/:id",
   WORKFLOW_DEFINITIONS: "/workflow/definitions",
   WORKFLOW_RUNS: "/workflow/runs",
+  WORKFLOW_AI: "/workflow/ai",
+  WORKFLOW_CHAT_RUN: "/workflow/chat/:id",
   AGENTS: "/agents",
   AGENT_DETAIL: "/agents/:id",
   AGENT_CODEX_POOL: "/agents/:id/codex-pool",

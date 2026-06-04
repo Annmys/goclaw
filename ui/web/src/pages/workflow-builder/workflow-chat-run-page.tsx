@@ -1,0 +1,138 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useNavigate } from "react-router";
+import { Send, ArrowLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/shared/page-header";
+import { ROUTES } from "@/lib/routes";
+import { useGraphDefinitions } from "./hooks/use-graph-definitions";
+import type { GraphDefinition } from "@/types/workflow-graph";
+import type { WorkflowRun } from "@/types/workflow";
+
+interface ChatTurn {
+  role: "user" | "assistant";
+  text: string;
+  status?: string;
+}
+
+// renderOutput turns a workflow run's output map into a readable reply. It
+// prefers common reply fields (content/message/response/text), else pretty JSON.
+function renderOutput(output: Record<string, unknown> | undefined): string {
+  if (!output || Object.keys(output).length === 0) return "(无输出)";
+  for (const key of ["content", "message", "response", "text", "result"]) {
+    const v = output[key];
+    if (typeof v === "string" && v) return v;
+  }
+  return JSON.stringify(output, null, 2);
+}
+
+// WorkflowChatRunPage runs a saved workflow conversationally: each user message
+// triggers a run (message passed as workflow input) and the run's output is
+// shown as an assistant reply. This is goclaw's equivalent of sim's
+// "deploy as chat" consumption surface.
+export function WorkflowChatRunPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { getDefinition, runDefinition } = useGraphDefinitions();
+  const [def, setDef] = useState<GraphDefinition | null>(null);
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
+  }, [id, getDefinition]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [turns, busy]);
+
+  const send = useCallback(
+    async (text: string) => {
+      const message = text.trim();
+      if (!message || busy || !id) return;
+      setInput("");
+      setTurns((t) => [...t, { role: "user", text: message }]);
+      setBusy(true);
+      try {
+        const run: WorkflowRun = await runDefinition(id, { message });
+        setTurns((t) => [
+          ...t,
+          { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status },
+        ]);
+      } catch (err) {
+        setTurns((t) => [...t, { role: "assistant", text: `运行失败:${(err as Error).message}`, status: "failed" }]);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [busy, id, runDefinition],
+  );
+
+  return (
+    <div className="flex h-full flex-col">
+      <PageHeader
+        title={def ? `运行:${def.name}` : "运行工作流"}
+        actions={
+          <Button size="sm" variant="outline" onClick={() => navigate(ROUTES.WORKFLOW_DEFINITIONS)}>
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            返回流程库
+          </Button>
+        }
+      />
+
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto max-w-2xl space-y-3">
+          {turns.length === 0 ? (
+            <p className="pt-8 text-center text-sm text-muted-foreground">
+              输入消息以运行该工作流。你发送的内容会作为流程输入(可在节点中用 &lt;trigger.message&gt; 引用)。
+            </p>
+          ) : (
+            turns.map((turn, i) => (
+              <div key={i} className={turn.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                <div
+                  className={
+                    turn.role === "user"
+                      ? "max-w-[80%] rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
+                      : "max-w-[85%] rounded-lg bg-muted px-3 py-2 text-sm"
+                  }
+                >
+                  {turn.status && turn.status !== "completed" ? (
+                    <div className="mb-1 text-[10px] uppercase text-muted-foreground">{turn.status}</div>
+                  ) : null}
+                  <div className="whitespace-pre-wrap">{turn.text}</div>
+                </div>
+              </div>
+            ))
+          )}
+          {busy ? (
+            <div className="flex justify-start">
+              <div className="rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">运行中…</div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="border-t p-3">
+        <div className="mx-auto flex max-w-2xl items-center gap-2">
+          <input
+            className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send(input);
+              }
+            }}
+            placeholder="输入消息运行工作流…"
+            disabled={busy}
+          />
+          <Button onClick={() => send(input)} disabled={busy || !input.trim()}>
+            <Send className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

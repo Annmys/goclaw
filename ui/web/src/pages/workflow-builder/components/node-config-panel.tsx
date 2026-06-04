@@ -1,4 +1,5 @@
 import type { BlockNodeData } from "./block-node";
+import { useNodeOptions } from "../hooks/use-node-options";
 
 interface NodeConfigPanelProps {
   data: BlockNodeData;
@@ -23,6 +24,7 @@ function useParam(data: BlockNodeData, onChange: NodeConfigPanelProps["onChange"
 // toGraph serializes them into config.params / config.tool.
 export function NodeConfigPanel({ data, onChange, onClose }: NodeConfigPanelProps) {
   const { get, set } = useParam(data, onChange);
+  const { agents, tools } = useNodeOptions();
 
   return (
     <div className="absolute right-2 top-2 w-72 rounded-md border bg-card p-3 shadow-lg">
@@ -42,8 +44,25 @@ export function NodeConfigPanel({ data, onChange, onClose }: NodeConfigPanelProp
         />
       </label>
 
-      {renderTypeFields(data, get, set, onChange)}
+      {renderTypeFields(data, get, set, onChange, agents, tools)}
     </div>
+  );
+}
+
+function select(value: string, options: { value: string; label: string }[], onChange: (v: string) => void, placeholder = "请选择") {
+  return (
+    <select
+      className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>
+          {o.label}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -84,12 +103,22 @@ function renderTypeFields(
   get: (k: string) => string,
   set: (k: string, v: string) => void,
   onChange: NodeConfigPanelProps["onChange"],
+  agents: { id: string; label: string }[],
+  tools: { name: string; label: string }[],
 ): React.ReactNode {
   switch (data.type) {
     case "agent":
       return (
         <>
-          {field("智能体 ID", input(get("agent"), (v) => set("agent", v), "例如 assistant"))}
+          {field(
+            "智能体",
+            select(
+              get("agent"),
+              agents.map((a) => ({ value: a.id, label: a.label })),
+              (v) => set("agent", v),
+              agents.length ? "选择智能体" : "(无可用智能体)",
+            ),
+          )}
           {field("提示词", textarea(get("prompt"), (v) => set("prompt", v), "给智能体的指令,可用 <trigger.message>"))}
           {field("系统提示(可选)", textarea(get("systemPrompt"), (v) => set("systemPrompt", v), "", 2))}
         </>
@@ -97,11 +126,16 @@ function renderTypeFields(
     case "tool":
       return (
         <>
-          {field("工具名", input(data.tool ?? "", (v) => onChange({ tool: v }), "例如 web_search"))}
           {field(
-            "参数 (JSON)",
-            textarea(get("__args"), (v) => set("__args", v), '{"query":"..."}'),
+            "工具",
+            select(
+              data.tool ?? "",
+              tools.map((t) => ({ value: t.name, label: t.label })),
+              (v) => onChange({ tool: v }),
+              tools.length ? "选择工具" : "(无可用工具)",
+            ),
           )}
+          {field("参数 (JSON)", textarea(get("__args"), (v) => set("__args", v), '{"query":"..."}'))}
           <p className="text-[10px] text-muted-foreground">参数按 JSON 填写,键为工具入参名。</p>
         </>
       );

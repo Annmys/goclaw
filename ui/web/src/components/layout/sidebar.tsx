@@ -94,6 +94,7 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
         </SidebarGroup>
 
         <SidebarGroup label={t("groups.workflow")} collapsed={collapsed}>
+          <SidebarItem to={ROUTES.WORKFLOW_AI} icon={Sparkles} label={t("nav.workflowAI")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_DEFINITIONS} icon={Workflow} label={t("nav.workflowDefinitions")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_BUILDER} icon={Blocks} label={t("nav.workflowBuilder")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW} icon={ClipboardList} label={t("nav.workflowRuns")} collapsed={collapsed} />
