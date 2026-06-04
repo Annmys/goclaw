@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { Plus, Play, Pencil, Trash2 } from "lucide-react";
+import { Plus, Play, Pencil, Trash2, PackageCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -10,19 +10,30 @@ import { useGraphDefinitions } from "./hooks/use-graph-definitions";
 // edit / run / delete actions, and a button to create a new one in the builder.
 export function WorkflowDefinitionsPage() {
   const navigate = useNavigate();
-  const { definitions, isLoading, deleteDefinition } = useGraphDefinitions();
+  const { definitions, isLoading, deleteDefinition, seedEPLTemplate } = useGraphDefinitions();
 
   const openNew = () => navigate(ROUTES.WORKFLOW_BUILDER);
   const openEdit = (id: string) => navigate(ROUTES.WORKFLOW_BUILDER_EDIT.replace(":id", id));
   const openRun = (id: string) => navigate(ROUTES.WORKFLOW_CHAT_RUN.replace(":id", id));
 
+  const addEPL = async () => {
+    const def = await seedEPLTemplate();
+    openEdit(def.id);
+  };
+
   return (
     <div className="flex h-full flex-col">
       <PageHeader title="流程库" actions={
-        <Button size="sm" onClick={openNew}>
-          <Plus className="mr-1 h-4 w-4" />
-          新建工作流
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={addEPL}>
+            <PackageCheck className="mr-1 h-4 w-4" />
+            预估箱单示例
+          </Button>
+          <Button size="sm" onClick={openNew}>
+            <Plus className="mr-1 h-4 w-4" />
+            新建工作流
+          </Button>
+        </div>
       } />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">

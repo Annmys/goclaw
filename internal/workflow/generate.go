@@ -28,17 +28,18 @@ type GenerateResult struct {
 	Explanation string      `json:"explanation"`
 }
 
-// defaultCopilotAgent is the agent key seeded for workflow authoring.
-const defaultCopilotAgent = "workflow-architect"
+// defaultCopilotAgent is the agent key used for workflow authoring. Matches the
+// "Workflow 创建" agent seeded by cmd/workflow_agents_seed.go.
+const defaultCopilotAgent = "workflow-chuanjian"
 
 // resolveCopilotAgent picks the agent used for AI generation: the preferred
 // authoring agent if present, otherwise the first available agent. Returns ""
 // when none can be resolved.
-func (e *Engine) resolveCopilotAgent() string {
+func (e *Engine) resolveCopilotAgent(ctx context.Context) string {
 	if e.runner == nil || e.runner.ListAgents == nil {
 		return defaultCopilotAgent // best effort; AgentRun will surface a clear error if absent
 	}
-	available := e.runner.ListAgents()
+	available := e.runner.ListAgents(ctx)
 	for _, id := range available {
 		if id == defaultCopilotAgent {
 			return id
@@ -64,7 +65,7 @@ func (e *Engine) GenerateGraph(ctx context.Context, req GenerateRequest) (*Gener
 	}
 	agentID := req.AgentID
 	if agentID == "" {
-		agentID = e.resolveCopilotAgent()
+		agentID = e.resolveCopilotAgent(ctx)
 	}
 	if agentID == "" {
 		return nil, fmt.Errorf("workflow generate: no agent available")

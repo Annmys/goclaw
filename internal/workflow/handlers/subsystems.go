@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
@@ -44,6 +45,12 @@ func (h AgentHandler) Execute(ctx context.Context, b graph.Block, inputs map[str
 	}
 	if sp := firstString(inputs["systemPrompt"], inputs["system"]); sp != "" {
 		req.ExtraSystemPrompt = sp
+	}
+	// Optional skill whitelist: a comma-separated string or []any of skill slugs
+	// restricts the agent to those skills (e.g. "epl-core-workflow" for the EPL
+	// packing-list flow). Empty/absent leaves the agent's default skills.
+	if sk := parseSkillFilter(inputs["skills"]); sk != nil {
+		req.SkillFilter = sk
 	}
 	res, err := h.R.AgentRun(ctx, agentID, req)
 	if err != nil {
@@ -148,6 +155,35 @@ func firstString(vals ...any) string {
 		}
 	}
 	return ""
+}
+
+// parseSkillFilter coerces a skills param into a slice of skill slugs. Accepts a
+// comma-separated string or a []any of strings. Returns nil when absent/empty
+// (meaning: use the agent's default skills).
+func parseSkillFilter(v any) []string {
+	switch t := v.(type) {
+	case string:
+		if t == "" {
+			return nil
+		}
+		var out []string
+		for _, part := range strings.Split(t, ",") {
+			if s := strings.TrimSpace(part); s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []any:
+		var out []string
+		for _, e := range t {
+			if s, ok := e.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func toInt(v any) (int, bool) {

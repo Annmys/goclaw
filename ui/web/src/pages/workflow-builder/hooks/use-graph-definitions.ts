@@ -93,6 +93,14 @@ export function useGraphDefinitions() {
     [http],
   );
 
+  // seedEPLTemplate creates (or returns) the ready-to-run EPL packing-list
+  // workflow so it can be tested immediately.
+  const seedEPLTemplate = useCallback(async (): Promise<GraphDefinition> => {
+    const res = await http.post<{ definition: GraphDefinition }>("/v1/workflow-templates/epl", {});
+    await queryClient.invalidateQueries({ queryKey: listKey });
+    return res.definition;
+  }, [http, queryClient, listKey]);
+
   return {
     definitions: definitionsQuery.data ?? [],
     isLoading: definitionsQuery.isLoading,
@@ -102,5 +110,6 @@ export function useGraphDefinitions() {
     deleteDefinition,
     runDefinition,
     generateGraph,
+    seedEPLTemplate,
   };
 }

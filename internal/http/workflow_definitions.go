@@ -114,3 +114,14 @@ func (h *WorkflowHandler) handleGenerate(w http.ResponseWriter, r *http.Request)
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+// handleSeedEPL creates (or returns) the ready-to-run EPL packing-list workflow
+// template for the caller, so it can be tested immediately from 流程库.
+func (h *WorkflowHandler) handleSeedEPL(w http.ResponseWriter, r *http.Request) {
+	def, err := h.engine.SeedEPLTemplate(r.Context(), "")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"definition": def})
+}

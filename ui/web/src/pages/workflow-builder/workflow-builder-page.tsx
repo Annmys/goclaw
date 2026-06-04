@@ -13,7 +13,7 @@ import ReactFlow, {
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
-import { Save, Play, Plus, Repeat, Rows3, Sparkles } from "lucide-react";
+import { Save, Play, Plus, Repeat, Rows3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
@@ -21,8 +21,7 @@ import { BlockNode, type BlockNodeData } from "./components/block-node";
 import { ContainerNode, type ContainerNodeData } from "./components/container-node";
 import { ContainerConfigPanel } from "./components/container-config-panel";
 import { NodeConfigPanel } from "./components/node-config-panel";
-import { CopilotPanel } from "./components/copilot-panel";
-import { NODE_TYPES, type WorkflowGraph } from "@/types/workflow-graph";
+import { NODE_TYPES } from "@/types/workflow-graph";
 import { toGraph, fromGraph, CONTAINER_SIZE, type AnyNodeData } from "./lib/graph-convert";
 import { useGraphDefinitions } from "./hooks/use-graph-definitions";
 
@@ -44,7 +43,7 @@ export function WorkflowBuilderPage() {
   useTranslation("sidebar");
   const { id: editId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getDefinition, saveDefinition, runDefinition, generateGraph } = useGraphDefinitions();
+  const { getDefinition, saveDefinition, runDefinition } = useGraphDefinitions();
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AnyNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -54,7 +53,6 @@ export function WorkflowBuilderPage() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<string>("");
   const [selectedId, setSelectedId] = useState<string | undefined>();
-  const [copilotOpen, setCopilotOpen] = useState(false);
 
   // Load existing definition when editing.
   useEffect(() => {
@@ -214,19 +212,6 @@ export function WorkflowBuilderPage() {
   const onNodeClick = useCallback((_e: unknown, node: Node<AnyNodeData>) => setSelectedId(node.id), []);
   const onPaneClick = useCallback(() => setSelectedId(undefined), []);
 
-  // applyGeneratedGraph replaces the canvas with an AI-generated graph.
-  const applyGeneratedGraph = useCallback(
-    (graph: WorkflowGraph) => {
-      const { nodes: n, edges: e } = fromGraph(graph);
-      setNodes(n);
-      setEdges(e);
-    },
-    [setNodes, setEdges],
-  );
-
-  // currentGraph snapshots the canvas for incremental AI edits.
-  const currentGraph = useMemo(() => toGraph(nodes, edges), [nodes, edges]);
-
   return (
     <div className="flex h-full flex-col">
       <PageHeader title="工作流编辑器" />
@@ -244,10 +229,6 @@ export function WorkflowBuilderPage() {
         <Button size="sm" variant="outline" onClick={handleRun} disabled={!defId || running}>
           <Play className="mr-1 h-4 w-4" />
           {running ? "运行中…" : "运行"}
-        </Button>
-        <Button size="sm" variant={copilotOpen ? "default" : "outline"} onClick={() => setCopilotOpen((v) => !v)}>
-          <Sparkles className="mr-1 h-4 w-4" />
-          AI 助手
         </Button>
       </div>
 
@@ -312,14 +293,6 @@ export function WorkflowBuilderPage() {
               data={selectedBlock.data}
               onChange={patchBlock}
               onClose={() => setSelectedId(undefined)}
-            />
-          ) : null}
-          {copilotOpen ? (
-            <CopilotPanel
-              current={currentGraph}
-              generate={generateGraph}
-              onApply={applyGeneratedGraph}
-              onClose={() => setCopilotOpen(false)}
             />
           ) : null}
           {runResult ? (

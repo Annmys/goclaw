@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
@@ -32,8 +33,35 @@ func (d *gatewayDeps) buildWorkflowNodeRunner() *workflow.NodeRunner {
 			}
 			return loop.Run(ctx, req)
 		}
-		r.ListAgents = func() []string {
-			return d.agentRouter.List()
+		r.ListAgents = func(ctx context.Context) []string {
+			// Prefer the agent store for complete, bare agent keys. The Router
+			// cache only holds already-instantiated agents and stores them under
+			// tenant-prefixed keys, which Get() would then double-prefix.
+			if d.pgStores != nil && d.pgStores.Agents != nil {
+				agents, err := d.pgStores.Agents.List(ctx, "")
+				if err == nil {
+					keys := make([]string, 0, len(agents))
+					for i := range agents {
+						if agents[i].AgentKey != "" {
+							keys = append(keys, agents[i].AgentKey)
+						}
+					}
+					if len(keys) > 0 {
+						return keys
+					}
+				}
+			}
+			// Fallback: strip tenant prefix from router cache keys ("tid:key" → "key").
+			raw := d.agentRouter.List()
+			out := make([]string, 0, len(raw))
+			for _, k := range raw {
+				if i := strings.LastIndex(k, ":"); i >= 0 {
+					out = append(out, k[i+1:])
+				} else {
+					out = append(out, k)
+				}
+			}
+			return out
 		}
 	}
 
