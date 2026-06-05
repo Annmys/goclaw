@@ -19,6 +19,7 @@ import {
   Volume2,
   Cpu,
   ClipboardList,
+  Play,
   HardDrive,
   Inbox,
   Brain,
@@ -43,6 +44,7 @@ import { cn } from "@/lib/utils";
 import { usePendingPairingsCount } from "@/hooks/use-pending-pairings-count";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useTenants } from "@/hooks/use-tenants";
+import { useGraphDefinitions } from "@/pages/workflow-builder/hooks/use-graph-definitions";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -55,6 +57,7 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
   const role = useAuthStore((s) => s.role);
   const { isOwner } = useTenants();
   const isAdmin = role === "admin" || role === "owner";
+  const { definitions: workflowDefs } = useGraphDefinitions();
 
   return (
     <aside
@@ -97,7 +100,15 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           <SidebarItem to={ROUTES.WORKFLOW_AI} icon={Sparkles} label={t("nav.workflowAI")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_DEFINITIONS} icon={Workflow} label={t("nav.workflowDefinitions")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_BUILDER} icon={Blocks} label={t("nav.workflowBuilder")} collapsed={collapsed} />
-          <SidebarItem to={ROUTES.WORKFLOW} icon={ClipboardList} label={t("nav.workflowRuns")} collapsed={collapsed} />
+          {workflowDefs.map((d) => (
+            <SidebarItem
+              key={d.id}
+              to={ROUTES.WORKFLOW_CHAT_RUN.replace(":id", d.id)}
+              icon={Play}
+              label={d.name || "未命名流程"}
+              collapsed={collapsed}
+            />
+          ))}
         </SidebarGroup>
 
         <SidebarGroup label={t("groups.conversations")} collapsed={collapsed}>
