@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 	"github.com/nextlevelbuilder/goclaw/internal/vault"
 	"github.com/nextlevelbuilder/goclaw/internal/workflow"
@@ -28,8 +31,17 @@ func (d *gatewayDeps) buildWorkflowNodeRunner() *workflow.NodeRunner {
 			if err != nil {
 				return nil, fmt.Errorf("workflow agent node: agent %q not found: %w", agentID, err)
 			}
+			// Build a session key unique per tenant + user + run so concurrent
+			// users (and concurrent runs of the same workflow) never share agent
+			// session state. Falls back to a fresh uuid when ids are absent.
 			if req.SessionKey == "" {
-				req.SessionKey = fmt.Sprintf("workflow:%s", agentID)
+				tid := store.TenantIDFromContext(ctx).String()
+				uid := store.UserIDFromContext(ctx)
+				runID := req.RunID
+				if runID == "" {
+					runID = uuid.NewString()
+				}
+				req.SessionKey = fmt.Sprintf("workflow:%s:%s:%s:%s", tid, uid, agentID, runID)
 			}
 			return loop.Run(ctx, req)
 		}

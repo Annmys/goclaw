@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/nextlevelbuilder/goclaw/internal/channels/media"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
@@ -63,15 +62,15 @@ func (h *MediaUploadHandler) handleUpload(w http.ResponseWriter, r *http.Request
 		ext = ".bin"
 	}
 
-	// Save to temp with unique name.
-	tmpName := fmt.Sprintf("ws_upload_%d%s", time.Now().UnixNano(), ext)
-	tmpPath := filepath.Join(os.TempDir(), tmpName)
-
-	out, err := os.Create(tmpPath)
+	// Save to a uniquely-named temp file. os.CreateTemp guarantees a
+	// collision-free name even under concurrent uploads from multiple users,
+	// so two requests in the same nanosecond can never overwrite each other.
+	out, err := os.CreateTemp("", fmt.Sprintf("ws_upload_*%s", ext))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": i18n.T(locale, i18n.MsgInternalError, "failed to create temp file")})
 		return
 	}
+	tmpPath := out.Name()
 	defer out.Close()
 
 	if _, err := io.Copy(out, file); err != nil {

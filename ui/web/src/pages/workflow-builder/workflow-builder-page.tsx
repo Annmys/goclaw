@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useEffect } from "react";
+import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import ReactFlow, {
@@ -10,6 +10,7 @@ import ReactFlow, {
   useEdgesState,
   type Connection,
   type Node,
+  type Edge,
   type NodeTypes,
 } from "reactflow";
 import "reactflow/dist/style.css";
@@ -24,6 +25,7 @@ import { NodeConfigPanel } from "./components/node-config-panel";
 import { NODE_TYPES } from "@/types/workflow-graph";
 import { toGraph, fromGraph, CONTAINER_SIZE, type AnyNodeData } from "./lib/graph-convert";
 import { useGraphDefinitions } from "./hooks/use-graph-definitions";
+import { useAuthStore } from "@/stores/use-auth-store";
 
 const nodeTypes: NodeTypes = { block: BlockNode, container: ContainerNode };
 
@@ -44,6 +46,7 @@ export function WorkflowBuilderPage() {
   const { id: editId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getDefinition, saveDefinition, runDefinition } = useGraphDefinitions();
+  const userId = useAuthStore((s) => s.userId);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<AnyNodeData>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -65,6 +68,43 @@ export function WorkflowBuilderPage() {
       setEdges(e);
     });
   }, [editId, getDefinition, setNodes, setEdges]);
+
+  // Draft persistence: keep unsaved canvas across navigation. The draft is
+  // keyed by user + definition id (or "new") in localStorage, restored on
+  // mount, and cleared after a successful save. Per-user key prevents drafts
+  // leaking across accounts on a shared browser. This fixes "switch away →
+  // come back → edits gone".
+  const draftKey = `wf-draft:${userId || "anon"}:${editId ?? "new"}`;
+  const draftRestored = useRef(false);
+
+  // restore draft once on mount (before/independent of server load)
+  useEffect(() => {
+    if (draftRestored.current) return;
+    draftRestored.current = true;
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { name?: string; nodes?: Node<AnyNodeData>[]; edges?: Edge[] };
+      if (draft.nodes?.length) {
+        if (draft.name) setName(draft.name);
+        setNodes(draft.nodes);
+        setEdges(draft.edges ?? []);
+      }
+    } catch {
+      // ignore corrupt draft
+    }
+  }, [draftKey, setNodes, setEdges]);
+
+  // persist draft whenever the canvas changes (skip the empty initial state)
+  useEffect(() => {
+    if (!draftRestored.current) return;
+    if (nodes.length === 0 && edges.length === 0) return;
+    try {
+      localStorage.setItem(draftKey, JSON.stringify({ name, nodes, edges }));
+    } catch {
+      // ignore quota errors
+    }
+  }, [draftKey, name, nodes, edges]);
 
   const onConnect = useCallback(
     (conn: Connection) => setEdges((eds) => addEdge({ ...conn, sourceHandle: conn.sourceHandle ?? "source" }, eds)),
@@ -152,11 +192,17 @@ export function WorkflowBuilderPage() {
       const graph = toGraph(nodes, edges);
       const saved = await saveDefinition({ id: defId, name, graph });
       setDefId(saved.id);
+      // clear the draft now that it's persisted server-side
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        /* ignore */
+      }
       if (!editId) navigate(ROUTES.WORKFLOW_BUILDER_EDIT.replace(":id", saved.id), { replace: true });
     } finally {
       setSaving(false);
     }
-  }, [nodes, edges, name, defId, editId, saveDefinition, navigate]);
+  }, [nodes, edges, name, defId, editId, saveDefinition, navigate, draftKey]);
 
   const handleRun = useCallback(async () => {
     if (!defId) return;
