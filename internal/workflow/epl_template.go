@@ -38,8 +38,10 @@ func buildEPLGraph(agentKey string) graph.Graph {
 						"skills": "epl-core-workflow",
 						"prompt": "请根据上传的船务清单(含 CI sheet)制作预估箱单(EPL)。" +
 							"严格按 epl-core-workflow 技能的 6 步执行:复制 CI sheet→动态定位结构→" +
-							"调整表头→查询流转单与重量→填入数据并合并居中→修正 Total 行。" +
-							"用户输入:<trigger.message>",
+							"调整表头→查询流转单与重量→填入数据并合并居中→修正 Total 行。\n" +
+							"上传的文件路径:<trigger.file_path>(文件名 <trigger.file_name>)。" +
+							"请用 exec 工具读取并处理该文件,完成后返回生成的 EPL 文件路径。\n" +
+							"用户补充说明:<trigger.message>",
 					},
 				},
 				Enabled: true,

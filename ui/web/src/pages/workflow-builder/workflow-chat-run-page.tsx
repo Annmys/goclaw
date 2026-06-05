@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Send, ArrowLeft } from "lucide-react";
+import { Send, ArrowLeft, Paperclip, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
@@ -32,12 +32,14 @@ function renderOutput(output: Record<string, unknown> | undefined): string {
 export function WorkflowChatRunPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getDefinition, runDefinition } = useGraphDefinitions();
+  const { getDefinition, runDefinition, uploadFile } = useGraphDefinitions();
   const [def, setDef] = useState<GraphDefinition | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
@@ -50,12 +52,22 @@ export function WorkflowChatRunPage() {
   const send = useCallback(
     async (text: string) => {
       const message = text.trim();
-      if (!message || busy || !id) return;
+      const file = pendingFile;
+      // allow sending with only a file (no text), e.g. EPL just needs the xlsx
+      if ((!message && !file) || busy || !id) return;
       setInput("");
-      setTurns((t) => [...t, { role: "user", text: message }]);
+      setPendingFile(null);
+      setTurns((t) => [...t, { role: "user", text: file ? `${message || "(已上传文件)"} 📎 ${file.name}` : message }]);
       setBusy(true);
       try {
-        const run: WorkflowRun = await runDefinition(id, { message });
+        const runInput: Record<string, unknown> = { message };
+        if (file) {
+          const up = await uploadFile(file);
+          runInput.file_path = up.path;
+          runInput.file_name = up.filename;
+          runInput.file_type = up.mime_type;
+        }
+        const run: WorkflowRun = await runDefinition(id, runInput);
         setTurns((t) => [
           ...t,
           { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status },
@@ -66,7 +78,7 @@ export function WorkflowChatRunPage() {
         setBusy(false);
       }
     },
-    [busy, id, runDefinition],
+    [busy, id, runDefinition, uploadFile, pendingFile],
   );
 
   return (
@@ -114,23 +126,48 @@ export function WorkflowChatRunPage() {
       </div>
 
       <div className="border-t p-3">
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          <input
-            className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send(input);
-              }
-            }}
-            placeholder="输入消息运行工作流…"
-            disabled={busy}
-          />
-          <Button onClick={() => send(input)} disabled={busy || !input.trim()}>
-            <Send className="h-4 w-4" />
-          </Button>
+        <div className="mx-auto max-w-2xl">
+          {pendingFile ? (
+            <div className="mb-2 flex items-center gap-2 rounded border bg-muted px-2 py-1 text-xs">
+              <Paperclip className="h-3.5 w-3.5" />
+              <span className="truncate">{pendingFile.name}</span>
+              <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setPendingFile(null)}>
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              accept=".xlsx,.xls,.csv"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) setPendingFile(f);
+                e.target.value = "";
+              }}
+            />
+            <Button size="icon" variant="outline" onClick={() => fileInputRef.current?.click()} disabled={busy} title="上传文件">
+              <Paperclip className="h-4 w-4" />
+            </Button>
+            <input
+              className="min-w-0 flex-1 rounded-md border bg-background px-3 py-2 text-sm"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              placeholder={pendingFile ? "可补充说明,或直接发送…" : "输入消息运行工作流…"}
+              disabled={busy}
+            />
+            <Button onClick={() => send(input)} disabled={busy || (!input.trim() && !pendingFile)}>
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>

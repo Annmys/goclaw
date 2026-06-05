@@ -101,6 +101,17 @@ export function useGraphDefinitions() {
     return res.definition;
   }, [http, queryClient, listKey]);
 
+  // uploadFile uploads a file (e.g. an xlsx for EPL) and returns its server path
+  // + mime, to be passed as workflow input. Reuses goclaw's media upload.
+  const uploadFile = useCallback(
+    async (file: File): Promise<{ path: string; mime_type: string; filename: string }> => {
+      const fd = new FormData();
+      fd.append("file", file);
+      return http.upload<{ path: string; mime_type: string; filename: string }>("/v1/media/upload", fd);
+    },
+    [http],
+  );
+
   return {
     definitions: definitionsQuery.data ?? [],
     isLoading: definitionsQuery.isLoading,
@@ -111,5 +122,6 @@ export function useGraphDefinitions() {
     runDefinition,
     generateGraph,
     seedEPLTemplate,
+    uploadFile,
   };
 }
