@@ -44,7 +44,30 @@ import { cn } from "@/lib/utils";
 import { usePendingPairingsCount } from "@/hooks/use-pending-pairings-count";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useTenants } from "@/hooks/use-tenants";
-import { useGraphDefinitions } from "@/pages/workflow-builder/hooks/use-graph-definitions";
+import { useQuery } from "@tanstack/react-query";
+import { useHttp } from "@/hooks/use-ws";
+
+// useSidebarWorkflows fetches saved workflow names for the dynamic menu items.
+// Guarded + silent: only runs when authenticated and never throws, so a failure
+// can never crash the global sidebar (which is outside the page ErrorBoundary).
+function useSidebarWorkflows(): { id: string; name: string }[] {
+  const http = useHttp();
+  const connected = useAuthStore((s) => s.connected);
+  const query = useQuery({
+    queryKey: ["sidebar-workflow-defs"],
+    enabled: connected,
+    retry: false,
+    queryFn: async () => {
+      try {
+        const res = await http.get<{ definitions: { id: string; name: string }[] }>("/v1/workflow-definitions");
+        return res.definitions ?? [];
+      } catch {
+        return [];
+      }
+    },
+  });
+  return query.data ?? [];
+}
 
 interface SidebarProps {
   collapsed: boolean;
@@ -57,7 +80,7 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
   const role = useAuthStore((s) => s.role);
   const { isOwner } = useTenants();
   const isAdmin = role === "admin" || role === "owner";
-  const { definitions: workflowDefs } = useGraphDefinitions();
+  const workflowDefs = useSidebarWorkflows();
 
   return (
     <aside
