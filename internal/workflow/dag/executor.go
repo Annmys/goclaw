@@ -249,6 +249,15 @@ func (e *Executor) executeNode(ctx context.Context, id string) (handlers.Output,
 	}
 	inputs := scope.Params(b.Config.Params)
 
+	// Trigger nodes with empty params should expose the run's input variables
+	// as their output (so downstream nodes can reference <trigger.file_path> etc.)
+	if b.Type() == "trigger" && len(inputs) == 0 && len(e.variables) > 0 {
+		inputs = make(map[string]any, len(e.variables))
+		for k, v := range e.variables {
+			inputs[k] = v
+		}
+	}
+
 	if e.observer != nil {
 		e.observer.OnNodeStart(id, b.Type(), inputs)
 	}
