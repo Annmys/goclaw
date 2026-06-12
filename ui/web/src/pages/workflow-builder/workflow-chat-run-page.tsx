@@ -7,16 +7,16 @@ import { ROUTES } from "@/lib/routes";
 import { useGraphDefinitions } from "./hooks/use-graph-definitions";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { GraphDefinition } from "@/types/workflow-graph";
-import type { WorkflowRun } from "@/types/workflow";
+import type { WorkflowRun, WorkflowRunEvent } from "@/types/workflow";
 
 interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   status?: string;
+  events?: WorkflowRunEvent[]; // node-level execution events for progress display
 }
 
-// renderOutput turns a workflow run's output map into a readable reply. It
-// prefers common reply fields (content/message/response/text), else pretty JSON.
+// renderOutput turns a workflow run's output map into a readable reply.
 function renderOutput(output: Record<string, unknown> | undefined): string {
   if (!output || Object.keys(output).length === 0) return "(无输出)";
   for (const key of ["content", "message", "response", "text", "result"]) {
@@ -24,6 +24,47 @@ function renderOutput(output: Record<string, unknown> | undefined): string {
     if (typeof v === "string" && v) return v;
   }
   return JSON.stringify(output, null, 2);
+}
+
+// NodeProgressTable renders the execution events as a per-node status table.
+function NodeProgressTable({ events }: { events: WorkflowRunEvent[] }) {
+  // Build node status from events
+  const nodes: Record<string, { id: string; status: "pending" | "running" | "completed" | "error"; message: string }> = {};
+  for (const ev of events) {
+    const nid = ev.node_id || "";
+    if (!nid) continue;
+    if (ev.type === "node_start") {
+      nodes[nid] = { id: nid, status: "running", message: ev.message };
+    } else if (ev.type === "node_complete") {
+      nodes[nid] = { id: nid, status: "completed", message: ev.message };
+    } else if (ev.type === "node_error") {
+      nodes[nid] = { id: nid, status: "error", message: ev.message };
+    }
+  }
+  const list = Object.values(nodes);
+  if (list.length === 0) return null;
+
+  const statusIcon = (s: string) => {
+    switch (s) {
+      case "completed": return "✅";
+      case "error": return "❌";
+      case "running": return "⏳";
+      default: return "⬜";
+    }
+  };
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="text-xs font-medium text-muted-foreground">执行进度:</div>
+      {list.map((n) => (
+        <div key={n.id} className="flex items-center gap-2 rounded border px-2 py-1 text-xs">
+          <span>{statusIcon(n.status)}</span>
+          <span className="font-medium">{n.id}</span>
+          <span className="truncate text-muted-foreground">{n.message.replace(/^node \S+ \(\S+\) /, "")}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // WorkflowChatRunPage runs a saved workflow conversationally: each user message
@@ -94,10 +135,15 @@ export function WorkflowChatRunPage() {
           progress("⚙️ 执行流程中…");
         }
         const run: WorkflowRun = await runDefinition(id, runInput);
-        // Replace progress message with final result
+        // Replace progress message with final result + node progress table
         setTurns((t) => {
           const filtered = t.filter((turn) => turn.status !== "progress");
-          return [...filtered, { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status }];
+          return [...filtered, {
+            role: "assistant",
+            text: renderOutput(run.output as Record<string, unknown>),
+            status: run.status,
+            events: run.events,
+          }];
         });
       } catch (err) {
         setTurns((t) => {
@@ -143,6 +189,7 @@ export function WorkflowChatRunPage() {
                     <div className="mb-1 text-[10px] uppercase text-muted-foreground">{turn.status}</div>
                   ) : null}
                   <div className="whitespace-pre-wrap">{turn.text}</div>
+                  {turn.events && turn.events.length > 0 ? <NodeProgressTable events={turn.events} /> : null}
                 </div>
               </div>
             ))
