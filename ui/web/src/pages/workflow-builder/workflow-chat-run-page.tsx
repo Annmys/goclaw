@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Send, ArrowLeft, Paperclip, X } from "lucide-react";
+import { Send, ArrowLeft, Paperclip, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
@@ -26,43 +26,100 @@ function renderOutput(output: Record<string, unknown> | undefined): string {
   return JSON.stringify(output, null, 2);
 }
 
-// NodeProgressTable renders the execution events as a per-node status table.
+// extractFilePath detects a downloadable file path from the output text.
+// Looks for /app/workspace/... paths which are servable via /v1/files/.
+function extractFilePath(text: string): string | null {
+  const m = text.match(/\/app\/workspace\/[^\s"',}]+\.xlsx/);
+  return m ? m[0] : null;
+}
+
+// fileDownloadUrl builds the download URL for a workspace file.
+function fileDownloadUrl(filePath: string): string {
+  // /v1/files/{path...} serves files by absolute path (minus leading /)
+  const relative = filePath.replace(/^\//, "");
+  return `/v1/files/${relative}`;
+}
+
+// NodeProgressTable renders execution events as a structured table showing
+// each node's name, type, status, duration, and output summary.
 function NodeProgressTable({ events }: { events: WorkflowRunEvent[] }) {
-  // Build node status from events
-  const nodes: Record<string, { id: string; status: "pending" | "running" | "completed" | "error"; message: string }> = {};
+  // Build per-node state from event stream
+  const nodes: Record<string, {
+    id: string;
+    type: string;
+    status: "pending" | "running" | "completed" | "error";
+    startTime?: string;
+    endTime?: string;
+    output?: string;
+  }> = {};
+
   for (const ev of events) {
     const nid = ev.node_id || "";
     if (!nid) continue;
+    // Extract node type from message pattern "node xxx (type) started/completed"
+    const typeMatch = ev.message.match(/\((\w[\w-]*)\)/);
+    const nodeType = typeMatch ? typeMatch[1] : "";
+
     if (ev.type === "node_start") {
-      nodes[nid] = { id: nid, status: "running", message: ev.message };
+      nodes[nid] = { id: nid, type: nodeType || (nodes[nid]?.type ?? ""), status: "running", startTime: ev.created_at };
     } else if (ev.type === "node_complete") {
-      nodes[nid] = { id: nid, status: "completed", message: ev.message };
+      const existing = nodes[nid] || { id: nid, type: nodeType || "" };
+      const outputStr = ev.payload ? JSON.stringify(ev.payload).slice(0, 80) : "";
+      nodes[nid] = { ...existing, type: existing.type || nodeType || "", status: "completed", endTime: ev.created_at, output: outputStr };
     } else if (ev.type === "node_error") {
-      nodes[nid] = { id: nid, status: "error", message: ev.message };
+      const existing = nodes[nid] || { id: nid, type: nodeType || "" };
+      nodes[nid] = { ...existing, type: existing.type || nodeType || "", status: "error", endTime: ev.created_at, output: ev.message };
     }
   }
+
   const list = Object.values(nodes);
   if (list.length === 0) return null;
 
-  const statusIcon = (s: string) => {
+  const statusLabel = (s: string) => {
     switch (s) {
-      case "completed": return "✅";
-      case "error": return "❌";
-      case "running": return "⏳";
-      default: return "⬜";
+      case "completed": return <span className="text-green-600 font-medium">✅ 完成</span>;
+      case "error": return <span className="text-red-600 font-medium">❌ 失败</span>;
+      case "running": return <span className="text-amber-600 font-medium">⏳ 执行中</span>;
+      default: return <span className="text-muted-foreground">⬜ 待执行</span>;
     }
   };
 
+  const duration = (start?: string, end?: string) => {
+    if (!start || !end) return "-";
+    const ms = new Date(end).getTime() - new Date(start).getTime();
+    return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  };
+
   return (
-    <div className="mt-2 space-y-1">
-      <div className="text-xs font-medium text-muted-foreground">执行进度:</div>
-      {list.map((n) => (
-        <div key={n.id} className="flex items-center gap-2 rounded border px-2 py-1 text-xs">
-          <span>{statusIcon(n.status)}</span>
-          <span className="font-medium">{n.id}</span>
-          <span className="truncate text-muted-foreground">{n.message.replace(/^node \S+ \(\S+\) /, "")}</span>
-        </div>
-      ))}
+    <div className="mt-3 overflow-x-auto rounded border">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b bg-muted/50 text-left">
+            <th className="px-2 py-1.5 font-medium">节点</th>
+            <th className="px-2 py-1.5 font-medium">类型</th>
+            <th className="px-2 py-1.5 font-medium">状态</th>
+            <th className="px-2 py-1.5 font-medium">耗时</th>
+            <th className="px-2 py-1.5 font-medium">输出摘要</th>
+          </tr>
+        </thead>
+        <tbody>
+          {list.map((n) => (
+            <tr
+              key={n.id}
+              className={
+                n.status === "error" ? "bg-red-50 dark:bg-red-950/20" :
+                n.status === "running" ? "bg-amber-50 dark:bg-amber-950/20" : ""
+              }
+            >
+              <td className="px-2 py-1.5 font-medium">{n.id}</td>
+              <td className="px-2 py-1.5 text-muted-foreground">{n.type}</td>
+              <td className="px-2 py-1.5">{statusLabel(n.status)}</td>
+              <td className="px-2 py-1.5 text-muted-foreground">{duration(n.startTime, n.endTime)}</td>
+              <td className="max-w-[200px] truncate px-2 py-1.5 text-muted-foreground">{n.output || "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -190,6 +247,18 @@ export function WorkflowChatRunPage() {
                   ) : null}
                   <div className="whitespace-pre-wrap">{turn.text}</div>
                   {turn.events && turn.events.length > 0 ? <NodeProgressTable events={turn.events} /> : null}
+                  {turn.role === "assistant" && turn.text && extractFilePath(turn.text) ? (
+                    <div className="mt-2">
+                      <a
+                        href={fileDownloadUrl(extractFilePath(turn.text)!)}
+                        download
+                        className="inline-flex items-center gap-1.5 rounded border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        下载结果文件
+                      </a>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             ))
