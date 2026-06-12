@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
 import { useGraphDefinitions } from "./hooks/use-graph-definitions";
+import { useAuthStore } from "@/stores/use-auth-store";
 import type { GraphDefinition } from "@/types/workflow-graph";
 import type { WorkflowRun } from "@/types/workflow";
 
@@ -33,13 +34,25 @@ export function WorkflowChatRunPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getDefinition, runDefinition, uploadFile } = useGraphDefinitions();
+  const userId = useAuthStore((s) => s.userId);
   const [def, setDef] = useState<GraphDefinition | null>(null);
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Persistent chat history per workflow + user (survives navigation)
+  const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}`;
+  const [turns, setTurns] = useState<ChatTurn[]>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch { return []; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(storageKey, JSON.stringify(turns)); } catch {}
+  }, [turns, storageKey]);
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
@@ -53,27 +66,44 @@ export function WorkflowChatRunPage() {
     async (text: string) => {
       const message = text.trim();
       const file = pendingFile;
-      // allow sending with only a file (no text), e.g. EPL just needs the xlsx
       if ((!message && !file) || busy || !id) return;
       setInput("");
       setPendingFile(null);
       setTurns((t) => [...t, { role: "user", text: file ? `${message || "(已上传文件)"} 📎 ${file.name}` : message }]);
       setBusy(true);
+
+      // Progress helper: show intermediate status as a temporary assistant message
+      const progress = (msg: string) => setTurns((t) => {
+        const last = t[t.length - 1];
+        if (last?.role === "assistant" && last.status === "progress") {
+          return [...t.slice(0, -1), { role: "assistant", text: msg, status: "progress" }];
+        }
+        return [...t, { role: "assistant", text: msg, status: "progress" }];
+      });
+
       try {
         const runInput: Record<string, unknown> = { message };
         if (file) {
+          progress("⬆️ 上传文件中…");
           const up = await uploadFile(file);
           runInput.file_path = up.path;
           runInput.file_name = up.filename;
           runInput.file_type = up.mime_type;
+          progress("⚙️ 执行流程中…");
+        } else {
+          progress("⚙️ 执行流程中…");
         }
         const run: WorkflowRun = await runDefinition(id, runInput);
-        setTurns((t) => [
-          ...t,
-          { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status },
-        ]);
+        // Replace progress message with final result
+        setTurns((t) => {
+          const filtered = t.filter((turn) => turn.status !== "progress");
+          return [...filtered, { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status }];
+        });
       } catch (err) {
-        setTurns((t) => [...t, { role: "assistant", text: `运行失败:${(err as Error).message}`, status: "failed" }]);
+        setTurns((t) => {
+          const filtered = t.filter((turn) => turn.status !== "progress");
+          return [...filtered, { role: "assistant", text: `运行失败:${(err as Error).message}`, status: "failed" }];
+        });
       } finally {
         setBusy(false);
       }
