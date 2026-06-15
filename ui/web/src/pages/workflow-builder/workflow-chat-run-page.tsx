@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Send, ArrowLeft, Paperclip, X, Download, Plus } from "lucide-react";
+import { Send, ArrowLeft, Paperclip, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
@@ -149,32 +149,8 @@ export function WorkflowChatRunPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Multi-session support: each workflow can have multiple chat sessions.
-  // Sessions list is stored per workflow+user; active session is switchable.
-  const sessionsKey = `wf-sessions:${userId || "anon"}:${id || "none"}`;
-  const [sessions, setSessions] = useState<{ id: string; title: string; createdAt: string }[]>(() => {
-    try { const r = localStorage.getItem(sessionsKey); return r ? JSON.parse(r) : []; }
-    catch { return []; }
-  });
-  const [activeSessionId, setActiveSessionId] = useState<string>(() => sessions[0]?.id || "");
-
-  // Create a new session if none exists
-  useEffect(() => {
-    if (sessions.length === 0) {
-      const newId = uid();
-      const newSession = { id: newId, title: "新会话", createdAt: new Date().toISOString() };
-      setSessions([newSession]);
-      setActiveSessionId(newId);
-    }
-  }, [sessions.length]);
-
-  // Persist sessions list
-  useEffect(() => {
-    try { localStorage.setItem(sessionsKey, JSON.stringify(sessions)); } catch {}
-  }, [sessions, sessionsKey]);
-
-  // Per-session chat history
-  const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}:${activeSessionId}`;
+  // Single persistent chat history per workflow + user
+  const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}`;
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
     try { const r = localStorage.getItem(storageKey); return r ? JSON.parse(r) : []; }
     catch { return []; }
@@ -183,20 +159,20 @@ export function WorkflowChatRunPage() {
     try { localStorage.setItem(storageKey, JSON.stringify(turns)); } catch {}
   }, [turns, storageKey]);
 
-  // Reload turns when switching session
+  // Register this workflow session into the sidebar history (wf-history:{userId})
   useEffect(() => {
+    if (!id || !def) return;
+    const historyKey = `wf-history:${userId || "anon"}`;
     try {
-      const r = localStorage.getItem(storageKey);
-      setTurns(r ? JSON.parse(r) : []);
-    } catch { setTurns([]); }
-  }, [activeSessionId, storageKey]);
-
-  const newSession = () => {
-    const newId = uid();
-    const s = { id: newId, title: `会话 ${sessions.length + 1}`, createdAt: new Date().toISOString() };
-    setSessions((prev) => [s, ...prev]);
-    setActiveSessionId(newId);
-  };
+      const history: { id: string; wfId: string; title: string; pinned: boolean; createdAt: string }[] =
+        JSON.parse(localStorage.getItem(historyKey) || "[]");
+      // Don't duplicate
+      if (history.some((h) => h.wfId === id)) return;
+      history.unshift({ id: uid(), wfId: id, title: def.name || "未命名流程", pinned: false, createdAt: new Date().toISOString() });
+      // Keep max 20 entries
+      localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 20)));
+    } catch {}
+  }, [id, def, userId]);
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
@@ -323,42 +299,18 @@ export function WorkflowChatRunPage() {
       <PageHeader
         title={def ? `运行:${def.name}` : "运行工作流"}
         actions={
-          <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={newSession}>
-              <Plus className="mr-1 h-4 w-4" />
-              新会话
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate(ROUTES.WORKFLOW_DEFINITIONS)}>
-              <ArrowLeft className="mr-1 h-4 w-4" />
-              返回流程库
-            </Button>
-          </div>
+          <Button size="sm" variant="outline" onClick={() => navigate(ROUTES.WORKFLOW_DEFINITIONS)}>
+            <ArrowLeft className="mr-1 h-4 w-4" />
+            返回流程库
+          </Button>
         }
       />
 
-      <div className="flex min-h-0 flex-1">
-        {/* Sessions sidebar */}
-        <div className="w-48 shrink-0 space-y-1 overflow-y-auto border-r p-2">
-          <div className="px-1 pb-1 text-xs font-medium text-muted-foreground">历史会话</div>
-          {sessions.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSessionId(s.id)}
-              className={`w-full truncate rounded px-2 py-1.5 text-left text-xs ${s.id === activeSessionId ? "bg-accent font-medium" : "hover:bg-accent/50"}`}
-            >
-              {s.title}
-              <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</div>
-            </button>
-          ))}
-        </div>
-
-        {/* Chat area */}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-            <div className="mx-auto max-w-2xl space-y-3">
-              {turns.length === 0 ? (
-                <p className="pt-8 text-center text-sm text-muted-foreground">
-                  输入消息以运行该工作流。你发送的内容会作为流程输入(可在节点中用 &lt;trigger.message&gt; 引用)。
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+        <div className="mx-auto max-w-2xl space-y-3">
+          {turns.length === 0 ? (
+            <p className="pt-8 text-center text-sm text-muted-foreground">
+              输入消息以运行该工作流。你发送的内容会作为流程输入(可在节点中用 &lt;trigger.message&gt; 引用)。
                 </p>
               ) : (
             turns.map((turn, i) => (
@@ -450,8 +402,6 @@ export function WorkflowChatRunPage() {
             </Button>
           </div>
         </div>
-      </div>
-      </div>
       </div>
     </div>
   );

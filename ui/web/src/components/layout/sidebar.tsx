@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -20,7 +20,6 @@ import {
   Volume2,
   Cpu,
   ClipboardList,
-  Play,
   HardDrive,
   Inbox,
   Brain,
@@ -45,30 +44,6 @@ import { cn } from "@/lib/utils";
 import { usePendingPairingsCount } from "@/hooks/use-pending-pairings-count";
 import { useAuthStore } from "@/stores/use-auth-store";
 import { useTenants } from "@/hooks/use-tenants";
-import { useQuery } from "@tanstack/react-query";
-import { useHttp } from "@/hooks/use-ws";
-
-// useSidebarWorkflows fetches saved workflow names for the dynamic menu items.
-// Guarded + silent: only runs when authenticated and never throws, so a failure
-// can never crash the global sidebar (which is outside the page ErrorBoundary).
-function useSidebarWorkflows(): { id: string; name: string }[] {
-  const http = useHttp();
-  const connected = useAuthStore((s) => s.connected);
-  const query = useQuery({
-    queryKey: ["sidebar-workflow-defs"],
-    enabled: connected,
-    retry: false,
-    queryFn: async () => {
-      try {
-        const res = await http.get<{ definitions: { id: string; name: string }[] }>("/v1/workflow-definitions");
-        return res.definitions ?? [];
-      } catch {
-        return [];
-      }
-    },
-  });
-  return query.data ?? [];
-}
 
 interface SidebarProps {
   collapsed: boolean;
@@ -81,33 +56,6 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
   const role = useAuthStore((s) => s.role);
   const { isOwner } = useTenants();
   const isAdmin = role === "admin" || role === "owner";
-  const workflowDefs = useSidebarWorkflows();
-
-  // Load recent workflow sessions from localStorage for the sidebar
-  const recentSessions = useMemo(() => {
-    try {
-      const results: { key: string; path: string; title: string }[] = [];
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (!k || !k.startsWith("wf-sessions:")) continue;
-        const sessions: { id: string; title: string; createdAt: string }[] = JSON.parse(localStorage.getItem(k) || "[]");
-        // Extract workflow id from key: wf-sessions:{user}:{workflowId}
-        const parts = k.split(":");
-        const wfId = parts[parts.length - 1] || "";
-        for (const s of sessions.slice(0, 3)) {
-          if (!wfId) continue;
-          results.push({
-            key: `${wfId}:${s.id}`,
-            path: ROUTES.WORKFLOW_CHAT_RUN.replace(":id", wfId) as string,
-            title: s.title,
-          });
-        }
-      }
-      return results.slice(0, 8); // max 8 total in sidebar
-    } catch {
-      return [];
-    }
-  }, []);
 
   return (
     <aside
@@ -150,28 +98,8 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
           <SidebarItem to={ROUTES.WORKFLOW_AI} icon={Sparkles} label={t("nav.workflowAI")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_DEFINITIONS} icon={Workflow} label={t("nav.workflowDefinitions")} collapsed={collapsed} />
           <SidebarItem to={ROUTES.WORKFLOW_BUILDER} icon={Blocks} label={t("nav.workflowBuilder")} collapsed={collapsed} />
-          {workflowDefs.map((d) => (
-            <SidebarItem
-              key={d.id}
-              to={ROUTES.WORKFLOW_CHAT_RUN.replace(":id", d.id)}
-              icon={Play}
-              label={d.name || "未命名流程"}
-              collapsed={collapsed}
-            />
-          ))}
-          {!collapsed && recentSessions.length > 0 && (
-            <div className="mt-2 border-t pt-2">
-              <div className="px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">历史会话</div>
-              {recentSessions.map((s) => (
-                <SidebarItem
-                  key={s.key}
-                  to={s.path}
-                  icon={History}
-                  label={s.title}
-                  collapsed={collapsed}
-                />
-              ))}
-            </div>
+          {!collapsed && (
+            <WorkflowHistorySidebar />
           )}
         </SidebarGroup>
 
@@ -243,5 +171,66 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
         <ConnectionStatus collapsed={collapsed} />
       </div>
     </aside>
+  );
+}
+
+// WorkflowHistorySidebar shows the last 5 workflow chat sessions in the sidebar.
+// Sessions are per-user (localStorage), support pinning, and "查看全部" for overflow.
+// Users only see their own sessions (localStorage is inherently per-browser).
+function WorkflowHistorySidebar() {
+  const userId = useAuthStore((s) => s.userId);
+  const storageKey = `wf-history:${userId || "anon"}`;
+
+  const [sessions, setSessions] = useState<{ id: string; wfId: string; title: string; pinned: boolean; createdAt: string }[]>(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey) || "[]"); }
+    catch { return []; }
+  });
+  const [showAll, setShowAll] = useState(false);
+
+  // Sort: pinned first, then by date desc
+  const sorted = useMemo(() => {
+    return [...sessions].sort((a, b) => {
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
+  }, [sessions]);
+
+  const visible = showAll ? sorted : sorted.slice(0, 5);
+
+  const togglePin = (id: string) => {
+    const updated = sessions.map((s) => s.id === id ? { ...s, pinned: !s.pinned } : s);
+    setSessions(updated);
+    try { localStorage.setItem(storageKey, JSON.stringify(updated)); } catch {}
+  };
+
+  if (sessions.length === 0) return null;
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <div className="px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">历史会话</div>
+      {visible.map((s) => (
+        <div key={s.id} className="group flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent">
+          <a href={`/workflow/chat/${s.wfId}`} className="min-w-0 flex-1 truncate">
+            {s.pinned ? "📌 " : ""}{s.title}
+          </a>
+          <button
+            onClick={() => togglePin(s.id)}
+            className="hidden shrink-0 text-[10px] text-muted-foreground hover:text-foreground group-hover:block"
+            title={s.pinned ? "取消置顶" : "置顶"}
+          >
+            {s.pinned ? "✕" : "📌"}
+          </button>
+        </div>
+      ))}
+      {sorted.length > 5 && !showAll && (
+        <button
+          onClick={() => setShowAll(true)}
+          className="w-full px-2 py-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+        >
+          查看全部 ({sorted.length})
+        </button>
+      )}
+    </div>
   );
 }
