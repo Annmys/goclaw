@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -82,6 +83,32 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
   const isAdmin = role === "admin" || role === "owner";
   const workflowDefs = useSidebarWorkflows();
 
+  // Load recent workflow sessions from localStorage for the sidebar
+  const recentSessions = useMemo(() => {
+    try {
+      const results: { key: string; path: string; title: string }[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (!k || !k.startsWith("wf-sessions:")) continue;
+        const sessions: { id: string; title: string; createdAt: string }[] = JSON.parse(localStorage.getItem(k) || "[]");
+        // Extract workflow id from key: wf-sessions:{user}:{workflowId}
+        const parts = k.split(":");
+        const wfId = parts[parts.length - 1] || "";
+        for (const s of sessions.slice(0, 3)) {
+          if (!wfId) continue;
+          results.push({
+            key: `${wfId}:${s.id}`,
+            path: ROUTES.WORKFLOW_CHAT_RUN.replace(":id", wfId) as string,
+            title: s.title,
+          });
+        }
+      }
+      return results.slice(0, 8); // max 8 total in sidebar
+    } catch {
+      return [];
+    }
+  }, []);
+
   return (
     <aside
       className={cn(
@@ -132,6 +159,20 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
               collapsed={collapsed}
             />
           ))}
+          {!collapsed && recentSessions.length > 0 && (
+            <div className="mt-2 border-t pt-2">
+              <div className="px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">历史会话</div>
+              {recentSessions.map((s) => (
+                <SidebarItem
+                  key={s.key}
+                  to={s.path}
+                  icon={History}
+                  label={s.title}
+                  collapsed={collapsed}
+                />
+              ))}
+            </div>
+          )}
         </SidebarGroup>
 
         <SidebarGroup label={t("groups.conversations")} collapsed={collapsed}>

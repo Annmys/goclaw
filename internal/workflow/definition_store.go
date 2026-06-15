@@ -84,30 +84,30 @@ func (e *Engine) GetDefinition(ctx context.Context, id string) (*GraphDefinition
 	if e.db == nil {
 		return nil, errors.New("workflow: no database configured")
 	}
-	tenantID, userID := scopeIDs(ctx)
+	tenantID, _ := scopeIDs(ctx)
 	def, err := scanDefinition(e.db.QueryRowContext(ctx, `
 		SELECT id, tenant_id, user_id, name, description, graph_json, version, active, created_at, updated_at
 		FROM workflow_definitions
-		WHERE id = $1 AND tenant_id = $2 AND user_id = $3
-	`, id, tenantID, userID))
+		WHERE id = $1 AND tenant_id = $2
+	`, id, tenantID))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrDefinitionNotFound
 	}
 	return def, err
 }
 
-// ListDefinitions returns all graph definitions in the caller's scope.
+// ListDefinitions returns all graph definitions in the caller's tenant (shared).
 func (e *Engine) ListDefinitions(ctx context.Context) ([]GraphDefinition, error) {
 	if e.db == nil {
 		return nil, errors.New("workflow: no database configured")
 	}
-	tenantID, userID := scopeIDs(ctx)
+	tenantID, _ := scopeIDs(ctx)
 	rows, err := e.db.QueryContext(ctx, `
 		SELECT id, tenant_id, user_id, name, description, graph_json, version, active, created_at, updated_at
 		FROM workflow_definitions
-		WHERE tenant_id = $1 AND user_id = $2
+		WHERE tenant_id = $1
 		ORDER BY updated_at DESC
-	`, tenantID, userID)
+	`, tenantID)
 	if err != nil {
 		return nil, err
 	}
