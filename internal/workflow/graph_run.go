@@ -125,3 +125,89 @@ func (e *Engine) StartGraphRun(ctx context.Context, defID string, input map[stri
 	}
 	return run, execErr
 }
+
+// StartGraphRunWithObserver is like StartGraphRun but accepts an external
+// observer for real-time SSE streaming of node events.
+func (e *Engine) StartGraphRunWithObserver(ctx context.Context, defID string, input map[string]any, observer dag.StepObserver) (Run, error) {
+	def, err := e.GetDefinition(ctx, defID)
+	if err != nil {
+		return Run{}, err
+	}
+
+	tenantID, userID := scopeIDs(ctx)
+	now := time.Now().UTC()
+	run := Run{
+		ID:              uuid.NewString(),
+		WorkflowID:      def.ID,
+		WorkflowName:    def.Name,
+		WorkflowVersion: def.Version,
+		TenantID:        tenantID.String(),
+		UserID:          userID,
+		Status:          RunRunning,
+		Input:           input,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+
+	var runner handlers.Runner
+	if e.runner != nil {
+		runner = runnerAdapter{r: e.runner}
+	}
+	reg := handlers.BuildRegistry(runner, "", userID, tenantID.String())
+
+	collector := &eventCollector{}
+	combined := &combinedObserver{a: observer, b: collector}
+	exec := dag.NewExecutor(&def.Graph, reg,
+		dag.WithObserver(combined),
+		dag.WithVariables(input),
+	)
+
+	start := time.Now()
+	res, execErr := exec.Run(ctx, "")
+	run.Events = collector.events
+	run.DurationMS = time.Since(start).Milliseconds()
+	run.UpdatedAt = time.Now().UTC()
+
+	if execErr != nil {
+		run.Status = RunFailed
+		run.Output = map[string]any{"error": execErr.Error()}
+	} else if res.Paused != nil {
+		run.Status = RunWaitingUserInput
+		run.Output = res.Output
+	} else {
+		run.Status = RunCompleted
+		run.Output = res.Output
+	}
+
+	e.mu.Lock()
+	e.runs[run.ID] = run
+	e.mu.Unlock()
+	if e.db != nil {
+		if err := e.saveRun(ctx, run); err != nil {
+			return run, err
+		}
+	}
+	return run, execErr
+}
+
+// combinedObserver fans out to two observers.
+type combinedObserver struct{ a, b dag.StepObserver }
+
+func (c *combinedObserver) OnNodeStart(nodeID, nodeType string, inputs map[string]any) {
+	if c.a != nil {
+		c.a.OnNodeStart(nodeID, nodeType, inputs)
+	}
+	c.b.OnNodeStart(nodeID, nodeType, inputs)
+}
+func (c *combinedObserver) OnNodeComplete(nodeID, nodeType string, output map[string]any) {
+	if c.a != nil {
+		c.a.OnNodeComplete(nodeID, nodeType, output)
+	}
+	c.b.OnNodeComplete(nodeID, nodeType, output)
+}
+func (c *combinedObserver) OnNodeError(nodeID, nodeType string, err error) {
+	if c.a != nil {
+		c.a.OnNodeError(nodeID, nodeType, err)
+	}
+	c.b.OnNodeError(nodeID, nodeType, err)
+}

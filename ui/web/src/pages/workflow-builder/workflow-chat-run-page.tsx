@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
-import { Send, ArrowLeft, Paperclip, X, Download } from "lucide-react";
+import { Send, ArrowLeft, Paperclip, X, Download, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { ROUTES } from "@/lib/routes";
 import { useGraphDefinitions } from "./hooks/use-graph-definitions";
+import { useHttp } from "@/hooks/use-ws";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { GraphDefinition } from "@/types/workflow-graph";
 import type { WorkflowRun, WorkflowRunEvent } from "@/types/workflow";
+
+// Safe UUID generator (crypto.randomUUID unavailable on HTTP)
+let _idSeq = 0;
+function uid(): string {
+  _idSeq++;
+  return `${Date.now()}-${_idSeq}-${Math.random().toString(36).slice(2, 8)}`;
+}
 
 interface ChatTurn {
   role: "user" | "assistant";
@@ -132,6 +140,7 @@ export function WorkflowChatRunPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { getDefinition, runDefinition, uploadFile } = useGraphDefinitions();
+  const http = useHttp();
   const userId = useAuthStore((s) => s.userId);
   const [def, setDef] = useState<GraphDefinition | null>(null);
   const [input, setInput] = useState("");
@@ -140,17 +149,54 @@ export function WorkflowChatRunPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Persistent chat history per workflow + user (survives navigation)
-  const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}`;
+  // Multi-session support: each workflow can have multiple chat sessions.
+  // Sessions list is stored per workflow+user; active session is switchable.
+  const sessionsKey = `wf-sessions:${userId || "anon"}:${id || "none"}`;
+  const [sessions, setSessions] = useState<{ id: string; title: string; createdAt: string }[]>(() => {
+    try { const r = localStorage.getItem(sessionsKey); return r ? JSON.parse(r) : []; }
+    catch { return []; }
+  });
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => sessions[0]?.id || "");
+
+  // Create a new session if none exists
+  useEffect(() => {
+    if (sessions.length === 0) {
+      const newId = uid();
+      const newSession = { id: newId, title: "新会话", createdAt: new Date().toISOString() };
+      setSessions([newSession]);
+      setActiveSessionId(newId);
+    }
+  }, [sessions.length]);
+
+  // Persist sessions list
+  useEffect(() => {
+    try { localStorage.setItem(sessionsKey, JSON.stringify(sessions)); } catch {}
+  }, [sessions, sessionsKey]);
+
+  // Per-session chat history
+  const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}:${activeSessionId}`;
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw) : [];
-    } catch { return []; }
+    try { const r = localStorage.getItem(storageKey); return r ? JSON.parse(r) : []; }
+    catch { return []; }
   });
   useEffect(() => {
     try { localStorage.setItem(storageKey, JSON.stringify(turns)); } catch {}
   }, [turns, storageKey]);
+
+  // Reload turns when switching session
+  useEffect(() => {
+    try {
+      const r = localStorage.getItem(storageKey);
+      setTurns(r ? JSON.parse(r) : []);
+    } catch { setTurns([]); }
+  }, [activeSessionId, storageKey]);
+
+  const newSession = () => {
+    const newId = uid();
+    const s = { id: newId, title: `会话 ${sessions.length + 1}`, createdAt: new Date().toISOString() };
+    setSessions((prev) => [s, ...prev]);
+    setActiveSessionId(newId);
+  };
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
@@ -170,37 +216,95 @@ export function WorkflowChatRunPage() {
       setTurns((t) => [...t, { role: "user", text: file ? `${message || "(已上传文件)"} 📎 ${file.name}` : message }]);
       setBusy(true);
 
-      // Progress helper: show intermediate status as a temporary assistant message
-      const progress = (msg: string) => setTurns((t) => {
-        const last = t[t.length - 1];
-        if (last?.role === "assistant" && last.status === "progress") {
-          return [...t.slice(0, -1), { role: "assistant", text: msg, status: "progress" }];
-        }
-        return [...t, { role: "assistant", text: msg, status: "progress" }];
-      });
+      // Live events accumulator for the progress table
+      const liveEvents: WorkflowRunEvent[] = [];
+      const updateProgress = () => {
+        setTurns((t) => {
+          const last = t[t.length - 1];
+          if (last?.role === "assistant" && last.status === "progress") {
+            return [...t.slice(0, -1), { role: "assistant", text: "⚙️ 执行中…", status: "progress", events: [...liveEvents] }];
+          }
+          return [...t, { role: "assistant", text: "⚙️ 执行中…", status: "progress", events: [...liveEvents] }];
+        });
+      };
 
       try {
         const runInput: Record<string, unknown> = { message };
         if (file) {
-          progress("⬆️ 上传文件中…");
+          setTurns((t) => [...t, { role: "assistant", text: "⬆️ 上传文件中…", status: "progress" }]);
           const up = await uploadFile(file);
           runInput.file_path = up.path;
           runInput.file_name = up.filename;
           runInput.file_type = up.mime_type;
-          progress("⚙️ 执行流程中…");
-        } else {
-          progress("⚙️ 执行流程中…");
         }
-        const run: WorkflowRun = await runDefinition(id, runInput);
-        // Replace progress message with final result + node progress table
+        updateProgress();
+
+        // Use SSE streaming endpoint for real-time node updates
+        const token = useAuthStore.getState().token;
+        const resp = await fetch(`/v1/workflow-definitions/${id}/run/stream`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+          body: JSON.stringify({ input: runInput }),
+        });
+
+        if (!resp.ok || !resp.body) {
+          // Fallback to non-streaming
+          const run: WorkflowRun = await runDefinition(id, runInput);
+          setTurns((t) => {
+            const filtered = t.filter((turn) => turn.status !== "progress");
+            return [...filtered, { role: "assistant", text: renderOutput(run.output as Record<string, unknown>), status: run.status, events: run.events }];
+          });
+          return;
+        }
+
+        // Read SSE stream
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let finalRun: WorkflowRun | null = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE events from buffer
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          let eventType = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) {
+              eventType = line.slice(7).trim();
+            } else if (line.startsWith("data: ")) {
+              const data = line.slice(6);
+              try {
+                const parsed = JSON.parse(data);
+                if (eventType === "node_start") {
+                  liveEvents.push({ id: uid(), type: "node_start", node_id: parsed.node_id, message: `node ${parsed.node_id} (${parsed.node_type}) started`, created_at: new Date().toISOString() });
+                  updateProgress();
+                } else if (eventType === "node_complete") {
+                  liveEvents.push({ id: uid(), type: "node_complete", node_id: parsed.node_id, message: `node ${parsed.node_id} (${parsed.node_type}) completed`, payload: { output: parsed.output }, created_at: new Date().toISOString() });
+                  updateProgress();
+                } else if (eventType === "node_error") {
+                  liveEvents.push({ id: uid(), type: "node_error", node_id: parsed.node_id, message: `node ${parsed.node_id} (${parsed.node_type}) error: ${parsed.error}`, created_at: new Date().toISOString() });
+                  updateProgress();
+                } else if (eventType === "done") {
+                  finalRun = parsed.run;
+                } else if (eventType === "error") {
+                  liveEvents.push({ id: uid(), type: "node_error", node_id: "system", message: parsed.error || "unknown error", created_at: new Date().toISOString() });
+                  updateProgress();
+                }
+              } catch { /* skip unparseable */ }
+              eventType = "";
+            }
+          }
+        }
+
+        // Final result
         setTurns((t) => {
           const filtered = t.filter((turn) => turn.status !== "progress");
-          return [...filtered, {
-            role: "assistant",
-            text: renderOutput(run.output as Record<string, unknown>),
-            status: run.status,
-            events: run.events,
-          }];
+          const output = finalRun?.output ? renderOutput(finalRun.output as Record<string, unknown>) : "执行完成";
+          return [...filtered, { role: "assistant", text: output, status: finalRun?.status || "completed", events: [...liveEvents] }];
         });
       } catch (err) {
         setTurns((t) => {
@@ -219,20 +323,44 @@ export function WorkflowChatRunPage() {
       <PageHeader
         title={def ? `运行:${def.name}` : "运行工作流"}
         actions={
-          <Button size="sm" variant="outline" onClick={() => navigate(ROUTES.WORKFLOW_DEFINITIONS)}>
-            <ArrowLeft className="mr-1 h-4 w-4" />
-            返回流程库
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={newSession}>
+              <Plus className="mr-1 h-4 w-4" />
+              新会话
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => navigate(ROUTES.WORKFLOW_DEFINITIONS)}>
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              返回流程库
+            </Button>
+          </div>
         }
       />
 
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        <div className="mx-auto max-w-2xl space-y-3">
-          {turns.length === 0 ? (
-            <p className="pt-8 text-center text-sm text-muted-foreground">
-              输入消息以运行该工作流。你发送的内容会作为流程输入(可在节点中用 &lt;trigger.message&gt; 引用)。
-            </p>
-          ) : (
+      <div className="flex min-h-0 flex-1">
+        {/* Sessions sidebar */}
+        <div className="w-48 shrink-0 space-y-1 overflow-y-auto border-r p-2">
+          <div className="px-1 pb-1 text-xs font-medium text-muted-foreground">历史会话</div>
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => setActiveSessionId(s.id)}
+              className={`w-full truncate rounded px-2 py-1.5 text-left text-xs ${s.id === activeSessionId ? "bg-accent font-medium" : "hover:bg-accent/50"}`}
+            >
+              {s.title}
+              <div className="text-[10px] text-muted-foreground">{new Date(s.createdAt).toLocaleDateString()}</div>
+            </button>
+          ))}
+        </div>
+
+        {/* Chat area */}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <div className="mx-auto max-w-2xl space-y-3">
+              {turns.length === 0 ? (
+                <p className="pt-8 text-center text-sm text-muted-foreground">
+                  输入消息以运行该工作流。你发送的内容会作为流程输入(可在节点中用 &lt;trigger.message&gt; 引用)。
+                </p>
+              ) : (
             turns.map((turn, i) => (
               <div key={i} className={turn.role === "user" ? "flex justify-end" : "flex justify-start"}>
                 <div
@@ -249,14 +377,21 @@ export function WorkflowChatRunPage() {
                   {turn.events && turn.events.length > 0 ? <NodeProgressTable events={turn.events} /> : null}
                   {turn.role === "assistant" && turn.text && extractFilePath(turn.text) ? (
                     <div className="mt-2">
-                      <a
-                        href={fileDownloadUrl(extractFilePath(turn.text)!)}
-                        download
+                      <button
+                        onClick={async () => {
+                          const fp = extractFilePath(turn.text)!;
+                          try {
+                            const res = await http.post<{ url: string }>("/v1/files/sign", { path: fp });
+                            window.open(res.url, "_blank");
+                          } catch {
+                            window.open(fileDownloadUrl(fp), "_blank");
+                          }
+                        }}
                         className="inline-flex items-center gap-1.5 rounded border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
                       >
                         <Download className="h-3.5 w-3.5" />
                         下载结果文件
-                      </a>
+                      </button>
                     </div>
                   ) : null}
                 </div>
@@ -315,6 +450,8 @@ export function WorkflowChatRunPage() {
             </Button>
           </div>
         </div>
+      </div>
+      </div>
       </div>
     </div>
   );
