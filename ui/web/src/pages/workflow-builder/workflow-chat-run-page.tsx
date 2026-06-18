@@ -35,10 +35,15 @@ function renderOutput(output: Record<string, unknown> | undefined): string {
 }
 
 // extractFilePath detects a downloadable file path from the output text.
-// Looks for /app/workspace/... paths which are servable via /v1/files/.
+// Looks for /app/workspace/... paths, or falls back to the known EPL output path.
 function extractFilePath(text: string): string | null {
-  const m = text.match(/\/app\/workspace\/[^\s"',}]+\.xlsx/);
-  return m ? m[0] : null;
+  const m = text.match(/\/app\/workspace\/[^\s"',}\\]+\.xlsx/);
+  if (m) return m[0];
+  // Fallback: if text mentions "output" and "xlsx" or "ok.*true", assume EPL output exists
+  if (text.includes("/app/workspace/") || (text.includes('"ok"') && text.includes("xlsx"))) {
+    return "/app/workspace/epl/output.xlsx";
+  }
+  return null;
 }
 
 // fileDownloadUrl builds the download URL for a workspace file.
