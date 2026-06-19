@@ -231,7 +231,7 @@ function WorkflowHistorySidebar() {
           </a>
           <button
             onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === s.id ? null : s.id); }}
-            className="hidden shrink-0 rounded px-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
+            className="shrink-0 rounded px-1 text-muted-foreground hover:bg-background hover:text-foreground"
           >
             ⋯
           </button>

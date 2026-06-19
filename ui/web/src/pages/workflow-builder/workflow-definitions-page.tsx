@@ -15,7 +15,7 @@ export function WorkflowDefinitionsPage() {
 
   const openNew = () => navigate(ROUTES.WORKFLOW_BUILDER);
   const openEdit = (id: string) => navigate(ROUTES.WORKFLOW_BUILDER_EDIT.replace(":id", id));
-  const openRun = (id: string) => navigate(ROUTES.WORKFLOW_CHAT_RUN.replace(":id", id));
+  const openRun = (id: string) => navigate(ROUTES.WORKFLOW_CHAT_RUN.replace(":id", id) + "?new=1");
 
   // Ensure the built-in EPL workflow exists in the library (idempotent),
   // so it shows up as a normal flow rather than behind a special button.

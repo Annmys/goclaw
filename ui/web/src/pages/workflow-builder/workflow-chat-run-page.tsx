@@ -154,9 +154,13 @@ export function WorkflowChatRunPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Detect if this is a fresh run from 流程库 (URL has ?new=1)
+  const isNewRun = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1";
+
   // Single persistent chat history per workflow + user
   const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}`;
   const [turns, setTurns] = useState<ChatTurn[]>(() => {
+    if (isNewRun) return []; // fresh start for new runs
     try { const r = localStorage.getItem(storageKey); return r ? JSON.parse(r) : []; }
     catch { return []; }
   });
@@ -164,24 +168,25 @@ export function WorkflowChatRunPage() {
     try { localStorage.setItem(storageKey, JSON.stringify(turns)); } catch {}
   }, [turns, storageKey]);
 
-  // Register a NEW workflow session into sidebar history every time this page opens.
-  // Each run from 流程库 creates a fresh conversation (never reuses old ones).
+  // Register a NEW workflow session into sidebar history ONLY when coming from 流程库 (?new=1).
+  // Clicking an existing history session should NOT create a new one.
   const sessionRegistered = useRef(false);
   useEffect(() => {
-    if (!id || !def || sessionRegistered.current) return;
+    if (!id || !def || sessionRegistered.current || !isNewRun) return;
     sessionRegistered.current = true;
     const historyKey = `wf-history:${userId || "anon"}`;
     try {
       const history: { id: string; wfId: string; title: string; pinned: boolean; createdAt: string }[] =
         JSON.parse(localStorage.getItem(historyKey) || "[]");
       history.unshift({ id: uid(), wfId: id, title: def.name || "未命名流程", pinned: false, createdAt: new Date().toISOString() });
-      // Keep max 20 entries
       localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 20)));
     } catch {}
-    // Clear previous chat for this workflow so it starts fresh
+    // Clear previous chat so it starts fresh
     try { localStorage.removeItem(storageKey); } catch {}
     setTurns([]);
-  }, [id, def, userId, storageKey]);
+    // Remove ?new=1 from URL to prevent re-triggering on refresh
+    window.history.replaceState({}, "", window.location.pathname);
+  }, [id, def, userId, storageKey, isNewRun]);
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
