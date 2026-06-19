@@ -175,8 +175,8 @@ export function Sidebar({ collapsed, onNavItemClick }: SidebarProps) {
 }
 
 // WorkflowHistorySidebar shows the last 5 workflow chat sessions in the sidebar.
-// Sessions are per-user (localStorage), support pinning, and "查看全部" for overflow.
-// Users only see their own sessions (localStorage is inherently per-browser).
+// Each session has a "..." menu with delete/pin/unpin actions.
+// Users only see their own sessions (localStorage per-user).
 function WorkflowHistorySidebar() {
   const userId = useAuthStore((s) => s.userId);
   const storageKey = `wf-history:${userId || "anon"}`;
@@ -186,6 +186,7 @@ function WorkflowHistorySidebar() {
     catch { return []; }
   });
   const [showAll, setShowAll] = useState(false);
+  const [menuOpen, setMenuOpen] = useState<string | null>(null);
 
   // Sort: pinned first, then by date desc
   const sorted = useMemo(() => {
@@ -198,29 +199,58 @@ function WorkflowHistorySidebar() {
 
   const visible = showAll ? sorted : sorted.slice(0, 5);
 
-  const togglePin = (id: string) => {
-    const updated = sessions.map((s) => s.id === id ? { ...s, pinned: !s.pinned } : s);
+  const persist = (updated: typeof sessions) => {
     setSessions(updated);
     try { localStorage.setItem(storageKey, JSON.stringify(updated)); } catch {}
+  };
+
+  const togglePin = (id: string) => {
+    persist(sessions.map((s) => s.id === id ? { ...s, pinned: !s.pinned } : s));
+    setMenuOpen(null);
+  };
+
+  const deleteSession = (id: string) => {
+    persist(sessions.filter((s) => s.id !== id));
+    // Also clear the chat history for this session
+    const session = sessions.find((s) => s.id === id);
+    if (session) {
+      try { localStorage.removeItem(`wf-chat:${userId || "anon"}:${session.wfId}`); } catch {}
+    }
+    setMenuOpen(null);
   };
 
   if (sessions.length === 0) return null;
 
   return (
     <div className="mt-2 border-t pt-2">
-      <div className="px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">历史会话</div>
+      <div className="px-2 pb-1 text-[10px] font-medium uppercase text-muted-foreground">工作流历史会话</div>
       {visible.map((s) => (
-        <div key={s.id} className="group flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent">
+        <div key={s.id} className="group relative flex items-center gap-1 rounded px-2 py-1 text-xs hover:bg-accent">
           <a href={`/workflow/chat/${s.wfId}`} className="min-w-0 flex-1 truncate">
             {s.pinned ? "📌 " : ""}{s.title}
           </a>
           <button
-            onClick={() => togglePin(s.id)}
-            className="hidden shrink-0 text-[10px] text-muted-foreground hover:text-foreground group-hover:block"
-            title={s.pinned ? "取消置顶" : "置顶"}
+            onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === s.id ? null : s.id); }}
+            className="hidden shrink-0 rounded px-1 text-muted-foreground hover:bg-background hover:text-foreground group-hover:block"
           >
-            {s.pinned ? "✕" : "📌"}
+            ⋯
           </button>
+          {menuOpen === s.id && (
+            <div className="absolute right-0 top-full z-50 mt-1 w-28 rounded border bg-card py-1 shadow-lg">
+              <button
+                onClick={() => togglePin(s.id)}
+                className="w-full px-3 py-1 text-left text-xs hover:bg-accent"
+              >
+                {s.pinned ? "取消置顶" : "置顶"}
+              </button>
+              <button
+                onClick={() => deleteSession(s.id)}
+                className="w-full px-3 py-1 text-left text-xs text-red-600 hover:bg-accent"
+              >
+                删除对话
+              </button>
+            </div>
+          )}
         </div>
       ))}
       {sorted.length > 5 && !showAll && (

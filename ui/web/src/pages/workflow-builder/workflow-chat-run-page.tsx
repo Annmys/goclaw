@@ -164,20 +164,24 @@ export function WorkflowChatRunPage() {
     try { localStorage.setItem(storageKey, JSON.stringify(turns)); } catch {}
   }, [turns, storageKey]);
 
-  // Register this workflow session into the sidebar history (wf-history:{userId})
+  // Register a NEW workflow session into sidebar history every time this page opens.
+  // Each run from 流程库 creates a fresh conversation (never reuses old ones).
+  const sessionRegistered = useRef(false);
   useEffect(() => {
-    if (!id || !def) return;
+    if (!id || !def || sessionRegistered.current) return;
+    sessionRegistered.current = true;
     const historyKey = `wf-history:${userId || "anon"}`;
     try {
       const history: { id: string; wfId: string; title: string; pinned: boolean; createdAt: string }[] =
         JSON.parse(localStorage.getItem(historyKey) || "[]");
-      // Don't duplicate
-      if (history.some((h) => h.wfId === id)) return;
       history.unshift({ id: uid(), wfId: id, title: def.name || "未命名流程", pinned: false, createdAt: new Date().toISOString() });
       // Keep max 20 entries
       localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 20)));
     } catch {}
-  }, [id, def, userId]);
+    // Clear previous chat for this workflow so it starts fresh
+    try { localStorage.removeItem(storageKey); } catch {}
+    setTurns([]);
+  }, [id, def, userId, storageKey]);
 
   useEffect(() => {
     if (id) getDefinition(id).then(setDef).catch(() => setDef(null));
