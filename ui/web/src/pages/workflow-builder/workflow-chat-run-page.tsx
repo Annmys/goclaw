@@ -24,14 +24,56 @@ interface ChatTurn {
   events?: WorkflowRunEvent[]; // node-level execution events for progress display
 }
 
-// renderOutput turns a workflow run's output map into a readable reply.
+// renderOutput turns a workflow run's output into a human-friendly display.
+// For EPL results: extracts key info from JSON, formats nicely.
+// For agent markdown: preserves as-is (already formatted).
 function renderOutput(output: Record<string, unknown> | undefined): string {
   if (!output || Object.keys(output).length === 0) return "(无输出)";
   for (const key of ["content", "message", "response", "text", "result"]) {
     const v = output[key];
-    if (typeof v === "string" && v) return v;
+    if (typeof v === "string" && v) return formatResultText(v);
   }
   return JSON.stringify(output, null, 2);
+}
+
+// formatResultText: parse EPL script JSON from the combined result text,
+// replace raw JSON with a clean summary, keep agent markdown as-is.
+function formatResultText(text: string): string {
+  // Split into sections: "脚本结果:{json...}" and "数据补全:..."
+  const scriptMatch = text.match(/脚本结果:\s*(\{[\s\S]*?\})\s*(?:\n|数据补全|文件:)/);
+  if (!scriptMatch) return text; // not an EPL result, return as-is
+
+  try {
+    const jsonStr = scriptMatch[1] || "";
+    const data = JSON.parse(jsonStr);
+    const filled = data.filled || {};
+    const lines: string[] = [];
+
+    lines.push("✅ EPL 预估箱单已生成\n");
+    lines.push(`📋 订单: ${(data.orders || []).join(", ") || "未知"}`);
+    if (filled.c_n) lines.push(`📦 C/N: ${filled.c_n} (${data.boxes || "?"}箱)`);
+    if (filled.dimension) lines.push(`📐 尺寸: ${filled.dimension.replace(/\\n/g, " | ")}`);
+    if (data.gw_total) lines.push(`⚖️ G.W.: ${data.gw_total} kg`);
+    if (filled.gw?.length) {
+      for (const g of filled.gw) {
+        lines.push(`   └ ${g.series} ${g.qty}M × ${(g.net_kg / g.qty).toFixed(3)}kg/m = ${g.net_kg}kg`);
+      }
+    }
+    if (data.pkg_weight) lines.push(`   └ 外包装: ${data.pkg_weight}kg`);
+
+    // Replace the raw JSON section with formatted summary
+    let result = text.replace(/脚本结果:\s*\{[\s\S]*?\}\s*(?=\n|数据补全|文件:)/, lines.join("\n") + "\n");
+
+    // Clean up "EPL预估箱单已生成并补全数据。\n" prefix (redundant with our ✅ line)
+    result = result.replace(/^EPL预估箱单已生成并补全数据。\s*\n?/, "");
+
+    // Clean up "文件:/app/workspace/epl/output.xlsx" (download button handles this)
+    result = result.replace(/\n?文件:\/app\/workspace\/epl\/output\.xlsx\s*$/, "");
+
+    return result.trim();
+  } catch {
+    return text; // JSON parse failed, return original
+  }
 }
 
 // extractFilePath detects a downloadable file path from the output text.
