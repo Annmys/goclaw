@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -210,7 +210,9 @@ function WorkflowHistorySidebar() {
   };
 
   const deleteSession = (id: string) => {
-    persist(sessions.filter((s) => s.id !== id));
+    const updated = sessions.filter((s) => s.id !== id);
+    setSessions(updated);
+    try { localStorage.setItem(storageKey, JSON.stringify(updated)); } catch {}
     // Also clear the chat history for this session
     const session = sessions.find((s) => s.id === id);
     if (session) {
@@ -218,6 +220,18 @@ function WorkflowHistorySidebar() {
     }
     setMenuOpen(null);
   };
+
+  // Re-sync from localStorage when it changes (e.g. from another tab or component)
+  useEffect(() => {
+    const handler = () => {
+      try { setSessions(JSON.parse(localStorage.getItem(storageKey) || "[]")); }
+      catch {}
+    };
+    window.addEventListener("storage", handler);
+    // Also poll every 2s to catch same-tab changes
+    const interval = setInterval(handler, 2000);
+    return () => { window.removeEventListener("storage", handler); clearInterval(interval); };
+  }, [storageKey]);
 
   if (sessions.length === 0) return null;
 
