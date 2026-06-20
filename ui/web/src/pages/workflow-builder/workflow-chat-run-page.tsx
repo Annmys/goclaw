@@ -149,13 +149,23 @@ export function WorkflowChatRunPage() {
   const userId = useAuthStore((s) => s.userId);
   const [def, setDef] = useState<GraphDefinition | null>(null);
   const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Detect if this is a fresh run from 流程库 (URL has ?new=1)
   const isNewRun = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("new") === "1";
+
+  // Persist busy state so switching away and back shows "still running" or result
+  const busyKey = `wf-busy:${userId || "anon"}:${id || "none"}`;
+  const [busy, setBusy] = useState(() => {
+    try { return localStorage.getItem(busyKey) === "1"; }
+    catch { return false; }
+  });
+  // Sync busy to localStorage
+  useEffect(() => {
+    try { localStorage.setItem(busyKey, busy ? "1" : "0"); } catch {}
+  }, [busy, busyKey]);
 
   // Single persistent chat history per workflow + user
   const storageKey = `wf-chat:${userId || "anon"}:${id || "none"}`;
