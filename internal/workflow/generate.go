@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 
@@ -86,9 +87,11 @@ func (e *Engine) GenerateGraph(ctx context.Context, req GenerateRequest) (*Gener
 		return nil, fmt.Errorf("workflow generate: agent run failed: %w", err)
 	}
 
+	log.Printf("[workflow-generate] agent response len=%d content_preview=%.500s", len(res.Content), res.Content)
+
 	g, explanation, err := parseGeneratedGraph(res.Content)
 	if err != nil {
-		return nil, fmt.Errorf("workflow generate: %w", err)
+		return nil, fmt.Errorf("workflow generate: %w (agent_content_len=%d)", err, len(res.Content))
 	}
 	if g.Version == "" {
 		g.Version = graph.Version

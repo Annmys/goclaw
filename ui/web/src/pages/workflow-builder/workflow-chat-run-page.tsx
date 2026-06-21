@@ -248,6 +248,26 @@ export function WorkflowChatRunPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
 
+  // Recovery: if we come back and busy=true (left while running), check if the
+  // last turn is a "progress" message — if so, the SSE stream was lost when we
+  // navigated away. Show a notice and reset busy so the user can retry.
+  useEffect(() => {
+    if (!busy) return;
+    const lastTurn = turns[turns.length - 1];
+    if (lastTurn?.status === "progress") {
+      // The stream was interrupted — update the progress message to indicate this
+      setTurns((t) => {
+        const filtered = t.filter((turn) => turn.status !== "progress");
+        return [...filtered, { role: "assistant", text: "⚠️ 上次执行被中断(切走了页面)。请重新发送消息或上传文件重试。", status: "interrupted" }];
+      });
+      setBusy(false);
+    } else if (!lastTurn || lastTurn.status === "completed" || lastTurn.status === "failed") {
+      // Already finished — just clear busy
+      setBusy(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const send = useCallback(
     async (text: string) => {
       const message = text.trim();
