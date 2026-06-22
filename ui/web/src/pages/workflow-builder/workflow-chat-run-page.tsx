@@ -291,7 +291,18 @@ export function WorkflowChatRunPage() {
       };
 
       try {
-        const runInput: Record<string, unknown> = { message };
+        // Build message with conversation history so agent sees prior context
+        // (enables multi-turn flows like label-generate: draft → confirm → generate)
+        const historyContext = turns
+          .filter((t) => t.status !== "progress" && t.status !== "interrupted")
+          .slice(-6) // last 6 turns max to avoid token overflow
+          .map((t) => `[${t.role === "user" ? "用户" : "系统"}]: ${t.text.slice(0, 300)}`)
+          .join("\n");
+        const fullMessage = historyContext
+          ? `${message}\n\n--- 对话历史(供上下文参考) ---\n${historyContext}`
+          : message;
+
+        const runInput: Record<string, unknown> = { message: fullMessage };
         if (file) {
           setTurns((t) => [...t, { role: "assistant", text: "⬆️ 上传文件中…", status: "progress" }]);
           const up = await uploadFile(file);
