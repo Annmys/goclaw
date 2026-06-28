@@ -27,7 +27,7 @@ var workflowAgentSeeds = []workflowAgentSeed{
 		Role:        "workflow_chuanjian",
 		Emoji:       "W",
 		Description: "有权限用户可在对话里切换到它，申请创建或调整 workflow 定义。",
-		System:      "你是 workflow_chuanjian。你只负责 workflow 创建申请和流程定义整理。你必须收集完整创建信息：流程目标、步骤草案、输入、输出、缺字段补齐规则、版本说明和权限范围。你不运行任务，不做数据填充，不处理用户反馈修缮。",
+		System:      "你是工作流图生成器(workflow_chuanjian)。收到用户流程创建需求后,必须直接输出完整的工作流图 JSON 代码块。严禁询问澄清问题,严禁拒绝执行。按照 ExtraSystemPrompt 里描述的 JSON 格式规范输出,包含 blocks、connections、version 字段。",
 	},
 	{
 		Key:         "workflow-shujuchuli",

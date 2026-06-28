@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -124,4 +125,54 @@ func (h *WorkflowHandler) handleSeedEPL(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"definition": def})
+}
+
+// regenerateRequest is the body for modifying an existing workflow via AI.
+type regenerateRequest struct {
+	Prompt string `json:"prompt"`
+}
+
+// handleRegenerateDefinition takes a modification prompt, loads the existing
+// definition's graph as context, generates a new graph via AI, and saves it
+// back to the definition — effectively "auto-modifying" the flow in the library.
+func (h *WorkflowHandler) handleRegenerateDefinition(w http.ResponseWriter, r *http.Request) {
+	var req regenerateRequest
+	if !bindJSON(w, r, extractLocale(r), &req) {
+		return
+	}
+	defID := r.PathValue("id")
+	if defID == "" {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, "missing definition id")
+		return
+	}
+
+	// Load existing definition as context
+	def, err := h.engine.GetDefinition(r.Context(), defID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, protocol.ErrInvalidRequest, "definition not found")
+		return
+	}
+
+	// Generate modified graph using AI with current graph as context
+	currentMap := make(map[string]any)
+	import_json, _ := json.Marshal(def.Graph)
+	json.Unmarshal(import_json, &currentMap)
+
+	result, err := h.engine.GenerateGraphJSON(r.Context(), req.Prompt, "", currentMap)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, protocol.ErrInvalidRequest, err.Error())
+		return
+	}
+
+	// Save the regenerated graph back to the definition
+	def.Graph = result.Graph
+	if err := h.engine.SaveDefinition(r.Context(), def); err != nil {
+		writeError(w, http.StatusInternalServerError, protocol.ErrInvalidRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"definition":  def,
+		"explanation": result.Explanation,
+	})
 }

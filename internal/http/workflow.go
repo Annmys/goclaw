@@ -38,6 +38,7 @@ func (h *WorkflowHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /v1/workflow-definitions/{id}/run", requireAuth(permissions.RoleOperator, h.handleRunDefinition))
 	mux.HandleFunc("POST /v1/workflow-definitions/{id}/run/stream", requireAuth(permissions.RoleOperator, h.handleRunDefinitionSSE))
 	mux.HandleFunc("POST /v1/workflow-generate", requireAuth(permissions.RoleOperator, h.handleGenerate))
+	mux.HandleFunc("POST /v1/workflow-definitions/{id}/regenerate", requireAuth(permissions.RoleOperator, h.handleRegenerateDefinition))
 	mux.HandleFunc("POST /v1/workflow-templates/epl", requireAuth(permissions.RoleOperator, h.handleSeedEPL))
 }
 

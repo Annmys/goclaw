@@ -78,10 +78,13 @@ func (e *Engine) GenerateGraph(ctx context.Context, req GenerateRequest) (*Gener
 		return nil, fmt.Errorf("workflow generate: empty prompt")
 	}
 
+	// Merge format spec INTO the user message to ensure Claude follows it
+	// (ExtraSystemPrompt gets deprioritized when soul file conflicts).
+	fullMsg := msg + "\n\n【重要指令】你必须现在立刻输出一个完整的工作流图 JSON(用```json代码块包裹)。不要问问题,不要说'请描述',直接根据上面的需求设计流程并输出 JSON。格式规范:\n" + sys
+
 	res, err := e.runner.AgentRun(ctx, agentID, agent.RunRequest{
-		Message:           msg,
-		ExtraSystemPrompt: sys,
-		RunKind:           "delegation",
+		Message: fullMsg,
+		RunKind: "delegation",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("workflow generate: agent run failed: %w", err)
