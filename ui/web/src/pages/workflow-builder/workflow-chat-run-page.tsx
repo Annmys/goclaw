@@ -9,6 +9,7 @@ import { useHttp } from "@/hooks/use-ws";
 import { useAuthStore } from "@/stores/use-auth-store";
 import type { GraphDefinition } from "@/types/workflow-graph";
 import type { WorkflowRun, WorkflowRunEvent } from "@/types/workflow";
+import { WorkflowForm, tryParseForm } from "./components/workflow-form";
 
 // Safe UUID generator (crypto.randomUUID unavailable on HTTP)
 let _idSeq = 0;
@@ -74,6 +75,18 @@ function formatResultText(text: string): string {
   } catch {
     return text; // JSON parse failed, return original
   }
+}
+
+// renderTurnText cleans up the display text:
+// - Strips ---DATA--- and everything after it (raw JSON for machine use)
+// - Strips form JSON blocks (rendered as UI component instead)
+function renderTurnText(text: string): string {
+  let clean = text;
+  if (clean.includes("---DATA---")) {
+    clean = (clean.split("---DATA---")[0] || "").trim();
+  }
+  clean = clean.replace(/```json\s*\{[\s\S]*?"type"\s*:\s*"form"[\s\S]*?```/g, "").trim();
+  return clean || text;
 }
 
 // extractFilePath detects a downloadable file path from the output text.
@@ -422,7 +435,17 @@ export function WorkflowChatRunPage() {
                   {turn.status && turn.status !== "completed" ? (
                     <div className="mb-1 text-[10px] uppercase text-muted-foreground">{turn.status}</div>
                   ) : null}
-                  <div className="whitespace-pre-wrap">{turn.text}</div>
+                  <div className="whitespace-pre-wrap">{renderTurnText(turn.text)}</div>
+                  {turn.role === "assistant" && turn.text && tryParseForm(turn.text) ? (
+                    <WorkflowForm
+                      form={tryParseForm(turn.text)!}
+                      onSubmit={(values) => {
+                        const summary = Object.entries(values).map(([k, v]) => `${k}: ${v}`).join(", ");
+                        send(`用户选择: ${summary}`);
+                      }}
+                      disabled={busy}
+                    />
+                  ) : null}
                   {turn.events && turn.events.length > 0 ? <NodeProgressTable events={turn.events} /> : null}
                   {turn.role === "assistant" && turn.text && extractFilePath(turn.text) ? (
                     <div className="mt-2">
