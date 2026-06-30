@@ -274,6 +274,21 @@ func (l *Loop) buildMessages(ctx context.Context, history []providers.Message, s
 		l.sessions.Save(ctx, sessionKey)
 	}
 
+	// Skill-first enforcement: for agents with skill_first=true in other_config,
+	// inject a system reminder before the user message that they MUST use skill_search first.
+	// This is more effective than SOUL.md because it appears right before the user message
+	// (recency bias makes LLMs follow instructions closer to the current turn).
+	if l.skillFirstEnabled && len(history) == 0 {
+		messages = append(messages, providers.Message{
+			Role:    "user",
+			Content: "[System Reminder] 你收到了新任务。按照你的核心执行规则,你必须先调用 skill_search 工具搜索是否有匹配的 skill,然后根据搜索结果决定是否用 use_skill 执行。如果你跳过 skill_search 直接用 bash/exec,这次执行将被标记为不合规。",
+		})
+		messages = append(messages, providers.Message{
+			Role:    "assistant",
+			Content: "明白,我会先执行 skill_search 搜索匹配的技能。",
+		})
+	}
+
 	// Current user message
 	messages = append(messages, providers.Message{
 		Role:    "user",

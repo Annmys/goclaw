@@ -99,9 +99,10 @@ type Loop struct {
 	workspaceSharing *store.WorkspaceSharingConfig
 
 	// Per-agent overrides from DB (nil = use global defaults)
-	restrictToWs *bool
-	subagentsCfg *config.SubagentsConfig
-	memoryCfg    *config.MemoryConfig
+	restrictToWs     *bool
+	subagentsCfg     *config.SubagentsConfig
+	memoryCfg        *config.MemoryConfig
+	skillFirstEnabled bool // when true, inject skill_search reminder at start of new conversations
 	sandboxCfg   *sandbox.Config
 
 	// v3 memory/retrieval flags removed — always true at runtime.
@@ -499,6 +500,7 @@ func NewLoop(cfg LoopConfig) *Loop {
 		agentUUID:              cfg.AgentUUID,
 		tenantID:               cfg.TenantID,
 		agentOtherConfig:       append([]byte(nil), cfg.AgentOtherConfig...), // defensive copy
+		skillFirstEnabled:      parseSkillFirst(cfg.AgentOtherConfig),
 		agentType:              cfg.AgentType,
 		provider:               cfg.Provider,
 		model:                  cfg.Model,
@@ -723,4 +725,18 @@ type runState struct {
 	// Truncation retry counter — caps consecutive truncation/parse-error retries
 	// to prevent burning through all iterations when max_tokens is too low.
 	truncationRetries int
+}
+
+// parseSkillFirst checks if other_config contains "skill_first": true.
+func parseSkillFirst(otherConfig json.RawMessage) bool {
+	if len(otherConfig) == 0 {
+		return false
+	}
+	var cfg struct {
+		SkillFirst bool `json:"skill_first"`
+	}
+	if err := json.Unmarshal(otherConfig, &cfg); err != nil {
+		return false
+	}
+	return cfg.SkillFirst
 }
