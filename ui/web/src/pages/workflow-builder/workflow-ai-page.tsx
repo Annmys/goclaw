@@ -83,6 +83,16 @@ export function WorkflowAIPage() {
     [saveDefinition, navigate],
   );
 
+  // Direct save: when modifying an existing workflow, save changes directly back to library
+  const saveDirectly = useCallback(
+    async (graph: WorkflowGraph) => {
+      if (!selectedDef) return;
+      await saveDefinition({ id: selectedDef.id, name: selectedDef.name, graph });
+      setTurns((t) => [...t, { role: "assistant", text: `✅ 已保存修改到「${selectedDef.name}」流程库。` }]);
+    },
+    [selectedDef, saveDefinition],
+  );
+
   const clearChat = () => {
     setTurns([]);
     setSelectedDef(null);
@@ -183,10 +193,17 @@ export function WorkflowAIPage() {
                           </span>
                         ))}
                       </div>
-                      <Button size="sm" onClick={() => openInBuilder(turn.graph!, turn.text.slice(0, 30))}>
-                        在画布中打开
-                        <ArrowRight className="ml-1 h-3.5 w-3.5" />
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button size="sm" onClick={() => openInBuilder(turn.graph!, turn.text.slice(0, 30))}>
+                          在画布中打开
+                          <ArrowRight className="ml-1 h-3.5 w-3.5" />
+                        </Button>
+                        {selectedDef && (
+                          <Button size="sm" variant="outline" onClick={() => saveDirectly(turn.graph!)}>
+                            保存到流程库
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ) : null}
                 </div>
