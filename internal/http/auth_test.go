@@ -36,6 +36,13 @@ func setupTestToken(t *testing.T, token string) {
 	t.Cleanup(func() { pkgGatewayToken = old })
 }
 
+func setupTestNoAuthFallback(t *testing.T, allowed bool) {
+	t.Helper()
+	old := pkgNoAuthFallbackAllowed
+	pkgNoAuthFallbackAllowed = allowed
+	t.Cleanup(func() { pkgNoAuthFallbackAllowed = old })
+}
+
 func setupTestTenantStore(t *testing.T, ts store.TenantStore) {
 	t.Helper()
 	old := pkgTenantCache
@@ -94,7 +101,6 @@ func (m *mockTenantStore) ListTenants(context.Context) ([]store.TenantData, erro
 func (m *mockTenantStore) UpdateTenant(context.Context, uuid.UUID, map[string]any) error {
 	return nil
 }
-func (m *mockTenantStore) DeleteTenant(context.Context, uuid.UUID) error            { return nil }
 func (m *mockTenantStore) AddUser(context.Context, uuid.UUID, string, string) error { return nil }
 func (m *mockTenantStore) RemoveUser(context.Context, uuid.UUID, string) error      { return nil }
 func (m *mockTenantStore) GetUserRole(_ context.Context, tenantID uuid.UUID, userID string) (string, error) {
@@ -222,6 +228,7 @@ func TestResolveAuth_WrongToken(t *testing.T) {
 
 func TestResolveAuth_NoAuthConfigured(t *testing.T) {
 	setupTestCache(t, nil)
+	setupTestNoAuthFallback(t, true)
 
 	r := httptest.NewRequest("GET", "/v1/agents", nil)
 
@@ -231,6 +238,19 @@ func TestResolveAuth_NoAuthConfigured(t *testing.T) {
 	}
 	if auth.Role != permissions.RoleAdmin {
 		t.Errorf("role = %v, want admin (no token = dev/single-user mode)", auth.Role)
+	}
+}
+
+func TestResolveAuth_NoAuthConfiguredDisallowed(t *testing.T) {
+	setupTestCache(t, nil)
+	setupTestToken(t, "")
+	setupTestNoAuthFallback(t, false)
+
+	r := httptest.NewRequest("GET", "/v1/agents", nil)
+
+	auth := resolveAuth(r)
+	if auth.Authenticated {
+		t.Fatal("expected unauthenticated when no-token fallback is disabled")
 	}
 }
 
@@ -371,11 +391,38 @@ func TestResolveAuth_BrowserPairingScopesToMemberTenant(t *testing.T) {
 	if !auth.Authenticated {
 		t.Fatal("expected authenticated")
 	}
+	// Paired session inherits the user's tenant_users.role for the resolved
+	// tenant: admin in acme → permissions.RoleAdmin (not the legacy hard-coded
+	// RoleOperator).
 	if auth.Role != permissions.RoleAdmin {
 		t.Fatalf("role = %v, want admin", auth.Role)
 	}
 	if auth.TenantID != tenantID {
 		t.Fatalf("tenantID = %v, want %v", auth.TenantID, tenantID)
+	}
+}
+
+func TestResolveAuth_BrowserPairingFallsBackToOperatorWithoutMembership(t *testing.T) {
+	setupTestToken(t, "gateway-token")
+	ps := newMockPairingStore()
+	ps.paired["browser-1:browser"] = true
+	setupTestPairingStore(t, ps)
+	ts := newMockTenantStore()
+	setupTestTenantStore(t, ts)
+
+	r := httptest.NewRequest("GET", "/v1/agents", nil)
+	r.Header.Set("X-GoClaw-Sender-Id", "browser-1")
+	r.Header.Set("X-GoClaw-User-Id", "user-1")
+
+	auth := resolveAuth(r)
+	if !auth.Authenticated {
+		t.Fatal("expected authenticated")
+	}
+	// No membership row: preserve the pre-3.11 RoleOperator default so this
+	// change is backward compatible for users that pair without a tenant
+	// membership.
+	if auth.Role != permissions.RoleOperator {
+		t.Fatalf("role = %v, want operator (legacy fallback)", auth.Role)
 	}
 }
 

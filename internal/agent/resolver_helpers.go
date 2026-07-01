@@ -75,11 +75,6 @@ func buildTeamMD(team *store.TeamData, members []store.TeamMemberData, selfID uu
 
 	// Workflow guidance — version-aware to match backend behavior.
 	sb.WriteString("\n## Workflow\n\n")
-	if workflowInstructions := strings.TrimSpace(tools.ParseWorkflowInstructions(team.Settings)); workflowInstructions != "" {
-		sb.WriteString("## Team-Specific Workflow\n\n")
-		sb.WriteString(workflowInstructions)
-		sb.WriteString("\n\n")
-	}
 	if selfRole == store.TeamRoleLead {
 		sb.WriteString("Delegate work to team members using `team_tasks` with `assignee`.\n\n")
 		sb.WriteString("```\nteam_tasks(action=\"create\", subject=\"...\", description=\"...\", assignee=\"agent-key\")\n```\n\n")
@@ -126,9 +121,7 @@ func buildTeamMD(team *store.TeamData, members []store.TeamMemberData, selfID uu
 		sb.WriteString("\nFor simple questions about team composition, answer directly from the member list above.\n")
 	} else {
 		if selfRole == store.TeamRoleReviewer {
-			sb.WriteString("You are a **reviewer**. When evaluating, respond with **APPROVED** or **REJECTED: <feedback>**.\n")
-			sb.WriteString("Your review must always check both data accuracy and Excel presentation quality.\n")
-			sb.WriteString("Mandatory Excel checks: merged cells, borders/lines, column widths, row heights, alignment, headers, images/Logo, and whether the output is readable/printable.\n\n")
+			sb.WriteString("You are a **reviewer**. When evaluating, respond with **APPROVED** or **REJECTED: <feedback>**.\n\n")
 		}
 		sb.WriteString("As a member, focus entirely on your assigned task.\n\n")
 		sb.WriteString("Rules:\n")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,7 +21,8 @@ import (
 func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx context.Context, state *pipeline.RunState, tc providers.ToolCall) ([]providers.Message, error) {
 	emitRun := makeToolEmitRun(l, req)
 	return func(ctx context.Context, state *pipeline.RunState, tc providers.ToolCall) ([]providers.Message, error) {
-		registryName := l.resolveToolCallName(tc.Name)
+		tc = l.normalizeToolCall(tc)
+		registryName := l.canonicalToolName(l.resolveToolCallName(tc.Name))
 		argsJSON, _ := json.Marshal(tc.Arguments)
 		slog.Info("tool call", "agent", l.id, "tool", tc.Name, "args_len", len(argsJSON))
 
@@ -33,7 +35,7 @@ func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx
 
 		// Emit tool span start for tracing.
 		toolStart := time.Now().UTC()
-		toolSpanID := l.emitToolSpanStart(ctx, toolStart, tc.Name, tc.ID, string(argsJSON))
+		toolSpanID := l.emitToolSpanStart(ctx, toolStart, registryName, tc.ID, string(argsJSON))
 
 		// Inject agent audio snapshot so TTS tool (and any future audio consumers)
 		// can read agent-level voice/model config without an extra DB lookup.
@@ -43,15 +45,24 @@ func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx
 				OtherConfig: append([]byte(nil), l.agentOtherConfig...), // defensive copy at dispatch
 			})
 		}
+		ctx = store.WithChannelContextScope(ctx, channelContextScopeForRun(req))
 
-		result := l.tools.ExecuteWithContext(ctx, registryName, tc.Arguments,
-			req.Channel, req.ChatID, req.PeerKind, req.SessionKey, nil)
+		// C2 fix: route through executeToolForActor so per-user MCP tools
+		// resolve to the calling user's BridgeTool (not the first user's
+		// BridgeTool leaked via shared registry).
+		actorUserID := resolveActorUserID(req.UserID, req.SenderID, req.PeerKind, req.ChannelType)
+		result := l.executeToolForActor(ctx, registryName, tc.Arguments,
+			req.Channel, req.ChatID, req.PeerKind, req.SessionKey, actorUserID)
 		toolDuration := time.Since(toolStart)
 
 		l.emitToolSpanEnd(ctx, toolSpanID, toolStart, result)
+		l.recordToolUsageEvent(ctx, req, registryName, tc.Name, tc.ID, tc.Arguments, toolStart, result, toolSpanID)
 
 		// v3 evolution metrics: record tool execution non-blocking (best-effort).
-		l.recordToolMetric(ctx, req.SessionKey, registryName, tc.Arguments, result, toolDuration)
+		l.recordToolMetric(ctx, req.SessionKey, registryName, !result.IsError, toolDuration)
+		if registryName == "use_skill" {
+			l.recordSkillUsageFromTool(ctx, req, tc, result, toolDuration)
+		}
 
 		toolMsg, warningMsgs, action := l.processToolResult(ctx, bridgeRS, req, emitRun, tc, registryName, result, state.Context.HadBootstrap)
 		syncBridgeToState(bridgeRS, state, action)
@@ -65,9 +76,12 @@ func (l *Loop) makeExecuteToolCall(req *RunRequest, bridgeRS *runState) func(ctx
 
 // toolRawResult wraps a tools.Result with timing for metrics recording.
 type toolRawResult struct {
-	result      *tools.Result
-	duration    time.Duration
-	compression toolResultCompressionInfo
+	result   *tools.Result
+	duration time.Duration
+	start    time.Time
+	spanID   uuid.UUID
+	toolName string
+	rawName  string
 }
 
 // makeExecuteToolRaw wraps tool I/O only (parallel-safe, no state mutation).
@@ -75,7 +89,8 @@ type toolRawResult struct {
 func (l *Loop) makeExecuteToolRaw(req *RunRequest) func(ctx context.Context, tc providers.ToolCall) (providers.Message, any, error) {
 	emitRun := makeToolEmitRun(l, req)
 	return func(ctx context.Context, tc providers.ToolCall) (providers.Message, any, error) {
-		registryName := l.resolveToolCallName(tc.Name)
+		tc = l.normalizeToolCall(tc)
+		registryName := l.canonicalToolName(l.resolveToolCallName(tc.Name))
 		argsJSON, _ := json.Marshal(tc.Arguments)
 		slog.Info("tool call", "agent", l.id, "tool", tc.Name, "args_len", len(argsJSON))
 
@@ -92,7 +107,7 @@ func (l *Loop) makeExecuteToolRaw(req *RunRequest) func(ctx context.Context, tc 
 
 		// Emit tool span start (goroutine-safe: channel send only).
 		start := time.Now().UTC()
-		spanID := l.emitToolSpanStart(ctx, start, tc.Name, tc.ID, string(argsJSON))
+		spanID := l.emitToolSpanStart(ctx, start, registryName, tc.ID, string(argsJSON))
 
 		// Inject agent audio snapshot (parallel path — same as sequential makeExecuteToolCall).
 		if l.agentUUID != uuid.Nil {
@@ -101,23 +116,42 @@ func (l *Loop) makeExecuteToolRaw(req *RunRequest) func(ctx context.Context, tc 
 				OtherConfig: append([]byte(nil), l.agentOtherConfig...), // defensive copy at dispatch
 			})
 		}
+		ctx = store.WithChannelContextScope(ctx, channelContextScopeForRun(req))
 
-		result := l.tools.ExecuteWithContext(ctx, registryName, tc.Arguments,
-			req.Channel, req.ChatID, req.PeerKind, req.SessionKey, nil)
+		// C2 fix (parallel path): route through executeToolForActor for per-user
+		// MCP tool isolation. Same rationale as makeExecuteToolCall above.
+		actorUserID := resolveActorUserID(req.UserID, req.SenderID, req.PeerKind, req.ChannelType)
+		result := l.executeToolForActor(ctx, registryName, tc.Arguments,
+			req.Channel, req.ChatID, req.PeerKind, req.SessionKey, actorUserID)
 		dur := time.Since(start)
 
 		// Emit tool span end inside goroutine to prevent orphaned spans on ctx cancellation.
 		l.emitToolSpanEnd(ctx, spanID, start, result)
 
-		contentForLLM, compressionInfo := compressToolResultForNextTurnWithInfo(registryName, result.ForLLM)
 		msg := providers.Message{
 			Role:       "tool",
-			Content:    contentForLLM,
+			Content:    result.ForLLM,
 			ToolCallID: tc.ID,
 			IsError:    result.IsError,
 		}
-		return msg, &toolRawResult{result: result, duration: dur, compression: compressionInfo}, nil
+		return msg, &toolRawResult{result: result, duration: dur, start: start, spanID: spanID, toolName: registryName, rawName: tc.Name}, nil
 	}
+}
+
+func channelContextScopeForRun(req *RunRequest) store.ChannelContextScope {
+	if req == nil || req.Channel == "" {
+		return store.ChannelContextScope{}
+	}
+	scope := store.ChannelContextScope{
+		ChannelInstanceName: req.Channel,
+		ScopeType:           store.ChannelScopeTypeChannel,
+		ScopeKey:            req.Channel,
+	}
+	if req.PeerKind == "group" && req.ChatID != "" {
+		scope.ScopeType = store.ChannelScopeTypeGroup
+		scope.ScopeKey = req.ChatID
+	}
+	return scope
 }
 
 // makeProcessToolResult wraps post-execution bookkeeping (sequential, mutates bridgeRS).
@@ -125,32 +159,40 @@ func (l *Loop) makeExecuteToolRaw(req *RunRequest) func(ctx context.Context, tc 
 func (l *Loop) makeProcessToolResult(req *RunRequest, bridgeRS *runState) func(ctx context.Context, state *pipeline.RunState, tc providers.ToolCall, rawMsg providers.Message, rawData any) []providers.Message {
 	emitRun := makeToolEmitRun(l, req)
 	return func(ctx context.Context, state *pipeline.RunState, tc providers.ToolCall, rawMsg providers.Message, rawData any) []providers.Message {
-		registryName := l.resolveToolCallName(tc.Name)
+		tc = l.normalizeToolCall(tc)
+		registryName := l.canonicalToolName(l.resolveToolCallName(tc.Name))
 
 		// Extract result and timing from toolRawResult wrapper.
 		var result *tools.Result
 		var dur time.Duration
-		var compression toolResultCompressionInfo
+		var start time.Time
+		var spanID uuid.UUID
+		var rawName string
 		if raw, ok := rawData.(*toolRawResult); ok && raw != nil {
 			result = raw.result
 			dur = raw.duration
-			compression = raw.compression
+			start = raw.start
+			spanID = raw.spanID
+			registryName = raw.toolName
+			rawName = raw.rawName
 		} else if r, ok := rawData.(*tools.Result); ok {
 			result = r // backward compat
 		}
 		if result == nil {
 			return []providers.Message{rawMsg}
 		}
-		if compression.Compressed {
-			bridgeRS.toolCompressionEvents = append(bridgeRS.toolCompressionEvents, toolCompressionEvent{
-				ToolName:        registryName,
-				OriginalChars:   compression.OriginalChars,
-				CompressedChars: compression.CompressedChars,
-			})
+		if rawName == "" {
+			rawName = tc.Name
+		}
+		if !start.IsZero() {
+			l.recordToolUsageEvent(ctx, req, registryName, rawName, tc.ID, tc.Arguments, start, result, spanID)
 		}
 
 		// Record tool metrics (non-blocking, best-effort).
-		l.recordToolMetric(ctx, req.SessionKey, registryName, tc.Arguments, result, dur)
+		l.recordToolMetric(ctx, req.SessionKey, registryName, !result.IsError, dur)
+		if registryName == "use_skill" {
+			l.recordSkillUsageFromTool(ctx, req, tc, result, dur)
+		}
 
 		toolMsg, warningMsgs, action := l.processToolResult(ctx, bridgeRS, req, emitRun, tc, registryName, result, state.Context.HadBootstrap)
 		syncBridgeToState(bridgeRS, state, action)
@@ -179,9 +221,6 @@ func syncBridgeToState(bridgeRS *runState, state *pipeline.RunState, action tool
 	state.Tool.LoopKilled = bridgeRS.loopKilled
 	state.Tool.AsyncToolCalls = bridgeRS.asyncToolCalls
 	state.Tool.Deliverables = bridgeRS.deliverables
-	if len(bridgeRS.toolCompressionEvents) > 0 {
-		state.Tool.ToolCompressionEvents = append([]toolCompressionEvent(nil), bridgeRS.toolCompressionEvents...)
-	}
 	state.Evolution.BootstrapWrite = bridgeRS.bootstrapWriteDetected
 	state.Evolution.TeamTaskSpawns = bridgeRS.teamTaskSpawns
 	state.Evolution.TeamTaskCreates = bridgeRS.teamTaskCreates
@@ -206,33 +245,17 @@ func syncBridgeToState(bridgeRS *runState, state *pipeline.RunState, action tool
 
 // recordToolMetric records a tool execution metric non-blocking (best-effort).
 // No-op when evolution metrics store is not configured.
-func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string, args map[string]any, result *tools.Result, duration time.Duration) {
+func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string, success bool, duration time.Duration) {
 	if l.evolutionMetricsStore == nil {
 		return
 	}
 	tenantID := store.TenantIDFromContext(ctx)
-	metricKey := toolName
-	skillName := ""
-	if toolName == "use_skill" {
-		if raw, _ := args["name"].(string); raw != "" {
-			skillName = raw
-			metricKey = "skill:" + raw
-		}
-	}
-	success := result != nil && !result.IsError
-	errorPreview := ""
-	if result != nil && result.IsError {
-		errorPreview = truncateStr(result.ForLLM, 300)
-	}
 	go func() {
 		bgCtx, cancel := context.WithTimeout(store.WithTenantID(context.Background(), tenantID), 5*time.Second)
 		defer cancel()
 		value, _ := json.Marshal(map[string]any{
-			"tool":        toolName,
-			"skill":       skillName,
 			"success":     success,
 			"duration_ms": duration.Milliseconds(),
-			"error":       errorPreview,
 		})
 		if err := l.evolutionMetricsStore.RecordMetric(bgCtx, store.EvolutionMetric{
 			ID:         uuid.New(),
@@ -240,55 +263,90 @@ func (l *Loop) recordToolMetric(ctx context.Context, sessionKey, toolName string
 			AgentID:    l.agentUUID,
 			SessionKey: sessionKey,
 			MetricType: store.MetricTool,
-			MetricKey:  metricKey,
+			MetricKey:  toolName,
 			Value:      value,
 		}); err != nil {
-			slog.Debug("evolution.metric.record_failed", "tool", toolName, "metric_key", metricKey, "error", err)
+			slog.Debug("evolution.metric.record_failed", "tool", toolName, "error", err)
 		}
 	}()
 }
 
-func (l *Loop) recordToolCompressionMetric(ctx context.Context, sessionKey string, event toolCompressionEvent) {
-	if l.evolutionMetricsStore == nil {
+func (l *Loop) recordSkillUsageFromTool(ctx context.Context, req *RunRequest, tc providers.ToolCall, result *tools.Result, duration time.Duration) {
+	name, _ := tc.Arguments["name"].(string)
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	status := store.SkillUsageStatusSucceeded
+	reason := ""
+	if result != nil && result.IsError {
+		status = store.SkillUsageStatusFailed
+		reason = strings.TrimSpace(result.ForLLM)
+		if len(reason) > 500 {
+			reason = reason[:500]
+		}
+	}
+	l.recordSkillUsage(ctx, req, name, tc.ID, "use_skill", status, reason, duration)
+}
+
+func (l *Loop) recordSkillUsage(ctx context.Context, req *RunRequest, skillName, invocationID, source, status, reason string, duration time.Duration) {
+	if l.skillEvolutionStore == nil || l.skillStore == nil {
+		return
+	}
+	info, ok := l.skillStore.GetSkill(ctx, skillName)
+	if !ok || info == nil || info.ID == "" {
+		return
+	}
+	skillID, err := uuid.Parse(info.ID)
+	if err != nil {
 		return
 	}
 	tenantID := store.TenantIDFromContext(ctx)
+	if tenantID == uuid.Nil {
+		tenantID = l.tenantID
+	}
+	metric := store.SkillUsageMetric{
+		ID:               uuid.New(),
+		SkillID:          skillID,
+		SkillSlug:        info.Slug,
+		SkillVersion:     info.Version,
+		AgentID:          l.agentUUID,
+		InvocationID:     invocationID,
+		InvocationSource: source,
+		Status:           status,
+		FailureReason:    reason,
+		DurationMs:       duration.Milliseconds(),
+	}
+	if req != nil {
+		metric.UserID = req.UserID
+		metric.SessionKey = req.SessionKey
+		if req.RunID != "" {
+			metric.TraceID = req.RunID
+		}
+	}
 	go func() {
 		bgCtx, cancel := context.WithTimeout(store.WithTenantID(context.Background(), tenantID), 5*time.Second)
 		defer cancel()
-		value, _ := json.Marshal(map[string]any{
-			"original_chars":   event.OriginalChars,
-			"compressed_chars": event.CompressedChars,
-			"saved_chars":      event.OriginalChars - event.CompressedChars,
-		})
-		if err := l.evolutionMetricsStore.RecordMetric(bgCtx, store.EvolutionMetric{
-			ID:         uuid.New(),
-			TenantID:   tenantID,
-			AgentID:    l.agentUUID,
-			SessionKey: sessionKey,
-			MetricType: store.MetricTool,
-			MetricKey:  event.ToolName + ".compression",
-			Value:      value,
-		}); err != nil {
-			slog.Debug("evolution.metric.tool_compression_failed", "tool", event.ToolName, "error", err)
+		if err := l.skillEvolutionStore.RecordUsage(bgCtx, metric); err != nil {
+			slog.Debug("skill.metric.record_failed", "skill", skillName, "source", source, "error", err)
 		}
 	}()
-}
-
-func (l *Loop) recordToolCompressionMetrics(ctx context.Context, sessionKey string, events []toolCompressionEvent) {
-	for _, event := range events {
-		l.recordToolCompressionMetric(ctx, sessionKey, event)
-	}
 }
 
 // makeToolEmitRun creates a tool event emitter with request context.
 func makeToolEmitRun(l *Loop, req *RunRequest) func(AgentEvent) {
 	return func(event AgentEvent) {
 		event.RunKind = req.RunKind
+		event.DelegationID = req.DelegationID
+		event.TeamID = req.TeamID
+		event.TeamTaskID = req.TeamTaskID
+		event.ParentAgentID = req.ParentAgentID
 		event.SessionKey = req.SessionKey
 		event.SenderID = req.SenderID
 		event.UserID = req.UserID
 		event.Channel = req.Channel
+		event.ChatID = req.ChatID
+		event.TenantID = l.tenantID
 		l.emit(event)
 	}
 }

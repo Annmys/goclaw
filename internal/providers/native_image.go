@@ -41,7 +41,7 @@ func ValidateImageModel(model string) (string, error) {
 
 // NativeImageRequest describes a single image generation request.
 type NativeImageRequest struct {
-	// Model is the parent LLM model for the Responses API call (e.g. "gpt-5.4").
+	// Model is the parent LLM model for the Responses API call (e.g. "gpt-5.5").
 	// NOT the image model — see ImageModel below.
 	// If empty, the provider uses its own default LLM model.
 	Model string
@@ -61,6 +61,18 @@ type NativeImageRequest struct {
 
 	// OutputFormat is the desired image format: "png" (default), "jpg", "webp".
 	OutputFormat string
+
+	// RefImages contains the list of reference images.
+	RefImages []RefImage
+}
+
+// RefImage represents a single reference image for image-to-image or styling tasks.
+type RefImage struct {
+	Data     []byte
+	Base64   string
+	MimeType string
+	URL      string
+	Strength float64
 }
 
 // NativeImageResult holds the result of a native image generation call.

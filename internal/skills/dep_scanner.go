@@ -24,7 +24,7 @@ type SkillManifest struct {
 
 // IsEmpty returns true if the manifest has no dependencies.
 func (m *SkillManifest) IsEmpty() bool {
-	return len(m.Requires) == 0 && len(m.RequiresPython) == 0 && len(m.RequiresNode) == 0
+	return len(m.Requires) == 0 && len(m.RequiresPython) == 0 && len(m.RequiresNode) == 0 && len(m.Explicit) == 0
 }
 
 // ScanSkillDeps auto-detects dependencies by statically analyzing the scripts/ directory,
@@ -166,20 +166,15 @@ func scanFile(path string, pyImports, nodeImports map[string]bool, binaries map[
 
 	switch ext {
 	case ".py":
-		inTripleQuotedString := false
 		for _, line := range strings.Split(content, "\n") {
 			line = strings.TrimSpace(line)
-			codeLine := stripPythonTripleQuotedStringLine(line, &inTripleQuotedString)
-			if codeLine == "" {
-				continue
-			}
-			if m := pyImportRe.FindStringSubmatch(codeLine); len(m) > 1 {
+			if m := pyImportRe.FindStringSubmatch(line); len(m) > 1 {
 				// Skip JS ES module imports inside string literals (e.g. `import mermaid from '...'`)
-				if !jsFromStringRe.MatchString(codeLine) {
+				if !jsFromStringRe.MatchString(line) {
 					pyImports[m[1]] = true
 				}
 			}
-			if m := pyFromRe.FindStringSubmatch(codeLine); len(m) > 1 {
+			if m := pyFromRe.FindStringSubmatch(line); len(m) > 1 {
 				pyImports[m[1]] = true
 			}
 		}
@@ -195,32 +190,6 @@ func scanFile(path string, pyImports, nodeImports map[string]bool, binaries map[
 			}
 		}
 	}
-}
-
-func stripPythonTripleQuotedStringLine(line string, inTriple *bool) string {
-	var out strings.Builder
-	for len(line) > 0 {
-		iDouble := strings.Index(line, `"""`)
-		iSingle := strings.Index(line, `'''`)
-		i := -1
-		if iDouble >= 0 && (iSingle < 0 || iDouble < iSingle) {
-			i = iDouble
-		} else if iSingle >= 0 {
-			i = iSingle
-		}
-		if i < 0 {
-			if !*inTriple {
-				out.WriteString(line)
-			}
-			break
-		}
-		if !*inTriple {
-			out.WriteString(line[:i])
-		}
-		*inTriple = !*inTriple
-		line = line[i+3:]
-	}
-	return strings.TrimSpace(out.String())
 }
 
 func normalizeNodePkg(pkg string) string {

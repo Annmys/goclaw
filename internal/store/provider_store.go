@@ -33,7 +33,17 @@ const (
 	ProviderNovita          = "novita"          // Novita AI (OpenAI-compatible endpoint)
 	ProviderBytePlus        = "byteplus"        // BytePlus ModelArk (Seed 2.0 models)
 	ProviderBytePlusCoding  = "byteplus_coding" // BytePlus ModelArk Coding Plan
-	ProviderKimiCoding      = "kimi_coding"     // Moonshot Kimi for Coding API
+	ProviderVertex          = "vertex"          // Google Cloud Vertex AI (OAuth2 service account + ADC)
+	ProviderKimiCoding      = "kimi_coding"     // Moonshot Kimi Coding (OpenAI-compat, requires fixed User-Agent)
+
+	// MiniMax defaults.
+	MiniMaxDefaultAPIBase = "https://api.minimax.io/v1"
+	MiniMaxDefaultModel   = "MiniMax-M3"
+
+	// Z.AI defaults.
+	ZaiDefaultAPIBase       = "https://api.z.ai/api/paas/v4"
+	ZaiCodingDefaultAPIBase = "https://api.z.ai/api/coding/paas/v4"
+	ZaiDefaultModel         = "glm-5.2"
 
 	// Novita AI defaults.
 	NovitaDefaultAPIBase = "https://api.novita.ai/openai"
@@ -43,7 +53,18 @@ const (
 	BytePlusDefaultAPIBase       = "https://ark.ap-southeast.bytepluses.com/api/v3"
 	BytePlusCodingDefaultAPIBase = "https://ark.ap-southeast.bytepluses.com/api/coding/v3"
 	BytePlusDefaultModel         = "seed-2-0-lite-260228"
+
+	// Kimi Coding defaults. The upstream requires a fixed User-Agent on every
+	// request — handled by the runtime in cmd/gateway_providers.go via
+	// OpenAIProvider.WithExtraHeaders.
+	KimiCodingDefaultAPIBase    = "https://api.kimi.com/coding/v1"
+	KimiCodingDefaultModel      = "kimi-k2-turbo-preview"
+	KimiCodingRequiredUserAgent = "claude-code/0.1.0"
 )
+
+// Vertex AI constants live in internal/providers/vertex.go to avoid a store→providers import cycle
+// (store is imported by providers). DB-layer concerns (ProviderVertex type + settings parsing)
+// remain in this package.
 
 // ValidProviderTypes lists all accepted provider_type values.
 var ValidProviderTypes = map[string]bool{
@@ -71,7 +92,31 @@ var ValidProviderTypes = map[string]bool{
 	ProviderNovita:          true,
 	ProviderBytePlus:        true,
 	ProviderBytePlusCoding:  true,
+	ProviderVertex:          true,
 	ProviderKimiCoding:      true,
+}
+
+// VertexProviderSettings holds Vertex-specific config stored in llm_providers.settings JSONB.
+type VertexProviderSettings struct {
+	ProjectID string `json:"project_id"`
+	Region    string `json:"region"`
+	Model     string `json:"model,omitempty"` // optional default model override (e.g. "google/gemini-2.5-pro-001")
+}
+
+// ParseVertexProviderSettings extracts Vertex config from settings JSONB.
+// Returns nil if project_id or region is missing (both required).
+func ParseVertexProviderSettings(settings json.RawMessage) *VertexProviderSettings {
+	if len(settings) == 0 {
+		return nil
+	}
+	var s VertexProviderSettings
+	if json.Unmarshal(settings, &s) != nil {
+		return nil
+	}
+	if s.ProjectID == "" || s.Region == "" {
+		return nil
+	}
+	return &s
 }
 
 // LLMProviderData represents an LLM provider configuration.
@@ -104,6 +149,27 @@ type EmbeddingSettings struct {
 type ProviderReasoningConfig struct {
 	Effort   string `json:"effort,omitempty" db:"-"`
 	Fallback string `json:"fallback,omitempty" db:"-"`
+}
+
+// OllamaSettings holds Ollama-specific configuration stored in the provider settings JSONB.
+type OllamaSettings struct {
+	// NumCtx overrides the context window size sent in options.num_ctx on every request.
+	// When nil, the gateway queries the Ollama API (/api/show) for the model's native
+	// context length, falling back to 131072 if the API is unreachable.
+	NumCtx *int `json:"num_ctx,omitempty" db:"-"`
+}
+
+// ParseOllamaSettings extracts Ollama-specific config from a provider's settings JSONB.
+// Returns nil when no relevant settings are present.
+func ParseOllamaSettings(settings json.RawMessage) *OllamaSettings {
+	if len(settings) == 0 {
+		return nil
+	}
+	var s OllamaSettings
+	if json.Unmarshal(settings, &s) != nil || s.NumCtx == nil {
+		return nil
+	}
+	return &s
 }
 
 // ChatGPTOAuthProviderSettings holds provider-level defaults for Codex account pooling.
@@ -181,6 +247,7 @@ var NoEmbeddingTypes = map[string]bool{
 	ProviderACP:             true,
 	ProviderClaudeCLI:       true,
 	ProviderChatGPTOAuth:    true,
+	ProviderVertex:          true, // Vertex embeddings live on a different native endpoint, not on /endpoints/openapi
 }
 
 // ProviderStore manages LLM providers.

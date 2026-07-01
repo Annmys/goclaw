@@ -37,6 +37,15 @@ Conversation to summarize:
 
 `
 
+const defaultCompactionTimeout = 120 * time.Second
+
+func (l *Loop) compactionTimeout() time.Duration {
+	if l.compactionCfg != nil && l.compactionCfg.TimeoutSeconds > 0 {
+		return time.Duration(l.compactionCfg.TimeoutSeconds) * time.Second
+	}
+	return defaultCompactionTimeout
+}
+
 // compactMessagesInPlace summarizes the first ~70% of messages into a condensed
 // summary, keeping the last ~30% intact. Operates purely on the local messages
 // slice — no session state touched, no locks needed.
@@ -84,21 +93,29 @@ func (l *Loop) compactMessagesInPlace(ctx context.Context, messages []providers.
 		}
 	}
 
-	sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	timeout := l.compactionTimeout()
+	sctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	inTokens := l.estimateSummaryInputTokens(toSummarize)
-	slog.Info("compact_budget", "agent", l.id, "in_tokens", inTokens, "out_tokens", dynamicSummaryMax(inTokens))
-	resp, err := l.provider.Chat(sctx, providers.ChatRequest{
+	slog.Info("compact_budget",
+		"path", "mid-loop",
+		"agent", l.id,
+		"in_tokens", inTokens,
+		"out_tokens", dynamicSummaryMax(inTokens),
+		"timeout_seconds", int(timeout/time.Second),
+	)
+	chatReq := providers.ChatRequest{
 		Messages: []providers.Message{{
 			Role:    "user",
 			Content: compactionSummaryPrompt + sb.String(),
 		}},
 		Model:   l.model,
 		Options: map[string]any{"max_tokens": dynamicSummaryMax(inTokens), "temperature": 0.3},
-	})
+	}
+	resp, err := l.callInternalLLMWithUsage(sctx, chatReq, "mid-loop-compaction")
 	if err != nil {
-		slog.Warn("mid_loop_compaction_failed", "agent", l.id, "error", err)
+		slog.Warn("mid_loop_compaction_failed", "agent", l.id, "timeout_seconds", int(timeout/time.Second), "error", err)
 		return nil
 	}
 

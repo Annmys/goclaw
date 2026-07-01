@@ -12,15 +12,14 @@
 //	     - collapseConsecutiveDuplicateBlocks()
 //
 // Additional Go-specific:
-//	  5. stripEchoedSystemMessages()       → strip hallucinated [System Message] blocks
-//	  6. stripGarbledToolXML()             → strip garbled XML from models like DeepSeek
+//  5. stripEchoedSystemMessages()       → strip hallucinated [System Message] blocks
+//  6. stripGarbledToolXML()             → strip garbled XML from models like DeepSeek
 package agent
 
 import (
 	"log/slog"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
@@ -82,9 +81,34 @@ var garbledToolXMLPattern = regexp.MustCompile(
 	`(?s)</?(?:function_calls?|functioninvoke|invoke|invfunction_calls|tool_call|tool_use|parameter|minimax:tool_call)[^>]*>`,
 )
 
+// fullToolCallBlockPattern matches a COMPLETE Anthropic-style tool-call block
+// (`<function_calls>...</function_calls>`) that a model emitted as text instead
+// of invoking it natively. Unlike garbledToolXMLPattern — which removes only the
+// tags — this captures the whole block, tags plus the inner <parameter> text, so
+// a stray block is removed cleanly rather than leaving the argument values
+// orphaned in the user-facing reply.
+var fullToolCallBlockPattern = regexp.MustCompile(
+	`(?is)<function_calls?>.*?</function_calls?>`,
+)
+
+// invokeNamePattern extracts the tool name from an `<invoke name="...">` tag so a
+// dropped text-encoded tool call can be logged with the tool it tried to call.
+var invokeNamePattern = regexp.MustCompile(`(?i)<invoke\s+name="([^"]+)"`)
+
+// bareInvokeBlockPattern matches a complete `<invoke name="...">...</invoke>`
+// block emitted as text WITHOUT the surrounding <function_calls> wrapper. Some
+// models — and the claude-cli proxy under a degraded session — drop the wrapper
+// and emit just the invoke block, which fullToolCallBlockPattern misses; the
+// tag-only strip would then leak the inner <parameter> text. Applied after the
+// wrapped form so wrapper-nested invokes are already gone.
+var bareInvokeBlockPattern = regexp.MustCompile(
+	`(?is)<invoke\s+name="[^"]*".*?</invoke>`,
+)
+
 var garbledToolXMLIndicators = []string{
 	"invfunction_calls",
 	"functioninvoke",
+	"<invoke name=",
 	"<parameter name=",
 	"</parameter",
 	"<function_call",
@@ -106,18 +130,53 @@ func stripGarbledToolXML(content string) string {
 		return content
 	}
 
-	cleaned := garbledToolXMLPattern.ReplaceAllString(content, "")
-	cleaned = strings.TrimSpace(cleaned)
+	original := content
+
+	// A COMPLETE tool-call block is not "garble" — it is a tool call the model
+	// wrote as TEXT instead of invoking it natively. This shows up with the
+	// claude-cli thin-proxy provider, where tool execution lives inside the CLI:
+	// when the model emits the call as text the tool never runs, and the tag-only
+	// strip below would leave the inner <parameter> values mangled into the reply.
+	// Remove whole blocks — <function_calls>...</function_calls> wrappers first,
+	// then any bare <invoke>...</invoke> left without a wrapper — and log the
+	// attempted tool name(s) at WARN so this otherwise-silent no-op is diagnosable.
+	var droppedTools []string
+	var droppedBlocks int
+	for _, re := range []*regexp.Regexp{fullToolCallBlockPattern, bareInvokeBlockPattern} {
+		blocks := re.FindAllString(content, -1)
+		if len(blocks) == 0 {
+			continue
+		}
+		droppedBlocks += len(blocks)
+		for _, b := range blocks {
+			for _, m := range invokeNamePattern.FindAllStringSubmatch(b, -1) {
+				droppedTools = append(droppedTools, m[1])
+			}
+		}
+		content = re.ReplaceAllString(content, "")
+	}
+	if droppedBlocks > 0 {
+		slog.Warn("dropped text-encoded tool call from response",
+			"tools", droppedTools,
+			"blocks", droppedBlocks,
+			"hint", "model wrote a tool call as text instead of invoking it; the tool did not run",
+		)
+	}
+
+	// Strip any remaining stray tags (partial DeepSeek/GLM/Minimax artifacts).
+	cleaned := strings.TrimSpace(garbledToolXMLPattern.ReplaceAllString(content, ""))
 
 	if cleaned == "" {
-		slog.Warn("stripped entire response as garbled tool XML", "original_len", len(content))
+		slog.Warn("stripped entire response as garbled tool XML", "original_len", len(original))
 		return ""
 	}
 
-	slog.Warn("stripped garbled tool call XML from response",
-		"original_len", len(content),
-		"remaining_len", len(cleaned),
-	)
+	if cleaned != original {
+		slog.Warn("stripped garbled tool call XML from response",
+			"original_len", len(original),
+			"remaining_len", len(cleaned),
+		)
+	}
 	return cleaned
 }
 
@@ -170,8 +229,10 @@ func stripDowngradedToolCallText(content string) string {
 
 // Matches TS stripThinkingTagsFromText() with strict mode.
 // Strips: <redacted_thinking>...</redacted_thinking>, <think>...</think>,
-//         <thinking>...</thinking>, <thought>...</thought>,
-//         <antThinking>...</antThinking>
+//
+//	<thinking>...</thinking>, <thought>...</thought>,
+//	<antThinking>...</antThinking>
+//
 // Go regexp doesn't support backreferences, so we use separate patterns.
 var thinkingTagPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)<redacted_thinking\b[^>]*>.*?</redacted_thinking\s*>`),
@@ -378,17 +439,12 @@ func StripConfigLeak(content, agentType string) string {
 
 // --- NO_REPLY detection ---
 
-// IsSilentReply checks if the text begins with a NO_REPLY token.
+// IsSilentReply checks if the text contains a standalone NO_REPLY token.
 //
-// Divergent from TS isSilentReplyText() (exact-match only) — we match broadly:
-// decorative wrappers (`NO_REPLY_`, `"NO_REPLY"`, `**NO_REPLY**`) AND trailing
-// explanations (`NO_REPLY because offline`, `NO_REPLY: note`) suppress delivery.
-// Only requirement: the token is not glued to another word (`NO_REPLYING` is NOT silent).
-// Case-insensitive.
-//
-// Trade-off vs upstream #19537: upstream guards against suppressing substantive
-// replies that end in NO_REPLY. We accept that risk because observed model output
-// leans toward "NO_REPLY + reason" rather than "real reply ending in NO_REPLY".
+// Divergent from TS isSilentReplyText() (exact-match only) — we match broadly so
+// both prefix forms (`NO_REPLY because offline`) and terminal sentinel forms
+// (`not for me. NO_REPLY`) suppress delivery. The token must not be glued to
+// another word (`NO_REPLYING` and `XNO_REPLY` are not silent). Case-insensitive.
 func IsSilentReply(text string) bool {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
@@ -397,18 +453,31 @@ func IsSilentReply(text string) bool {
 	// Strip decorative wrappers from both ends (quotes, markdown emphasis, punctuation).
 	stripped := strings.Trim(trimmed, "_ \t\n\r.,:;!?\"'`*~#>-()[]{}")
 	const token = "NO_REPLY"
-	if len(stripped) < len(token) {
+	return containsStandaloneNoReplyToken(stripped, token)
+}
+
+func containsStandaloneNoReplyToken(text, token string) bool {
+	if len(text) < len(token) {
 		return false
 	}
-	if !strings.EqualFold(stripped[:len(token)], token) {
-		return false
+	for i := 0; i+len(token) <= len(text); i++ {
+		if !strings.EqualFold(text[i:i+len(token)], token) {
+			continue
+		}
+		beforeOK := i == 0 || !isAlphaNumByte(text[i-1])
+		after := i + len(token)
+		afterOK := after == len(text) || !isAlphaNumByte(text[after])
+		if beforeOK && afterOK {
+			return true
+		}
 	}
-	if len(stripped) == len(token) {
-		return true
-	}
-	// Token must not be glued to another word — next rune must be non-alphanumeric.
-	next, _ := utf8.DecodeRuneInString(stripped[len(token):])
-	return !isAlphaNum(next)
+	return false
+}
+
+func isAlphaNumByte(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }
 
 func isAlphaNum(r rune) bool {

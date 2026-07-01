@@ -11,14 +11,11 @@ import (
 type SkillSearchResult struct {
 	Name        string  `json:"name"`
 	Slug        string  `json:"slug"` // directory name (unique identifier, used for access filtering)
-	DisplayName string  `json:"display_name,omitempty"`
 	Description string  `json:"description"`
 	Location    string  `json:"location"` // absolute path to SKILL.md
 	BaseDir     string  `json:"baseDir"`  // skill directory (for {baseDir} references)
 	Source      string  `json:"source"`   // "workspace", "global", "builtin", "managed"
 	Score       float64 `json:"score"`
-	Family      string  `json:"family,omitempty"`
-	Canonical   bool    `json:"canonical,omitempty"`
 }
 
 // skillDoc is an internal representation of a skill document for BM25 scoring.
@@ -87,16 +84,8 @@ func (idx *Index) Build(skills []Info) {
 	totalTokens := 0
 
 	for _, s := range skills {
-		// Build searchable text from internal slug, display name, and description.
-		searchText := strings.Join([]string{
-			s.Slug,
-			s.Name,
-			s.DisplayName,
-			s.Description,
-			s.Family,
-			strings.Join(s.Replaces, " "),
-			strings.Join(s.Aliases, " "),
-		}, " ")
+		// Build searchable text from name + description
+		searchText := s.Name + " " + s.Description
 		tokens := tokenize(searchText)
 
 		idx.docs = append(idx.docs, skillDoc{
@@ -202,14 +191,11 @@ func (idx *Index) Search(query string, maxResults int) []SkillSearchResult {
 		out[i] = SkillSearchResult{
 			Name:        r.doc.info.Name,
 			Slug:        r.doc.info.Slug,
-			DisplayName: r.doc.info.DisplayName,
 			Description: r.doc.info.Description,
 			Location:    r.doc.info.Path,
 			BaseDir:     r.doc.info.BaseDir,
 			Source:      r.doc.info.Source,
 			Score:       r.score,
-			Family:      r.doc.info.Family,
-			Canonical:   r.doc.info.Canonical,
 		}
 	}
 

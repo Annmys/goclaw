@@ -275,11 +275,15 @@ func TestCronConfig_ToRetryConfig_Custom(t *testing.T) {
 func TestApplySystemConfigs(t *testing.T) {
 	cfg := Default()
 	cfg.ApplySystemConfigs(map[string]string{
-		"agent.default_provider":   "openai",
-		"agent.default_model":      "gpt-4o",
-		"agent.context_window":     "100000",
-		"gateway.rate_limit_rpm":   "60",
+		"agent.default_provider":    "openai",
+		"agent.default_model":       "gpt-4o",
+		"agent.context_window":      "100000",
+		"gateway.rate_limit_rpm":    "60",
 		"gateway.max_message_chars": "50000",
+		"tools.browser.enabled":     "false",
+		"tools.browser.remote_url":  "ws://chrome:9222",
+		"tools.browser.max_pages":   "9",
+		"cron.command_enabled":      "true",
 	})
 
 	if cfg.Agents.Defaults.Provider != "openai" {
@@ -293,6 +297,18 @@ func TestApplySystemConfigs(t *testing.T) {
 	}
 	if cfg.Gateway.RateLimitRPM != 60 {
 		t.Errorf("rate_limit_rpm: got %d", cfg.Gateway.RateLimitRPM)
+	}
+	if cfg.Tools.Browser.Enabled {
+		t.Error("tools.browser.enabled: got true, want false")
+	}
+	if cfg.Tools.Browser.RemoteURL != "ws://chrome:9222" {
+		t.Errorf("tools.browser.remote_url: got %q", cfg.Tools.Browser.RemoteURL)
+	}
+	if cfg.Tools.Browser.MaxPages != 9 {
+		t.Errorf("tools.browser.max_pages: got %d", cfg.Tools.Browser.MaxPages)
+	}
+	if !cfg.Cron.CommandEnabled {
+		t.Error("cron.command_enabled: got false, want true")
 	}
 }
 

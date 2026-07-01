@@ -70,7 +70,7 @@ func seedWorkflowAgents(ctx context.Context, agentStore store.AgentStore, tenant
 func ensureWorkflowAgent(ctx context.Context, agentStore store.AgentStore, seed workflowAgentSeed, agentCfg config.AgentDefaults, dataDir string, tenant store.TenantData) {
 	existing, err := agentStore.GetByKey(ctx, seed.Key)
 	if err == nil && existing != nil {
-		_ = agentStore.ShareAgent(ctx, existing.ID, store.TenantWideUserID, store.TenantRoleOperator, "system")
+		_ = agentStore.ShareAgent(ctx, existing.ID, "", store.TenantRoleOperator, "system")
 		return
 	}
 
@@ -117,7 +117,7 @@ func ensureWorkflowAgent(ctx context.Context, agentStore store.AgentStore, seed 
 	if err := agentStore.SetAgentContextFile(ctx, ag.ID, bootstrap.SoulFile, seed.System); err != nil {
 		slog.Warn("workflow agents seed: SOUL write failed", "agent", seed.Key, "error", err)
 	}
-	if err := agentStore.ShareAgent(ctx, ag.ID, store.TenantWideUserID, store.TenantRoleOperator, "system"); err != nil {
+	if err := agentStore.ShareAgent(ctx, ag.ID, "", store.TenantRoleOperator, "system"); err != nil {
 		slog.Warn("workflow agents seed: tenant share failed", "agent", seed.Key, "error", err)
 	}
 	slog.Info("workflow agent seeded", "agent", seed.Key, "tenant", tenant.ID)

@@ -16,6 +16,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/providerresolve"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
+	usagecaps "github.com/nextlevelbuilder/goclaw/internal/usage/caps"
 )
 
 // reloadStartTimeout bounds how long Reload() will wait for a single channel's
@@ -39,12 +40,14 @@ type InstanceLoader struct {
 	agentStore        store.AgentStore
 	providerReg       *providers.Registry
 	pendingCompactCfg *config.PendingCompactionConfig
+	usageCaps         *usagecaps.Service
 	factories         map[string]ChannelFactory
 	manager           *Manager
 	msgBus            *bus.MessageBus
 	pairingSvc        store.PairingStore
 	mu                sync.Mutex
-	loaded            map[string]struct{} // channel names managed by this loader
+	loaded            map[string]struct{}  // channel names managed by this loader
+	loadedIDs         map[string]uuid.UUID // channel name -> DB instance ID
 }
 
 // NewInstanceLoader creates a new InstanceLoader.
@@ -63,6 +66,7 @@ func NewInstanceLoader(
 		msgBus:     msgBus,
 		pairingSvc: pairingSvc,
 		loaded:     make(map[string]struct{}),
+		loadedIDs:  make(map[string]uuid.UUID),
 	}
 }
 
@@ -76,6 +80,10 @@ func (l *InstanceLoader) SetProviderRegistry(reg *providers.Registry) {
 // Must be called before LoadAll/Reload.
 func (l *InstanceLoader) SetPendingCompactionConfig(cfg *config.PendingCompactionConfig) {
 	l.pendingCompactCfg = cfg
+}
+
+func (l *InstanceLoader) SetUsageCapService(s *usagecaps.Service) {
+	l.usageCaps = s
 }
 
 // RegisterFactory registers a factory for a channel type (e.g., "telegram", "discord").
@@ -126,6 +134,7 @@ func (l *InstanceLoader) Reload(ctx context.Context) {
 		l.manager.UnregisterChannel(name)
 	}
 	l.loaded = make(map[string]struct{})
+	l.loadedIDs = make(map[string]uuid.UUID)
 
 	// Brief pause to let external APIs (e.g., Telegram getUpdates) release polling locks.
 	time.Sleep(500 * time.Millisecond)
@@ -151,6 +160,46 @@ func (l *InstanceLoader) Reload(ctx context.Context) {
 	slog.Info("channel instances reloaded", "count", registered)
 }
 
+// LoadInstanceByID loads or refreshes one enabled channel instance without
+// stopping unrelated channels. Used by create-time cache invalidation and QR
+// auth flows that need the just-created channel to become available quickly.
+func (l *InstanceLoader) LoadInstanceByID(ctx context.Context, id uuid.UUID) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	inst, err := l.store.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if _, ok := l.loaded[inst.Name]; ok {
+		if loadedID, hasLoadedID := l.loadedIDs[inst.Name]; hasLoadedID && loadedID == inst.ID {
+			if _, exists := l.manager.GetChannel(inst.Name); exists {
+				return nil
+			}
+		} else if ch, exists := l.manager.GetChannel(inst.Name); exists {
+			if err := ch.Stop(ctx); err != nil {
+				slog.Warn("failed to stop stale channel instance before targeted reload",
+					"name", inst.Name, "old_id", loadedID, "new_id", inst.ID, "error", err)
+			}
+			l.manager.UnregisterChannel(inst.Name)
+		}
+		delete(l.loaded, inst.Name)
+		delete(l.loadedIDs, inst.Name)
+	}
+
+	if !inst.Enabled {
+		return nil
+	}
+
+	if err := l.loadInstance(ctx, *inst, true); err != nil {
+		return err
+	}
+
+	slog.Info("channel instance loaded by id", "id", id, "name", inst.Name, "type", inst.ChannelType)
+	return nil
+}
+
 // Stop stops all managed channels.
 func (l *InstanceLoader) Stop(ctx context.Context) {
 	l.mu.Lock()
@@ -165,6 +214,7 @@ func (l *InstanceLoader) Stop(ctx context.Context) {
 		l.manager.UnregisterChannel(name)
 	}
 	l.loaded = make(map[string]struct{})
+	l.loadedIDs = make(map[string]uuid.UUID)
 }
 
 // coerceStringBools converts string "true"/"false" values to JSON booleans
@@ -212,6 +262,7 @@ func (l *InstanceLoader) LoadedNames() map[string]struct{} {
 // If false, the caller is responsible for starting (used by LoadAll, where StartAll handles it).
 func (l *InstanceLoader) loadInstance(ctx context.Context, inst store.ChannelInstanceData, autoStart bool) error {
 	l.loaded[inst.Name] = struct{}{}
+	l.loadedIDs[inst.Name] = inst.ID
 
 	factory, ok := l.factories[inst.ChannelType]
 	if !ok {
@@ -306,8 +357,9 @@ func (l *InstanceLoader) loadInstance(ctx context.Context, inst store.ChannelIns
 
 		if p != nil && model != "" {
 			cc := &CompactionConfig{
-				Provider: p,
-				Model:    model,
+				Provider:  p,
+				Model:     model,
+				UsageCaps: l.usageCaps,
 			}
 			if l.pendingCompactCfg != nil {
 				cc.Threshold = l.pendingCompactCfg.Threshold
@@ -338,7 +390,7 @@ func (l *InstanceLoader) loadInstance(ctx context.Context, inst store.ChannelIns
 	// derives from it — e.g. Telegram's pollCtx — are not cancelled out from
 	// under a successful start.
 	if autoStart {
-		l.startChannelWithTimeout(ctx, inst, ch)
+		l.startChannelWithTimeout(instCtx, inst, ch)
 	}
 
 	slog.Info("channel instance loaded",

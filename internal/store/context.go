@@ -31,6 +31,8 @@ const (
 	SharedKGKey contextKey = "goclaw_shared_kg"
 	// SharedSessionsKey indicates sessions should be shared across all users (no per-group scoping).
 	SharedSessionsKey contextKey = "goclaw_shared_sessions"
+	// SharedContextKey indicates context files should be read/written at agent scope.
+	SharedContextKey contextKey = "goclaw_shared_context"
 	// ShellDenyGroupsKey holds per-agent shell deny group overrides.
 	ShellDenyGroupsKey contextKey = "goclaw_shell_deny_groups"
 	// AgentKeyKey is the context key for the agent key/name (string identifier, e.g. "default").
@@ -48,6 +50,8 @@ const (
 	CredentialUserIDKey contextKey = "goclaw_credential_user_id"
 	// SenderNameKey is the display name from channel metadata (for bootstrap auto-contact).
 	SenderNameKey contextKey = "goclaw_sender_name"
+	// ChannelContextScopeKey carries the channel/group/user scope for runtime grants and credentials.
+	ChannelContextScopeKey contextKey = "goclaw_channel_context_scope"
 	// AgentAudioKey carries the immutable agent audio snapshot for TTS tool dispatch.
 	AgentAudioKey contextKey = "goclaw_agent_audio"
 )
@@ -114,10 +118,19 @@ func WithCredentialUserID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, CredentialUserIDKey, id)
 }
 
+// ExplicitCredentialUserIDFromContext returns only the explicitly injected credential identity.
+// Unlike CredentialUserIDFromContext, it does not fall back to UserID.
+func ExplicitCredentialUserIDFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(CredentialUserIDKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
 // CredentialUserIDFromContext returns the resolved identity for credential lookups.
 // Falls back to RunContext.CredentialUserID, then UserIDFromContext.
 func CredentialUserIDFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(CredentialUserIDKey).(string); ok && v != "" {
+	if v := ExplicitCredentialUserIDFromContext(ctx); v != "" {
 		return v
 	}
 	if rc := RunContextFromCtx(ctx); rc != nil && rc.CredentialUserID != "" {
@@ -277,6 +290,32 @@ func IsSharedMemory(ctx context.Context) bool {
 // Returns "" (shared/global) when shared memory is active, otherwise the per-user ID.
 func MemoryUserID(ctx context.Context) string {
 	if IsSharedMemory(ctx) {
+		return ""
+	}
+	return UserIDFromContext(ctx)
+}
+
+// WithSharedContext returns a context flagged for shared context files.
+func WithSharedContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, SharedContextKey, true)
+}
+
+// IsSharedContext returns true if context files should use agent-level scope.
+func IsSharedContext(ctx context.Context) bool {
+	if v, ok := ctx.Value(SharedContextKey).(bool); ok {
+		return v
+	}
+	if rc := RunContextFromCtx(ctx); rc != nil {
+		return rc.SharedContext
+	}
+	return false
+}
+
+// ContextUserID returns the userID to use for context-file operations.
+// Shared workspace mode maps virtual context files to the agent-level store so
+// read_file/write_file behavior matches the visible shared workspace path.
+func ContextUserID(ctx context.Context) string {
+	if IsSharedContext(ctx) {
 		return ""
 	}
 	return UserIDFromContext(ctx)

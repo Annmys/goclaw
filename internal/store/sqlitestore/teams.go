@@ -91,37 +91,16 @@ func (s *SQLiteTeamStore) UpdateTeam(ctx context.Context, teamID uuid.UUID, upda
 }
 
 func (s *SQLiteTeamStore) DeleteTeam(ctx context.Context, teamID uuid.UUID) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	// Team Vault documents have agent_id NULL. If SQLite's FK action only sets
-	// team_id to NULL, scope='team' would violate the scope consistency rules.
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE vault_documents SET scope = 'shared', team_id = NULL WHERE team_id = ? AND scope = 'team'`,
-		teamID); err != nil {
-		return err
-	}
-
-	var res sql.Result
 	if store.IsCrossTenant(ctx) {
-		res, err = tx.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ?`, teamID)
-	} else {
-		tid := store.TenantIDFromContext(ctx)
-		if tid == uuid.Nil {
-			return fmt.Errorf("tenant_id required for delete")
-		}
-		res, err = tx.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ? AND tenant_id = ?`, teamID, tid)
-	}
-	if err != nil {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ?`, teamID)
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("team not found: %s", teamID)
+	tid := store.TenantIDFromContext(ctx)
+	if tid == uuid.Nil {
+		return fmt.Errorf("tenant_id required for delete")
 	}
-	return tx.Commit()
+	_, err := s.db.ExecContext(ctx, `DELETE FROM agent_teams WHERE id = ? AND tenant_id = ?`, teamID, tid)
+	return err
 }
 
 func (s *SQLiteTeamStore) ListTeams(ctx context.Context) ([]store.TeamData, error) {
@@ -442,8 +421,8 @@ func (s *SQLiteTeamStore) ListUserTeams(ctx context.Context, userID string) ([]s
 	baseQuery := `SELECT ` + teamSelectCols + `
 		 FROM agent_teams t
 		 WHERE t.status = ?
-		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id IN (?, ?))`
-	args := []any{store.TeamStatusActive, userID, store.TenantWideUserID}
+		   AND EXISTS (SELECT 1 FROM team_user_grants g WHERE g.team_id = t.id AND g.user_id = ?)`
+	args := []any{store.TeamStatusActive, userID}
 
 	if !store.IsCrossTenant(ctx) {
 		tenantID := store.TenantIDFromContext(ctx)
@@ -489,8 +468,8 @@ func (s *SQLiteTeamStore) HasTeamAccess(ctx context.Context, teamID uuid.UUID, u
 	}
 	var exists bool
 	err = s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = ? AND user_id IN (?, ?)`+tClause+`)`,
-		append([]any{teamID, userID, store.TenantWideUserID}, tArgs...)...,
+		`SELECT EXISTS(SELECT 1 FROM team_user_grants WHERE team_id = ? AND user_id = ?`+tClause+`)`,
+		append([]any{teamID, userID}, tArgs...)...,
 	).Scan(&exists)
 	return exists, err
 }

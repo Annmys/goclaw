@@ -14,11 +14,11 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
+	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
 	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/sandbox"
-	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/store/pg"
@@ -208,20 +208,17 @@ func setupToolRegistry(
 
 	// Block exec from accessing sensitive directories (data dir, .goclaw, config file).
 	// Prevents `cp /app/data/config.json workspace/` and similar exfiltration.
-	// Exception: skill directories are allowed (skills may contain executable scripts).
+	// Exception: .goclaw/skills-store/ is allowed (skills may contain executable scripts).
 	if execTool, ok := toolsReg.Get("exec"); ok {
 		if et, ok := execTool.(*tools.ExecTool); ok {
 			// Apply global shell deny-group toggles before any request can arrive.
 			// Per-agent overrides via store.WithShellDenyGroups still win per-key.
 			et.SetGlobalShellDenyGroups(cfg.Tools.ShellDenyGroups)
+			et.SetCommandKeywordAllowlist(cfg.Tools.CommandKeywordAllowlist)
 			et.DenyPaths(dataDir, ".goclaw/")
-			// Allow skills execution from both global file-based skills and managed
-			// skills-store. Agents may receive either path depending on skill source
-			// priority/cache state, but both are system-managed skill locations.
+			// Allow skills execution: master-tenant skills-store + all tenant-scoped skills-store dirs.
 			et.AllowPathExemptions(
-				".goclaw/skills/",
 				".goclaw/skills-store/",
-				filepath.Join(dataDir, "skills")+"/",
 				filepath.Join(dataDir, "skills-store")+"/",
 				filepath.Join(dataDir, "tenants")+"/",
 			)
@@ -325,7 +322,7 @@ func wireTracingAndCron(
 	// Start snapshot worker for hourly usage aggregation
 	var snapshotWorker *tracing.SnapshotWorker
 	if stores.Snapshots != nil {
-		snapshotWorker = tracing.NewSnapshotWorker(stores.DB, stores.Snapshots)
+		snapshotWorker = tracing.NewSnapshotWorker(stores.DB, stores.Snapshots, stores.UsageEvents)
 		snapshotWorker.Start()
 
 		// Backfill historical data in background
@@ -409,18 +406,6 @@ func setupMemoryEmbeddings(
 						slog.Warn("KG embeddings backfill failed", "error", err)
 					} else if count > 0 {
 						slog.Info("KG embeddings backfill complete", "entities_updated", count)
-					}
-				}()
-			}
-
-			// Wire embedding provider into agent store for agent semantic search.
-			if pgAgents, ok := pgStores.Agents.(*pg.PGAgentStore); ok {
-				pgAgents.SetEmbeddingProvider(embProvider)
-				go func() {
-					if count, err := pgAgents.BackfillAgentEmbeddings(context.Background()); err != nil {
-						slog.Warn("agent embeddings backfill failed", "error", err)
-					} else if count > 0 {
-						slog.Info("agent embeddings backfill complete", "agents_updated", count)
 					}
 				}()
 			}
@@ -619,4 +604,3 @@ func setupSkillsSystem(
 
 	return skillsLoader, skillSearchTool, globalSkillsDir, bundledSkillsDir, builtinSkillsDir
 }
-

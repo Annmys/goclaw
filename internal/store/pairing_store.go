@@ -9,8 +9,6 @@ type PairingRequestData struct {
 	Channel   string            `json:"channel" db:"channel"`
 	ChatID    string            `json:"chat_id" db:"chat_id"`
 	AccountID string            `json:"account_id" db:"account_id"`
-	TenantID  string            `json:"tenant_id,omitempty" db:"tenant_id"`
-	UserID    string            `json:"user_id,omitempty" db:"user_id"`
 	CreatedAt int64             `json:"created_at" db:"created_at"`
 	ExpiresAt int64             `json:"expires_at" db:"expires_at"`
 	Metadata  map[string]string `json:"metadata,omitempty" db:"metadata"`
@@ -23,8 +21,6 @@ type PairedDeviceData struct {
 	ChatID   string            `json:"chat_id" db:"chat_id"`
 	PairedAt int64             `json:"paired_at" db:"paired_at"`
 	PairedBy string            `json:"paired_by" db:"paired_by"`
-	TenantID string            `json:"tenant_id,omitempty" db:"tenant_id"`
-	UserID   string            `json:"user_id,omitempty" db:"user_id"`
 	Metadata map[string]string `json:"metadata,omitempty" db:"metadata"`
 }
 

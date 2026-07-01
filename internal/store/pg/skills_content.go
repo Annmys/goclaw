@@ -21,8 +21,7 @@ func (s *PGSkillStore) LoadSkill(ctx context.Context, name string) (string, bool
 	var version int
 	var filePath *string
 	// Tenant filter: system skills visible globally, custom skills scoped to tenant.
-	q := `SELECT slug, version, file_path FROM skills
-		WHERE (slug = $1 OR lower(slug) = lower($1) OR name = $1) AND status = 'active'`
+	q := "SELECT slug, version, file_path FROM skills WHERE slug = $1 AND status = 'active'"
 	args := []any{name}
 	if !store.IsCrossTenant(ctx) {
 		tid := store.TenantIDFromContext(ctx)
@@ -32,7 +31,6 @@ func (s *PGSkillStore) LoadSkill(ctx context.Context, name string) (string, bool
 		q += " AND (is_system = true OR tenant_id = $2)"
 		args = append(args, tid)
 	}
-	q += " ORDER BY CASE WHEN slug = $1 THEN 0 WHEN lower(slug) = lower($1) THEN 1 WHEN name = $1 THEN 2 ELSE 3 END LIMIT 1"
 	err := s.db.QueryRowContext(ctx, q, args...).Scan(&slug, &version, &filePath)
 	if err != nil {
 		return "", false
@@ -42,6 +40,11 @@ func (s *PGSkillStore) LoadSkill(ctx context.Context, name string) (string, bool
 	if err != nil {
 		return "", false
 	}
+	// Resolve {baseDir} placeholder so SKILL.md script-invocation lines hold
+	// absolute paths regardless of agent CWD. Mirrors skills.Loader.LoadSkill
+	// substitution; without it, agents reading SKILL.md via this RPC see the
+	// literal placeholder.
+	content = strings.ReplaceAll(content, "{baseDir}", info.BaseDir)
 	return content, true
 }
 
@@ -52,11 +55,11 @@ func (s *PGSkillStore) LoadForContext(ctx context.Context, allowList []string) s
 	}
 	var parts []string
 	for _, sk := range skills {
-		content, ok := s.LoadSkill(ctx, sk.Slug)
+		content, ok := s.LoadSkill(ctx, sk.Name)
 		if !ok {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("### Skill: %s（%s）V%d\n\n%s", sk.Slug, sk.Name, sk.Version, content))
+		parts = append(parts, fmt.Sprintf("### Skill: %s\n\n%s", sk.Name, content))
 	}
 	if len(parts) == 0 {
 		return ""
@@ -81,21 +84,9 @@ func (s *PGSkillStore) BuildSummary(ctx context.Context, allowList []string) str
 	result.WriteString("<available_skills>\n")
 	for _, sk := range skills {
 		result.WriteString("  <skill>\n")
-		result.WriteString(fmt.Sprintf("    <slug>%s</slug>\n", sk.Slug))
 		result.WriteString(fmt.Sprintf("    <name>%s</name>\n", sk.Name))
-		displayName := sk.Name
-		if sk.DisplayName != "" {
-			displayName = sk.DisplayName
-		}
-		result.WriteString(fmt.Sprintf("    <display>%s（%s）V%d</display>\n", sk.Slug, displayName, sk.Version))
 		result.WriteString(fmt.Sprintf("    <description>%s</description>\n", sk.Description))
 		result.WriteString(fmt.Sprintf("    <location>%s</location>\n", sk.Path))
-		if sk.Family != "" {
-			result.WriteString(fmt.Sprintf("    <family>%s</family>\n", sk.Family))
-		}
-		if sk.Canonical {
-			result.WriteString("    <canonical>true</canonical>\n")
-		}
 		result.WriteString("  </skill>\n")
 	}
 	result.WriteString("</available_skills>")
@@ -103,46 +94,65 @@ func (s *PGSkillStore) BuildSummary(ctx context.Context, allowList []string) str
 }
 
 func (s *PGSkillStore) GetSkill(ctx context.Context, name string) (*store.SkillInfo, bool) {
-	var id uuid.UUID
-	var skillName, slug, visibility string
-	var desc *string
-	var tags []string
-	var version int
-	var isSystem bool
-	var fmRaw []byte
-	var filePath *string
-	q := `SELECT id, name, slug, description, visibility, tags, version, is_system, frontmatter, file_path FROM skills
-		WHERE (slug = $1 OR lower(slug) = lower($1) OR name = $1) AND status = 'active'`
-	args := []any{name}
+	baseSelect := `SELECT id, name, slug, description, visibility, owner_id, tags, version, is_system, status, enabled, deps, frontmatter, file_path
+		FROM skills WHERE `
+	scope := ""
+	args := []any{}
 	if !store.IsCrossTenant(ctx) {
 		tid := store.TenantIDFromContext(ctx)
 		if tid == uuid.Nil {
 			tid = store.MasterTenantID
 		}
-		q += " AND (is_system = true OR tenant_id = $2)"
 		args = append(args, tid)
+		scope = fmt.Sprintf(" AND (is_system = true OR tenant_id = $%d)", len(args))
 	}
-	q += " ORDER BY CASE WHEN slug = $1 THEN 0 WHEN lower(slug) = lower($1) THEN 1 WHEN name = $1 THEN 2 ELSE 3 END LIMIT 1"
-	err := s.db.QueryRowContext(ctx, q, args...).Scan(&id, &skillName, &slug, &desc, &visibility, pq.Array(&tags), &version, &isSystem, &fmRaw, &filePath)
-	if err != nil {
-		return nil, false
+
+	scan := func(q string, qArgs ...any) (*store.SkillInfo, bool) {
+		var id uuid.UUID
+		var skillName, slug, visibility, ownerID, status string
+		var desc *string
+		var tags []string
+		var version int
+		var isSystem, enabled bool
+		var depsRaw, fmRaw []byte
+		var filePath *string
+		err := s.db.QueryRowContext(ctx, q, qArgs...).Scan(&id, &skillName, &slug, &desc, &visibility, &ownerID, pq.Array(&tags), &version, &isSystem, &status, &enabled, &depsRaw, &fmRaw, &filePath)
+		if err != nil {
+			return nil, false
+		}
+		info := buildSkillInfo(id.String(), skillName, slug, desc, version, s.baseDir, filePath)
+		info.Visibility = visibility
+		info.OwnerID = ownerID
+		info.Tags = tags
+		info.IsSystem = isSystem
+		info.Status = status
+		info.Enabled = enabled
+		info.Author = parseFrontmatterAuthor(fmRaw)
+		info.CreatorAgent = parseFrontmatterCreatorAgent(fmRaw)
+		info.MissingDeps = parseDepsColumn(depsRaw)
+		enriched := []store.SkillInfo{info}
+		s.attachSkillAgentMetadata(ctx, enriched)
+		return &enriched[0], true
 	}
-	info := buildSkillInfo(id.String(), skillName, slug, desc, version, s.baseDir, filePath)
-	info.Visibility = visibility
-	info.Tags = tags
-	info.IsSystem = isSystem
-	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
-	return &info, true
+
+	if id, err := uuid.Parse(name); err == nil {
+		return scan(baseSelect+"id = $"+fmt.Sprint(len(args)+1)+" AND status IN ('active', 'archived')"+scope, append(args, id)...)
+	}
+	if info, ok := scan(baseSelect+"slug = $"+fmt.Sprint(len(args)+1)+" AND status = 'active'"+scope, append(args, name)...); ok {
+		return info, true
+	}
+	return scan(baseSelect+"name = $"+fmt.Sprint(len(args)+1)+" AND status = 'active'"+scope+" ORDER BY id LIMIT 1", append(args, name)...)
 }
 
 func (s *PGSkillStore) FilterSkills(ctx context.Context, allowList []string) []store.SkillInfo {
 	all := s.ListSkills(ctx)
 	var filtered []store.SkillInfo
 	if allowList == nil {
-		// No allowList → return all enabled skills (for agent injection)
+		// No allowList → return all enabled skills visible to the caller
+		// (for agent injection). Private skills owned by others are hidden
+		// so they don't leak across tenant members.
 		for _, sk := range all {
-			if sk.Enabled {
+			if sk.Enabled && store.IsSkillVisibleTo(ctx, sk.OwnerID, sk.Visibility, sk.IsSystem) {
 				filtered = append(filtered, sk)
 			}
 		}
@@ -167,14 +177,14 @@ func (s *PGSkillStore) FilterSkills(ctx context.Context, allowList []string) []s
 // Used by admin operations (e.g. toggle) that need full skill info.
 // Tenant filter: system skills visible globally, custom skills scoped to tenant.
 func (s *PGSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (store.SkillInfo, bool) {
-	var name, slug, visibility, status string
+	var name, slug, visibility, ownerID, status string
 	var desc *string
 	var tags []string
 	var version int
 	var isSystem, enabled bool
-	var depsRaw, fmRaw []byte
+	var depsRaw []byte
 	var filePath *string
-	q := `SELECT name, slug, description, visibility, tags, version, is_system, status, enabled, deps, frontmatter, file_path
+	q := `SELECT name, slug, description, visibility, owner_id, tags, version, is_system, status, enabled, deps, file_path
 		 FROM skills WHERE id = $1`
 	args := []any{id}
 	if !store.IsCrossTenant(ctx) {
@@ -185,19 +195,18 @@ func (s *PGSkillStore) GetSkillByID(ctx context.Context, id uuid.UUID) (store.Sk
 		q += " AND (is_system = true OR tenant_id = $2)"
 		args = append(args, tid)
 	}
-	err := s.db.QueryRowContext(ctx, q, args...).Scan(&name, &slug, &desc, &visibility, pq.Array(&tags), &version, &isSystem, &status, &enabled, &depsRaw, &fmRaw, &filePath)
+	err := s.db.QueryRowContext(ctx, q, args...).Scan(&name, &slug, &desc, &visibility, &ownerID, pq.Array(&tags), &version, &isSystem, &status, &enabled, &depsRaw, &filePath)
 	if err != nil {
 		return store.SkillInfo{}, false
 	}
 	info := buildSkillInfo(id.String(), name, slug, desc, version, s.baseDir, filePath)
 	info.Visibility = visibility
+	info.OwnerID = ownerID
 	info.Tags = tags
 	info.IsSystem = isSystem
 	info.Status = status
 	info.Enabled = enabled
 	info.MissingDeps = parseDepsColumn(depsRaw)
-	info.Author = parseFrontmatterAuthor(fmRaw)
-	info.DisplayName, info.Family, info.Canonical, info.Replaces, info.Aliases, info.RegressionPrefixes = parseFrontmatterGovernance(fmRaw)
 	return info, true
 }
 
@@ -251,13 +260,13 @@ func buildSkillInfo(id, name, slug string, desc *string, version int, baseDir st
 	}
 	skillDir := fmt.Sprintf("%s/%s/%d", baseDir, slug, version)
 	if filePath != nil && *filePath != "" {
-		skillDir = *filePath
+		skillDir = store.SkillBaseDir(*filePath)
 	}
 	return store.SkillInfo{
 		ID:          id,
 		Name:        name,
 		Slug:        slug,
-		Path:        skillDir + "/SKILL.md",
+		Path:        store.SkillMarkdownPath(skillDir),
 		BaseDir:     skillDir,
 		Source:      "managed",
 		Description: d,

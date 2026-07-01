@@ -19,16 +19,6 @@ const (
 	TenantStatusArchived  = "archived"
 )
 
-// IsValidTenantStatus reports whether status is one of the supported tenant states.
-func IsValidTenantStatus(status string) bool {
-	switch status {
-	case TenantStatusActive, TenantStatusSuspended, TenantStatusArchived:
-		return true
-	default:
-		return false
-	}
-}
-
 // Tenant role constants (hierarchy: owner > admin > operator > member > viewer).
 const (
 	TenantRoleOwner    = "owner"
@@ -69,7 +59,6 @@ type TenantStore interface {
 	GetTenantBySlug(ctx context.Context, slug string) (*TenantData, error)
 	ListTenants(ctx context.Context) ([]TenantData, error)
 	UpdateTenant(ctx context.Context, id uuid.UUID, updates map[string]any) error
-	DeleteTenant(ctx context.Context, id uuid.UUID) error
 
 	// Tenant-user membership
 	AddUser(ctx context.Context, tenantID uuid.UUID, userID, role string) error

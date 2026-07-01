@@ -2,15 +2,12 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/pipeline"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
-	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
@@ -28,47 +25,15 @@ func (s *stubExecutor) Get(string) (tools.Tool, bool)            { return nil, f
 func (s *stubExecutor) List() []string                           { return nil }
 func (s *stubExecutor) Aliases() map[string]string               { return nil }
 
-type metricRecorder struct {
-	mu      sync.Mutex
-	metrics []store.EvolutionMetric
+type metadataTestTool struct {
+	name string
 }
 
-func (m *metricRecorder) RecordMetric(_ context.Context, metric store.EvolutionMetric) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.metrics = append(m.metrics, metric)
-	return nil
-}
-
-func (m *metricRecorder) QueryMetrics(context.Context, uuid.UUID, store.MetricType, time.Time, int) ([]store.EvolutionMetric, error) {
-	return nil, nil
-}
-
-func (m *metricRecorder) AggregateToolMetrics(context.Context, uuid.UUID, time.Time) ([]store.ToolAggregate, error) {
-	return nil, nil
-}
-
-func (m *metricRecorder) AggregateRetrievalMetrics(context.Context, uuid.UUID, time.Time) ([]store.RetrievalAggregate, error) {
-	return nil, nil
-}
-
-func (m *metricRecorder) Cleanup(context.Context, time.Time) (int64, error) { return 0, nil }
-
-func (m *metricRecorder) latest(t *testing.T) store.EvolutionMetric {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		m.mu.Lock()
-		if len(m.metrics) > 0 {
-			metric := m.metrics[len(m.metrics)-1]
-			m.mu.Unlock()
-			return metric
-		}
-		m.mu.Unlock()
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for metric")
-	return store.EvolutionMetric{}
+func (t metadataTestTool) Name() string               { return t.name }
+func (t metadataTestTool) Description() string        { return "test tool" }
+func (t metadataTestTool) Parameters() map[string]any { return nil }
+func (t metadataTestTool) Execute(context.Context, map[string]any) *tools.Result {
+	return &tools.Result{ForLLM: "ok"}
 }
 
 // eventCollector buffers AgentEvents for inspection in tests.
@@ -205,41 +170,56 @@ func TestMakeExecuteToolRaw_ConcurrentCallsEmitAllEvents(t *testing.T) {
 	}
 }
 
-func TestRecordToolMetric_UseSkillTracksConcreteSkill(t *testing.T) {
-	recorder := &metricRecorder{}
-	agentID := uuid.New()
+func TestParallelEligibleToolCall_OnlyAllowsRegisteredReadOnlyTools(t *testing.T) {
+	t.Parallel()
+	registry := tools.NewRegistry()
+	registry.RegisterWithMetadata(metadataTestTool{name: "read_file"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapReadOnly}})
+	registry.RegisterWithMetadata(metadataTestTool{name: "write_file"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapMutating}})
+	registry.RegisterWithMetadata(metadataTestTool{name: "spawn"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapAsync}})
+	registry.RegisterWithMetadata(metadataTestTool{name: "mcp_search"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapReadOnly, tools.CapMCPBridged}})
+	registry.RegisterWithMetadata(metadataTestTool{name: "web_fetch"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapReadOnly}})
+	registry.RegisterAlias("read_alias", "read_file")
+
+	l := &Loop{registry: registry}
+
+	tests := []struct {
+		name string
+		tc   providers.ToolCall
+		want bool
+	}{
+		{name: "registered read only", tc: providers.ToolCall{Name: "read_file"}, want: true},
+		{name: "alias read only", tc: providers.ToolCall{Name: "read_alias"}, want: true},
+		{name: "mutating", tc: providers.ToolCall{Name: "write_file"}, want: false},
+		{name: "async", tc: providers.ToolCall{Name: "spawn"}, want: false},
+		{name: "mcp prefix", tc: providers.ToolCall{Name: "mcp_search"}, want: false},
+		{name: "exec excluded", tc: providers.ToolCall{Name: "exec"}, want: false},
+		{name: "wait excluded", tc: providers.ToolCall{Name: "wait"}, want: false},
+		{name: "unknown inferred read only still blocked", tc: providers.ToolCall{Name: "web_search"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := l.parallelEligibleToolCall(tt.tc); got != tt.want {
+				t.Fatalf("parallelEligibleToolCall(%q) = %v, want %v", tt.tc.Name, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParallelEligibleToolCall_StripsAgentToolPrefixBeforeMetadataLookup(t *testing.T) {
+	t.Parallel()
+	registry := tools.NewRegistry()
+	registry.RegisterWithMetadata(metadataTestTool{name: "web_fetch"}, tools.ToolMetadata{Capabilities: []tools.ToolCapability{tools.CapReadOnly}})
+
 	l := &Loop{
-		id:                    "test-agent",
-		agentUUID:             agentID,
-		evolutionMetricsStore: recorder,
+		registry: registry,
+		agentToolPolicy: &config.ToolPolicySpec{
+			ToolCallPrefix: "agent_",
+		},
 	}
-	tenantID := uuid.New()
-	ctx := store.WithTenantID(context.Background(), tenantID)
 
-	l.recordToolMetric(ctx, "session-1", "use_skill", map[string]any{"name": "shipping-doc-processing"}, &tools.Result{ForLLM: "ok"}, 25*time.Millisecond)
-
-	metric := recorder.latest(t)
-	if metric.AgentID != agentID {
-		t.Fatalf("AgentID = %s, want %s", metric.AgentID, agentID)
-	}
-	if metric.MetricType != store.MetricTool {
-		t.Fatalf("MetricType = %s, want tool", metric.MetricType)
-	}
-	if metric.MetricKey != "skill:shipping-doc-processing" {
-		t.Fatalf("MetricKey = %q, want skill:shipping-doc-processing", metric.MetricKey)
-	}
-	var value map[string]any
-	if err := json.Unmarshal(metric.Value, &value); err != nil {
-		t.Fatalf("metric value is not JSON: %v", err)
-	}
-	if value["tool"] != "use_skill" {
-		t.Fatalf("tool = %v, want use_skill", value["tool"])
-	}
-	if value["skill"] != "shipping-doc-processing" {
-		t.Fatalf("skill = %v, want shipping-doc-processing", value["skill"])
-	}
-	if value["success"] != true {
-		t.Fatalf("success = %v, want true", value["success"])
+	if !l.parallelEligibleToolCall(providers.ToolCall{Name: "agent_web_fetch"}) {
+		t.Fatal("expected prefixed registered read-only tool to be parallel eligible")
 	}
 }
 

@@ -56,6 +56,11 @@ func (t *PublishSkillTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Path to skill directory containing SKILL.md (absolute or relative to workspace)",
 			},
+			"visibility": map[string]any{
+				"type":        "string",
+				"enum":        []string{skills.VisibilityPrivate, skills.VisibilityPublic},
+				"description": "Who can discover this skill. 'private' (default) is visible only to the owner; 'public' is visible to anyone in the tenant.",
+			},
 		},
 		"required": []string{"path"},
 	}
@@ -66,6 +71,12 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	if rawPath == "" {
 		return ErrorResult("path is required")
 	}
+
+	rawVisibility, _ := args["visibility"].(string)
+	if err := skills.ValidateVisibility(rawVisibility); err != nil {
+		return ErrorResult(err.Error())
+	}
+	visibility := skills.NormalizeVisibility(rawVisibility)
 
 	// Resolve path: absolute or relative to workspace
 	dir := rawPath
@@ -104,12 +115,6 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	if t.skills.IsSystemSkill(slug) {
 		return ErrorResult(fmt.Sprintf("slug %q conflicts with a system skill", slug))
 	}
-	if strings.TrimSpace(frontmatter["family"]) == "" {
-		return ErrorResult("SKILL.md frontmatter must include 'family' to prevent unmanaged parallel skills")
-	}
-	if existing := t.findCanonicalByFamily(ctx, string(content), slug); existing != nil {
-		return ErrorResult(fmt.Sprintf("skill family already has canonical skill %q (%s). Patch that skill instead of publishing a parallel one", existing.Slug, existing.Name))
-	}
 
 	// Compute hash + size
 	hasher := sha256.New()
@@ -147,7 +152,7 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 		Slug:        slug,
 		Description: &desc,
 		OwnerID:     ownerID,
-		Visibility:  "private",
+		Visibility:  visibility,
 		Version:     version,
 		FilePath:    destDir,
 		FileSize:    fileSize,
@@ -165,7 +170,7 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	// Auto-grant to calling agent (granted-by = owner, same as CreateSkillManaged)
 	agentID := store.AgentIDFromContext(ctx)
 	if agentID != uuid.Nil {
-		if err := t.skills.GrantToAgent(ctx, id, agentID, version, ownerID); err != nil {
+		if err := t.skills.GrantToAgent(ctx, id, agentID, version, ownerID, true); err != nil {
 			slog.Warn("publish_skill: auto-grant failed", "error", err)
 		}
 	}
@@ -201,28 +206,6 @@ func (t *PublishSkillTool) Execute(ctx context.Context, args map[string]any) *Re
 	}
 
 	return NewResult(result)
-}
-
-func (t *PublishSkillTool) findCanonicalByFamily(ctx context.Context, content, slug string) *store.SkillInfo {
-	meta := skills.ParseSkillGovernance(content)
-	family := meta.FamilyKey(slug)
-	if family == "" {
-		return nil
-	}
-	for _, sk := range t.skills.ListSkills(ctx) {
-		if sk.Status != "active" && sk.Status != "archived" {
-			continue
-		}
-		if sk.Slug == slug {
-			continue
-		}
-		skFamily := skillFamilyKey(sk)
-		if skFamily == family {
-			skCopy := sk
-			return &skCopy
-		}
-	}
-	return nil
 }
 
 // copySkillDir recursively copies src to dst, skipping symlinks and system artifacts.

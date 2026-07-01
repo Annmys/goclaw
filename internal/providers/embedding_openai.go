@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-const defaultEmbeddingBatchSize = 2048
-const dashScopeEmbeddingBatchSize = 10
-const embeddingBatchSize = defaultEmbeddingBatchSize
+const embeddingBatchSize = 2048
 
 // ExpectedEmbeddingDim is the pgvector column dimension used across the system.
 // All embedding providers must return vectors of this dimension.
@@ -42,8 +40,11 @@ func NewOpenAIEmbeddingProvider(apiKey, apiBase, model string) *OpenAIEmbeddingP
 		apiKey:       apiKey,
 		apiBase:      strings.TrimRight(apiBase, "/"),
 		model:        model,
-		client:       &http.Client{Timeout: 60 * time.Second},
-		retry:        DefaultRetryConfig(),
+		// Use a fixed 60s timeout client. Embedding requests are short but can be
+		// batched. The apiBase is validated at provider-creation time by
+		// validateProviderURL in internal/http/providers.go.
+		client: &http.Client{Timeout: 60 * time.Second},
+		retry:  DefaultRetryConfig(),
 	}
 }
 
@@ -58,11 +59,10 @@ func (p *OpenAIEmbeddingProvider) Embed(ctx context.Context, texts []string) ([]
 	}
 
 	results := make([][]float32, len(texts))
-	batchSize := p.batchSize()
 
-	// Process in provider-specific batches.
-	for start := 0; start < len(texts); start += batchSize {
-		end := min(start+batchSize, len(texts))
+	// Process in batches of embeddingBatchSize
+	for start := 0; start < len(texts); start += embeddingBatchSize {
+		end := min(start+embeddingBatchSize, len(texts))
 
 		embeddings, err := p.embedBatch(ctx, texts[start:end])
 		if err != nil {
@@ -75,15 +75,6 @@ func (p *OpenAIEmbeddingProvider) Embed(ctx context.Context, texts []string) ([]
 	}
 
 	return results, nil
-}
-
-func (p *OpenAIEmbeddingProvider) batchSize() int {
-	apiBase := strings.ToLower(p.apiBase)
-	name := strings.ToLower(p.providerName)
-	if strings.Contains(apiBase, "dashscope.aliyuncs.com") || strings.Contains(name, "dashscope") || strings.Contains(name, "bailian") {
-		return dashScopeEmbeddingBatchSize
-	}
-	return defaultEmbeddingBatchSize
 }
 
 func (p *OpenAIEmbeddingProvider) embedBatch(ctx context.Context, texts []string) ([][]float32, error) {

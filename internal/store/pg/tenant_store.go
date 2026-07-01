@@ -106,11 +106,6 @@ func (s *PGTenantStore) UpdateTenant(ctx context.Context, id uuid.UUID, updates 
 	return execMapUpdate(ctx, s.db, "tenants", id, updates)
 }
 
-func (s *PGTenantStore) DeleteTenant(ctx context.Context, id uuid.UUID) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM tenants WHERE id = $1`, id)
-	return err
-}
-
 // ============================================================
 // Tenant-user membership
 // ============================================================

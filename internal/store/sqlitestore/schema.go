@@ -16,7 +16,7 @@ var schemaSQL string
 
 // SchemaVersion is the current SQLite schema version.
 // Bump this when adding new migration steps below.
-const SchemaVersion = 27
+const SchemaVersion = 52
 
 // migrations maps version → SQL to apply when upgrading FROM that version.
 // schema.sql always represents the LATEST full schema (for fresh DBs).
@@ -30,6 +30,9 @@ const SchemaVersion = 27
 //
 // Then bump SchemaVersion to 2.
 var migrations = map[int]string{
+	// Version 49 → 50: per-cron-job LLM provider/model override (mirrors agent_heartbeats).
+	49: `ALTER TABLE cron_jobs ADD COLUMN provider_id TEXT REFERENCES llm_providers(id) ON DELETE SET NULL;
+ALTER TABLE cron_jobs ADD COLUMN model VARCHAR(200);`,
 	// Version 1 → 2: add contact_type column to channel_contacts.
 	1: `ALTER TABLE channel_contacts ADD COLUMN contact_type VARCHAR(20) NOT NULL DEFAULT 'user';`,
 	// Version 2 → 3: promote cron payload fields to dedicated columns + add stateless flag.
@@ -467,6 +470,156 @@ WHERE context_pruning IS NOT NULL
 	21: `SELECT 1;`,
 	22: `SELECT 1;`,
 
+	// Version 27 → 28: webhooks + webhook_calls tables (mirrors PG migration 000059).
+	// scopes/ip_allowlist stored as JSON TEXT; bool columns as INTEGER (0/1).
+	// webhook_calls.request_payload + response are TEXT (canonical JSON) from the start —
+	// upstream history had an interim BLOB form, but dev never shipped it.
+	27: `CREATE TABLE IF NOT EXISTS webhooks (
+    id                  TEXT        PRIMARY KEY,
+    tenant_id           TEXT        NOT NULL,
+    agent_id            TEXT        REFERENCES agents(id) ON DELETE SET NULL,
+    name                TEXT        NOT NULL,
+    kind                TEXT        NOT NULL CHECK (kind IN ('llm', 'message')),
+    secret_prefix       TEXT,
+    secret_hash         TEXT        NOT NULL,
+    scopes              TEXT        NOT NULL DEFAULT '[]',
+    channel_id          TEXT,
+    rate_limit_per_min  INTEGER     NOT NULL DEFAULT 60,
+    ip_allowlist        TEXT        NOT NULL DEFAULT '[]',
+    require_hmac        INTEGER     NOT NULL DEFAULT 0,
+    localhost_only      INTEGER     NOT NULL DEFAULT 0,
+    revoked             INTEGER     NOT NULL DEFAULT 0,
+    created_by          TEXT,
+    created_at          TEXT        NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT        NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_used_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webhooks_tenant
+    ON webhooks (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_webhooks_tenant_agent
+    ON webhooks (tenant_id, agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_webhooks_secret
+    ON webhooks (secret_hash)
+    WHERE revoked = 0;
+CREATE TABLE IF NOT EXISTS webhook_calls (
+    id               TEXT     PRIMARY KEY,
+    tenant_id        TEXT     NOT NULL,
+    webhook_id       TEXT     NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+    agent_id         TEXT,
+    idempotency_key  TEXT,
+    mode             TEXT     NOT NULL CHECK (mode IN ('sync', 'async')),
+    callback_url     TEXT,
+    status           TEXT     NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed', 'dead')),
+    attempts         INTEGER  NOT NULL DEFAULT 0,
+    delivery_id      TEXT     NOT NULL,
+    next_attempt_at  TEXT,
+    started_at       TEXT,
+    request_payload  TEXT,
+    response         TEXT,
+    last_error       TEXT,
+    created_at       TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_calls_tenant_created
+    ON webhook_calls (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_calls_status_attempt
+    ON webhook_calls (status, next_attempt_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_webhook_calls_idempotency
+    ON webhook_calls (webhook_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;`,
+
+	// Version 28 → 29: add lease_token to webhook_calls for optimistic-concurrency CAS.
+	// Mirrors PG migration 000060.
+	28: `ALTER TABLE webhook_calls ADD COLUMN lease_token TEXT;`,
+
+	// Version 29 → 30: add encrypted_secret to webhooks (AES-256-GCM of raw secret).
+	// Mirrors PG migration 000061.
+	29: `ALTER TABLE webhooks ADD COLUMN encrypted_secret TEXT NOT NULL DEFAULT '';`,
+
+	// Version 30 → 31: workstations + agent_workstation_links tables. Mirrors PG migration 000062.
+	30: `CREATE TABLE IF NOT EXISTS workstations (
+    id              TEXT PRIMARY KEY,
+    workstation_key VARCHAR(100) NOT NULL,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name            VARCHAR(255) NOT NULL,
+    backend_type    VARCHAR(20) NOT NULL CHECK (backend_type IN ('ssh','docker')),
+    metadata        BLOB NOT NULL,
+    default_cwd     VARCHAR(500) NOT NULL DEFAULT '',
+    default_env     BLOB NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    UNIQUE (tenant_id, workstation_key)
+);
+CREATE INDEX IF NOT EXISTS idx_workstations_tenant_active
+    ON workstations(tenant_id, active) WHERE active = 1;
+CREATE TABLE IF NOT EXISTS agent_workstation_links (
+    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    is_default      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (agent_id, workstation_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workstation_default
+    ON agent_workstation_links(agent_id) WHERE is_default = 1;
+CREATE INDEX IF NOT EXISTS idx_agent_workstation_tenant ON agent_workstation_links(tenant_id);`,
+
+	// Version 31 → 32: workstation_permissions allowlist table. Mirrors PG migration 000063.
+	31: `CREATE TABLE IF NOT EXISTS workstation_permissions (
+    id              TEXT PRIMARY KEY,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    pattern         VARCHAR(500) NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (workstation_id, pattern)
+);
+CREATE INDEX IF NOT EXISTS idx_workstation_perms_ws ON workstation_permissions(workstation_id) WHERE enabled = 1;
+CREATE INDEX IF NOT EXISTS idx_workstation_perms_tenant ON workstation_permissions(tenant_id);`,
+
+	// Version 32 → 33: workstation_activity audit log table. Mirrors PG migration 000064.
+	32: `CREATE TABLE IF NOT EXISTS workstation_activity (
+    id              TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    agent_id        VARCHAR(255) NOT NULL DEFAULT '',
+    action          VARCHAR(20)  NOT NULL,
+    cmd_hash        VARCHAR(64)  NOT NULL DEFAULT '',
+    cmd_preview     VARCHAR(200) NOT NULL DEFAULT '',
+    exit_code       INTEGER,
+    duration_ms     INTEGER,
+    deny_reason     VARCHAR(200) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_ws_time     ON workstation_activity(workstation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_tenant_time ON workstation_activity(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_retention   ON workstation_activity(created_at);`,
+
+	// Version 33 → 34: per-agent ordered provider/model fallback config.
+	33: `ALTER TABLE agents ADD COLUMN model_fallback TEXT NOT NULL DEFAULT '{}';`,
+
+	// Version 34 → 35: agent skill grants can optionally allow skill management.
+	34: `ALTER TABLE skill_agent_grants ADD COLUMN can_manage INTEGER NOT NULL DEFAULT 0;`,
+
+	// Version 35 → 36: remove legacy cross-tenant skill-agent grant rows.
+	35: `DELETE FROM skill_agent_grants
+WHERE id IN (
+    SELECT sag.id
+    FROM skill_agent_grants sag
+    JOIN skills s ON sag.skill_id = s.id
+    JOIN agents a ON sag.agent_id = a.id
+    WHERE sag.tenant_id <> a.tenant_id
+       OR (s.is_system = 0 AND sag.tenant_id <> s.tenant_id)
+);`,
+
+	// Version 36 → 37: enforce one default workstation link per agent.
+	// Mirrors PG migration 000062 partial unique index.
+	36: `CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workstation_default
+    ON agent_workstation_links(agent_id) WHERE is_default = 1;`,
+
 	// Version 23 → 24: vault_documents scope/ownership consistency triggers.
 	// Mirrors PG migration 000055 CHECK constraint; SQLite cannot add CHECK via
 	// ALTER TABLE so we use BEFORE INSERT + BEFORE UPDATE triggers instead.
@@ -562,43 +715,490 @@ CREATE INDEX IF NOT EXISTS idx_heartbeats_due
   ON agent_heartbeats(next_run_at)
   WHERE enabled = 1 AND next_run_at IS NOT NULL;`,
 
-	// Version 26 → 27: local knowledge source registry.
-	26: localKnowledgeSourcesSchema,
-}
+	// Version 26 → 27: add encrypted_env BLOB column to secure_cli_agent_grants.
+	// Mirrors PG migration 000058 (renumbered from upstream 000056 during merge train).
+	// NULL = no grant-level env override.
+	// DOWN path: modernc.org/sqlite supports DROP COLUMN since v3.35 (bundled
+	// version is ≥3.39). If DROP COLUMN fails on an older embedded build, the
+	// fallback is to rebuild the table without the column — see runbook
+	// docs/runbooks/packages-migration-rollback.md.
+	26: `ALTER TABLE secure_cli_agent_grants ADD COLUMN encrypted_env BLOB;`,
 
-const localKnowledgeSourcesSchema = `
-CREATE TABLE IF NOT EXISTS local_knowledge_sources (
+	// Version 37 → 38: bitrix_portals table (mirrors PG migration 000068).
+	// Stores per-tenant OAuth credentials + refresh state for Bitrix24 portals.
+	37: `CREATE TABLE IF NOT EXISTS bitrix_portals (
+    id           TEXT NOT NULL PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name         VARCHAR(100) NOT NULL,
+    domain       VARCHAR(255) NOT NULL,
+    credentials  BLOB,
+    state        BLOB,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bitrix_portals_tenant_name
+    ON bitrix_portals (tenant_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bitrix_portals_domain
+    ON bitrix_portals (LOWER(TRIM(domain)));`,
+
+	// Version 38 → 39: selected browser cookie sync.
+	38: `CREATE TABLE IF NOT EXISTS browser_cookies (
     id              TEXT NOT NULL PRIMARY KEY,
     tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    source_key      VARCHAR(100) NOT NULL,
-    name            VARCHAR(255) NOT NULL,
-    description     TEXT NOT NULL DEFAULT '',
-    path_windows    TEXT NOT NULL DEFAULT '',
-    path_container  TEXT NOT NULL DEFAULT '',
-    tenant_scope    VARCHAR(20) NOT NULL DEFAULT 'tenant'
-                    CHECK (tenant_scope IN ('system', 'tenant', 'shared')),
-    sync_mode       VARCHAR(20) NOT NULL DEFAULT 'manual'
-                    CHECK (sync_mode IN ('manual', 'scheduled', 'watch')),
-    index_target    VARCHAR(20) NOT NULL DEFAULT 'registry'
-                    CHECK (index_target IN ('registry', 'vault', 'memory', 'knowledge_graph', 'tool_cache')),
-    enabled         BOOLEAN NOT NULL DEFAULT 1,
-    last_sync_at    TEXT,
-    last_success_at TEXT,
-    last_error      TEXT,
-    file_count      INTEGER NOT NULL DEFAULT 0,
-    record_count    INTEGER NOT NULL DEFAULT 0,
-    content_hash    VARCHAR(128) NOT NULL DEFAULT '',
-    metadata        TEXT NOT NULL DEFAULT '{}',
+    user_id         VARCHAR(255) NOT NULL,
+    agent_id        VARCHAR(255) NOT NULL,
+    domain          TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    path            TEXT NOT NULL DEFAULT '/',
+    encrypted_value TEXT NOT NULL,
+    secure          INTEGER NOT NULL DEFAULT 0,
+    http_only       INTEGER NOT NULL DEFAULT 0,
+    same_site       VARCHAR(32) NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    source          VARCHAR(64) NOT NULL DEFAULT '',
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE(tenant_id, source_key)
+    CHECK (TRIM(domain) <> ''),
+    CHECK (TRIM(name) <> ''),
+    CHECK (TRIM(path) <> '')
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_cookies_scope_unique
+    ON browser_cookies (tenant_id, user_id, agent_id, domain, path, name);
+CREATE INDEX IF NOT EXISTS idx_browser_cookies_scope_domain
+    ON browser_cookies (tenant_id, user_id, agent_id, domain);
+CREATE INDEX IF NOT EXISTS idx_browser_cookies_expires_at
+    ON browser_cookies (expires_at);`,
 
-CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_tenant
-    ON local_knowledge_sources(tenant_id, enabled);
-CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_target
-    ON local_knowledge_sources(tenant_id, index_target);
-`
+	// Version 39 → 40: credential adapter framework — credential_type on user creds.
+	39: `ALTER TABLE secure_cli_user_credentials ADD COLUMN credential_type TEXT;`,
+	// Version 40 → 41: credential adapter framework — host_scope on user creds.
+	40: `ALTER TABLE secure_cli_user_credentials ADD COLUMN host_scope TEXT;`,
+	// Version 41 → 42: credential adapter framework — adapter_name on binaries.
+	41: `ALTER TABLE secure_cli_binaries ADD COLUMN adapter_name TEXT;`,
+	// Version 42 → 43: archived agent run timeline.
+	42: `CREATE TABLE IF NOT EXISTS run_timeline_items (
+    id           TEXT NOT NULL PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id       TEXT NOT NULL,
+    session_key  TEXT NOT NULL,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    user_id      TEXT,
+    channel      TEXT,
+    chat_id      TEXT,
+    seq          INTEGER NOT NULL,
+    item_type    TEXT NOT NULL,
+    status       TEXT,
+    title        TEXT,
+    preview      TEXT,
+    content      TEXT NOT NULL DEFAULT '',
+    tool_name    TEXT,
+    tool_call_id TEXT,
+    trace_id     TEXT REFERENCES traces(id) ON DELETE SET NULL,
+    span_id      TEXT REFERENCES spans(id) ON DELETE SET NULL,
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, run_id, seq)
+);
+CREATE INDEX IF NOT EXISTS idx_run_timeline_run_seq
+    ON run_timeline_items (tenant_id, run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_run_timeline_session_time
+    ON run_timeline_items (tenant_id, session_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_timeline_trace
+    ON run_timeline_items (tenant_id, trace_id)
+    WHERE trace_id IS NOT NULL;`,
+	// Version 43 → 44: channel-context MCP and Secure CLI grants/credentials.
+	43: addChannelContextCapabilityTables,
+	// Version 44 → 45: passive channel memory extraction run and review queue.
+	44: addChannelMemoryExtractionTables,
+	// Version 45 → 46: per-agent typed Secure CLI credentials.
+	45: `CREATE UNIQUE INDEX IF NOT EXISTS idx_secure_cli_binaries_id_tenant
+    ON secure_cli_binaries(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_id_tenant
+    ON agents(id, tenant_id);
+CREATE TABLE IF NOT EXISTS secure_cli_agent_credentials (
+    id              TEXT NOT NULL PRIMARY KEY,
+    binary_id       TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    encrypted_env   BLOB NOT NULL,
+    metadata        TEXT NOT NULL DEFAULT '{}',
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id),
+    credential_type TEXT,
+    host_scope      TEXT,
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(binary_id, agent_id, tenant_id),
+    FOREIGN KEY (binary_id, tenant_id) REFERENCES secure_cli_binaries(id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id, tenant_id) REFERENCES agents(id, tenant_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_scac_tenant ON secure_cli_agent_credentials(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_scac_binary ON secure_cli_agent_credentials(binary_id);
+CREATE INDEX IF NOT EXISTS idx_scac_agent ON secure_cli_agent_credentials(agent_id);`,
+	// Version 46 → 47: scope skill user-grant uniqueness by tenant.
+	46: `CREATE TABLE skill_user_grants_new (
+    id         TEXT NOT NULL PRIMARY KEY,
+    skill_id   TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    user_id    VARCHAR(255) NOT NULL,
+    granted_by VARCHAR(255) NOT NULL,
+    tenant_id  TEXT NOT NULL REFERENCES tenants(id),
+    created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(skill_id, user_id, tenant_id)
+);
+INSERT OR IGNORE INTO skill_user_grants_new (id, skill_id, user_id, granted_by, tenant_id, created_at)
+    SELECT id, skill_id, user_id, granted_by, tenant_id, created_at
+    FROM skill_user_grants;
+DROP TABLE skill_user_grants;
+ALTER TABLE skill_user_grants_new RENAME TO skill_user_grants;
+CREATE INDEX IF NOT EXISTS idx_skill_user_grants_user ON skill_user_grants(user_id);
+CREATE INDEX IF NOT EXISTS idx_skill_user_grants_tenant ON skill_user_grants(tenant_id);`,
+	// Version 47 → 48: skill self-evolution settings, metrics, suggestions, and immutable version records.
+	47: addSkillSelfEvolutionTables,
+	// Version 48 → 49: append-only usage event analytics.
+	48: addUsageEventAnalyticsTables,
+	// Version 50 → 51: mcp_oauth_tokens table for MCP OAuth client support.
+	// Partial unique indexes instead of UNIQUE constraint — SQLite treats NULLs as
+	// distinct in UNIQUE constraints, so global tokens (user_id IS NULL) would not
+	// conflict and re-auth would insert duplicates instead of updating.
+	50: `CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+    id                TEXT NOT NULL PRIMARY KEY,
+    server_id         TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id           TEXT,
+    access_token      TEXT NOT NULL,
+    refresh_token     TEXT,
+    token_type        TEXT NOT NULL DEFAULT 'Bearer',
+    scopes            TEXT,
+    expires_at        TEXT,
+    issued_at         TEXT,
+    dcr_client_id     TEXT NOT NULL DEFAULT '',
+    dcr_client_secret TEXT,
+    dcr_issuer        TEXT NOT NULL DEFAULT '',
+    token_endpoint    TEXT NOT NULL DEFAULT '',
+    resource_uri      TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS mcp_oauth_tokens_global_uq ON mcp_oauth_tokens (server_id, tenant_id) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS mcp_oauth_tokens_user_uq ON mcp_oauth_tokens (server_id, tenant_id, user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_server_tenant ON mcp_oauth_tokens (server_id, tenant_id);`,
+	// Version 51 → 52: add last_heartbeat_at to webhook_calls for lease heartbeat.
+	// Mirrors PG migration 000085. Idempotent-guarded via idempotentColumnMigration(51).
+	51: `ALTER TABLE webhook_calls ADD COLUMN last_heartbeat_at TEXT;`,
+}
+
+const addUsageEventAnalyticsTables = `
+CREATE TABLE IF NOT EXISTS usage_events (
+    id            TEXT NOT NULL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL REFERENCES tenants(id),
+    event_time    TEXT NOT NULL,
+    bucket_hour   TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    resource_id   TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT '',
+    agent_id      TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    team_id       TEXT,
+    trace_id      TEXT REFERENCES traces(id) ON DELETE SET NULL,
+    span_id       TEXT REFERENCES spans(id) ON DELETE SET NULL,
+    run_id        TEXT NOT NULL DEFAULT '',
+    session_key   TEXT NOT NULL DEFAULT '',
+    channel       TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    input_tokens  BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens  BIGINT NOT NULL DEFAULT 0,
+    cost_usd      NUMERIC(12,6) NOT NULL DEFAULT 0,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    call_count    INTEGER NOT NULL DEFAULT 1,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    metadata      TEXT,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_time
+    ON usage_events(tenant_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_resource_time
+    ON usage_events(tenant_id, resource_type, resource_name, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_type_time
+    ON usage_events(tenant_id, event_type, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_agent_time
+    ON usage_events(tenant_id, agent_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_channel_time
+    ON usage_events(tenant_id, channel, event_time DESC) WHERE channel != '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_events_trace_span_type_source
+    ON usage_events(trace_id, span_id, event_type, source)
+    WHERE trace_id IS NOT NULL AND span_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS usage_event_rollups (
+    id            TEXT NOT NULL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL REFERENCES tenants(id),
+    bucket_hour   TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT '',
+    agent_id      TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    channel       TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    input_tokens  BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens  BIGINT NOT NULL DEFAULT 0,
+    cost_usd      NUMERIC(12,6) NOT NULL DEFAULT 0,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    call_count    INTEGER NOT NULL DEFAULT 0,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_event_rollups_unique
+    ON usage_event_rollups(
+        tenant_id,
+        bucket_hour,
+        event_type,
+        resource_type,
+        resource_name,
+        source,
+        COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'),
+        channel,
+        provider,
+        model,
+        status
+    );
+CREATE INDEX IF NOT EXISTS idx_usage_event_rollups_tenant_hour
+    ON usage_event_rollups(tenant_id, bucket_hour DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_event_rollups_resource_hour
+    ON usage_event_rollups(tenant_id, resource_type, resource_name, bucket_hour DESC);`
+
+const addSkillSelfEvolutionTables = `
+CREATE TABLE IF NOT EXISTS skill_evolution_settings (
+    tenant_id        TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id         TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    enabled          INTEGER NOT NULL DEFAULT 0,
+    mode             VARCHAR(32) NOT NULL DEFAULT 'suggest_only',
+    last_analyzed_at TEXT,
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (tenant_id, skill_id),
+    CHECK (mode IN ('suggest_only', 'auto_analyze'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_evolution_settings_skill ON skill_evolution_settings(skill_id);
+
+CREATE TABLE IF NOT EXISTS skill_usage_metrics (
+    id                TEXT PRIMARY KEY,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id          TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    skill_slug        VARCHAR(255) NOT NULL,
+    skill_version     INTEGER NOT NULL DEFAULT 1,
+    agent_id          TEXT,
+    user_id           VARCHAR(255),
+    session_key       TEXT,
+    trace_id          TEXT,
+    invocation_id     TEXT,
+    invocation_source VARCHAR(32) NOT NULL DEFAULT 'runtime',
+    status            VARCHAR(32) NOT NULL DEFAULT 'started',
+    failure_reason    TEXT,
+    tool_calls_count  INTEGER NOT NULL DEFAULT 0,
+    duration_ms       INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (status IN ('started', 'succeeded', 'failed', 'abandoned'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_skill_created ON skill_usage_metrics(skill_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_tenant_created ON skill_usage_metrics(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_status ON skill_usage_metrics(skill_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_invocation ON skill_usage_metrics(invocation_id);
+
+CREATE TABLE IF NOT EXISTS skill_improvement_suggestions (
+    id                     TEXT PRIMARY KEY,
+    tenant_id              TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id               TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    skill_slug             VARCHAR(255) NOT NULL,
+    suggestion_type        VARCHAR(64) NOT NULL,
+    status                 VARCHAR(32) NOT NULL DEFAULT 'pending',
+    reason                 TEXT NOT NULL DEFAULT '',
+    evidence               TEXT NOT NULL DEFAULT '{}',
+    draft_patch            TEXT NOT NULL DEFAULT '{}',
+    target_file            TEXT NOT NULL DEFAULT '',
+    created_by_actor_type  VARCHAR(32) NOT NULL DEFAULT '',
+    created_by_actor_id    VARCHAR(255) NOT NULL DEFAULT '',
+    reviewed_by_actor_type VARCHAR(32) NOT NULL DEFAULT '',
+    reviewed_by_actor_id   VARCHAR(255) NOT NULL DEFAULT '',
+    reviewed_at            TEXT,
+    applied_version        INTEGER,
+    created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (status IN ('pending', 'approved', 'rejected', 'applied'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_suggestions_skill_status_created ON skill_improvement_suggestions(skill_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_suggestions_tenant_created ON skill_improvement_suggestions(tenant_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS skill_versions (
+    id                         TEXT PRIMARY KEY,
+    tenant_id                  TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id                   TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    version                    INTEGER NOT NULL,
+    content_hash               VARCHAR(64) NOT NULL DEFAULT '',
+    changed_files              TEXT NOT NULL DEFAULT '[]',
+    created_by_actor_type      VARCHAR(32) NOT NULL DEFAULT '',
+    created_by_actor_id        VARCHAR(255) NOT NULL DEFAULT '',
+    created_from_suggestion_id TEXT REFERENCES skill_improvement_suggestions(id) ON DELETE SET NULL,
+    created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(skill_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_tenant_skill ON skill_versions(tenant_id, skill_id, version DESC);
+
+INSERT OR IGNORE INTO skill_versions (
+    id, tenant_id, skill_id, version, content_hash, changed_files,
+    created_by_actor_type, created_by_actor_id, created_at
+)
+SELECT lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(2))) || '-' ||
+       lower(hex(randomblob(2))) || '-' || lower(hex(randomblob(6))),
+       tenant_id, id, version, COALESCE(file_hash, ''), '[]',
+       'system', 'migration', COALESCE(created_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+FROM skills
+WHERE status != 'deleted';`
+
+const addChannelMemoryExtractionTables = `
+CREATE TABLE IF NOT EXISTS channel_memory_extraction_runs (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    channel_name        VARCHAR(255) NOT NULL,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    user_id             VARCHAR(255) NOT NULL DEFAULT '',
+    history_key         VARCHAR(255) NOT NULL,
+    trigger             VARCHAR(32) NOT NULL DEFAULT 'scheduled',
+    status              VARCHAR(32) NOT NULL DEFAULT 'pending',
+    source_start_id     VARCHAR(255) NOT NULL DEFAULT '',
+    source_end_id       VARCHAR(255) NOT NULL DEFAULT '',
+    source_start_at     TEXT,
+    source_end_at       TEXT,
+    message_count       INTEGER NOT NULL DEFAULT 0,
+    redaction_count     INTEGER NOT NULL DEFAULT 0,
+    redaction_types     TEXT NOT NULL DEFAULT '[]',
+    item_count          INTEGER NOT NULL DEFAULT 0,
+    error_message       TEXT NOT NULL DEFAULT '',
+    started_at          TEXT,
+    completed_at        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, channel_instance_id, history_key, source_start_id, source_end_id)
+);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_runs_channel
+  ON channel_memory_extraction_runs(tenant_id, channel_instance_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_runs_status
+  ON channel_memory_extraction_runs(tenant_id, status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS channel_memory_extraction_items (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id              TEXT NOT NULL REFERENCES channel_memory_extraction_runs(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    user_id             VARCHAR(255) NOT NULL DEFAULT '',
+    item_hash           VARCHAR(128) NOT NULL,
+    item_type           VARCHAR(64) NOT NULL,
+    summary             TEXT NOT NULL,
+    topics              TEXT NOT NULL DEFAULT '[]',
+    entities            TEXT NOT NULL DEFAULT '[]',
+    confidence          REAL NOT NULL DEFAULT 0,
+    source_id           VARCHAR(255) NOT NULL DEFAULT '',
+    status              VARCHAR(32) NOT NULL DEFAULT 'pending_review',
+    approved_by         VARCHAR(255) NOT NULL DEFAULT '',
+    approved_at         TEXT,
+    rejected_by         VARCHAR(255) NOT NULL DEFAULT '',
+    rejected_at         TEXT,
+    deleted_at          TEXT,
+    written_at          TEXT,
+    episodic_id         VARCHAR(64) NOT NULL DEFAULT '',
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, run_id, item_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_items_channel_status
+  ON channel_memory_extraction_items(tenant_id, channel_instance_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_items_run
+  ON channel_memory_extraction_items(tenant_id, run_id);`
+
+const addChannelContextCapabilityTables = `
+CREATE TABLE IF NOT EXISTS mcp_context_grants (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    server_id           TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    enabled             BOOLEAN NOT NULL DEFAULT 1,
+    tool_allow          TEXT,
+    tool_deny           TEXT,
+    config_overrides    TEXT,
+    granted_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_grants_scope ON mcp_context_grants(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_grants_server ON mcp_context_grants(server_id);
+
+CREATE TABLE IF NOT EXISTS mcp_context_credentials (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    server_id           TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    api_key             TEXT,
+    headers             BLOB,
+    env                 BLOB,
+    created_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, server_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_credentials_scope ON mcp_context_credentials(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_credentials_server ON mcp_context_credentials(server_id);
+
+CREATE TABLE IF NOT EXISTS secure_cli_context_grants (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    binary_id           TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
+    deny_args           TEXT,
+    deny_verbose        TEXT,
+    timeout_seconds     INTEGER,
+    tips                TEXT,
+    encrypted_env       BLOB,
+    enabled             BOOLEAN NOT NULL DEFAULT 1,
+    granted_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, binary_id)
+);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_grants_scope ON secure_cli_context_grants(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_grants_binary ON secure_cli_context_grants(binary_id);
+
+CREATE TABLE IF NOT EXISTS secure_cli_context_credentials (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    binary_id           TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
+    encrypted_env       BLOB NOT NULL,
+    metadata            TEXT NOT NULL DEFAULT '{}',
+    credential_type     TEXT,
+    host_scope          TEXT,
+    created_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, binary_id)
+);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_credentials_scope ON secure_cli_context_credentials(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_credentials_binary ON secure_cli_context_credentials(binary_id);`
 
 // addHooksTables is the SQLite incremental migration for schema v19 → v20.
 // Mirrors PG migrations 000052–000055 (consolidated — desktop never shipped
@@ -666,8 +1266,8 @@ CREATE TABLE IF NOT EXISTS tenant_hook_budget (
 );`
 
 // backfillV16 populates base_name / path_basename for rows that existed
-// before the v15 → v16 migration. Idempotent — re-running on already-filled
-// rows is a no-op thanks to the WHERE base_name = ” filter.
+// before the v15 -> v16 migration. Idempotent; re-running on already-filled
+// rows is a no-op for already-filled base_name values.
 func backfillV16(ctx context.Context, db *sql.DB) error {
 	type row struct{ id, path string }
 
@@ -789,6 +1389,15 @@ func EnsureSchema(db *sql.DB) error {
 			if !ok {
 				return fmt.Errorf("sqlite: missing migration for version %d → %d", v, v+1)
 			}
+			if tableName, columnName, ok := idempotentColumnMigration(v); ok {
+				hasColumn, err := sqliteColumnExists(db, tableName, columnName)
+				if err != nil {
+					return fmt.Errorf("inspect %s.%s: %w", tableName, columnName, err)
+				}
+				if hasColumn {
+					patch = `SELECT 1;`
+				}
+			}
 			// Migrations that rebuild a table referenced by another table's FK
 			// require foreign_keys=OFF per SQLite altertable §7. The pragma is
 			// a no-op inside a transaction, so toggle it around BEGIN/COMMIT.
@@ -853,6 +1462,54 @@ func EnsureSchema(db *sql.DB) error {
 	}
 
 	return seedMasterTenant(db)
+}
+
+func idempotentColumnMigration(version int) (string, string, bool) {
+	switch version {
+	case 26:
+		return "secure_cli_agent_grants", "encrypted_env", true
+	case 28:
+		return "webhook_calls", "lease_token", true
+	case 29:
+		return "webhooks", "encrypted_secret", true
+	case 33:
+		return "agents", "model_fallback", true
+	case 34:
+		return "skill_agent_grants", "can_manage", true
+	case 39:
+		return "secure_cli_user_credentials", "credential_type", true
+	case 40:
+		return "secure_cli_user_credentials", "host_scope", true
+	case 41:
+		return "secure_cli_binaries", "adapter_name", true
+	case 51:
+		return "webhook_calls", "last_heartbeat_at", true
+	default:
+		return "", "", false
+	}
+}
+
+func sqliteColumnExists(db *sql.DB, tableName, columnName string) (bool, error) {
+	rows, err := db.Query("PRAGMA table_info(" + tableName + ")")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if name == columnName {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // seedMasterTenant ensures the master tenant row exists (idempotent).

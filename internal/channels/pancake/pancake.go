@@ -11,6 +11,7 @@ import (
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
+	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -150,7 +151,7 @@ func (ch *Channel) Start(ctx context.Context) error {
 	if ch.webhookSecret == "" {
 		slog.Warn("security.pancake_webhook_no_secret",
 			"page_id", ch.pageID,
-			"note", "webhook_secret not configured; incoming webhook requests will not be authenticated")
+			"note", "webhook_secret not configured; incoming webhook requests will be ignored until configured")
 	}
 
 	// Without HMAC, any actor reaching the webhook endpoint can trigger Pancake API calls.
@@ -332,6 +333,9 @@ func (ch *Channel) sendPrivateReply(ctx context.Context, senderID, conversationI
 // BlockReplyEnabled returns the per-channel block_reply override (nil = inherit gateway default).
 func (ch *Channel) BlockReplyEnabled() *bool { return ch.config.BlockReply }
 
+// ChatBehaviorConfig returns the per-channel chat_behavior override.
+func (ch *Channel) ChatBehaviorConfig() *config.ChatBehaviorConfig { return ch.config.ChatBehavior }
+
 // WebhookHandler returns the shared webhook path and global router as handler.
 // Only the first pancake instance mounts the route; others return ("", nil).
 func (ch *Channel) WebhookHandler() (string, http.Handler) {
@@ -370,4 +374,3 @@ func (ch *Channel) maxMessageLength() int {
 		return 2000
 	}
 }
-

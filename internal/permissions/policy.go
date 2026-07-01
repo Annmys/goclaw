@@ -124,6 +124,34 @@ func (pe *PolicyEngine) CanAccessWithScopes(scopes []Scope, method string) bool 
 	return false
 }
 
+// RoleFromTenantRole maps a `tenant_users.role` value to the gateway's
+// permissions.Role used by CanAccess. Used by the WS and HTTP browser-pairing
+// auth paths so a paired session inherits the role the user already has in
+// their tenant instead of a hard-coded operator default. String literals
+// rather than store.TenantRole* constants are used to avoid an import cycle
+// (store depends on this package transitively).
+//
+// Mapping:
+//
+//	owner            → RoleOwner
+//	admin            → RoleAdmin
+//	operator, member → RoleOperator
+//	viewer, ""       → RoleViewer
+func RoleFromTenantRole(tenantRole string) Role {
+	switch tenantRole {
+	case "owner":
+		return RoleOwner
+	case "admin":
+		return RoleAdmin
+	case "operator", "member":
+		return RoleOperator
+	case "viewer":
+		return RoleViewer
+	default:
+		return RoleViewer
+	}
+}
+
 // RoleFromScopes determines the effective role from a set of scopes.
 func RoleFromScopes(scopes []Scope) Role {
 	if slices.Contains(scopes, ScopeAdmin) {
@@ -211,7 +239,9 @@ func isAdminMethod(method string) bool {
 		protocol.MethodConfigPatch,
 		protocol.MethodConfigSchema,
 		protocol.MethodConfigDefaults,
+		protocol.MethodChatBehaviorPreview,
 		protocol.MethodConfigPermissionsList,
+		protocol.MethodConfigPermissionsCheck,
 		protocol.MethodConfigPermissionsGrant,
 		protocol.MethodConfigPermissionsRevoke,
 
@@ -229,6 +259,10 @@ func isAdminMethod(method string) bool {
 		protocol.MethodChannelInstancesUpdate,
 		protocol.MethodChannelInstancesDelete,
 
+		// Bitrix24 portal management — admin-only writes (credentials + delete).
+		protocol.MethodBitrixPortalsCreate,
+		protocol.MethodBitrixPortalsDelete,
+
 		// Pairing management (approve/revoke/list/deny require admin).
 		protocol.MethodPairingApprove,
 		protocol.MethodPairingDeny,
@@ -245,12 +279,10 @@ func isAdminMethod(method string) bool {
 		protocol.MethodTeamsTaskDeleteBulk,
 
 		// Tenants — write paths.
-		protocol.MethodTenantsCreate,
-		protocol.MethodTenantsUpdate,
-		protocol.MethodTenantsDelete,
-		protocol.MethodTenantsUsersAdd,
-		protocol.MethodTenantsUsersRemove,
-		protocol.MethodTenantsAccessUpdate,
+		"tenants.create",
+		"tenants.update",
+		"tenants.users.add",
+		"tenants.users.remove",
 
 		// API keys expose secret material — gate list + mutations as admin.
 		protocol.MethodAPIKeysList,
@@ -282,6 +314,17 @@ func isAdminMethod(method string) bool {
 		protocol.MethodTTSEnable,
 		protocol.MethodTTSDisable,
 		protocol.MethodTTSSetProvider,
+
+		// Workstations — credentials + remote exec; create/update/delete and
+		// agent linking + permission mutations are admin-only.
+		protocol.MethodWorkstationsCreate,
+		protocol.MethodWorkstationsUpdate,
+		protocol.MethodWorkstationsDelete,
+		protocol.MethodWorkstationsLinkAgent,
+		protocol.MethodWorkstationsUnlinkAgent,
+		protocol.MethodWorkstationsPermAdd,
+		protocol.MethodWorkstationsPermRemove,
+		protocol.MethodWorkstationsPermToggle,
 	}
 	return slices.Contains(adminMethods, method)
 }
@@ -301,6 +344,7 @@ func isWriteMethod(method string) bool {
 		protocol.MethodCronToggle,
 		protocol.MethodCronRun,
 		protocol.MethodSend,
+		protocol.MethodLLMComplete,
 		protocol.MethodAgentsFileSet,
 		protocol.MethodTeamsTaskApprove,
 		protocol.MethodTeamsTaskReject,
@@ -322,6 +366,9 @@ func isWriteMethod(method string) bool {
 		// Channel pairing starts (QR scan flows).
 		protocol.MethodZaloPersonalQRStart,
 		protocol.MethodWhatsAppQRStart,
+
+		// Workstations — connection test invokes SSH side-effects.
+		protocol.MethodWorkstationsTest,
 	}
 	return slices.Contains(writeExact, method)
 }
@@ -349,6 +396,7 @@ func isReadMethod(method string) bool {
 		// Sessions read
 		protocol.MethodSessionsList,
 		protocol.MethodSessionsPreview,
+		protocol.MethodRunTimelineGet,
 
 		// Skills read
 		protocol.MethodSkillsList,
@@ -365,6 +413,12 @@ func isReadMethod(method string) bool {
 		protocol.MethodChannelInstancesList,
 		protocol.MethodChannelInstancesGet,
 
+		// Bitrix24 portal read — any tenant member can list portals to populate
+		// the channel-form dropdown; get_install_url is needed to resume a
+		// half-finished authorize flow.
+		protocol.MethodBitrixPortalsList,
+		protocol.MethodBitrixPortalsGetInstallURL,
+
 		// Usage / quota
 		protocol.MethodUsageGet,
 		protocol.MethodUsageSummary,
@@ -380,11 +434,10 @@ func isReadMethod(method string) bool {
 		protocol.MethodVoicesList,
 
 		// Tenants read
-		protocol.MethodTenantsList,
-		protocol.MethodTenantsGet,
-		protocol.MethodTenantsUsersList,
-		protocol.MethodTenantsMine,
-		protocol.MethodTenantsAccessGet,
+		"tenants.list",
+		"tenants.get",
+		"tenants.users.list",
+		"tenants.mine",
 
 		// Teams read
 		protocol.MethodTeamsList,
@@ -418,6 +471,12 @@ func isReadMethod(method string) bool {
 
 		// Zalo personal contacts listing
 		protocol.MethodZaloPersonalContacts,
+
+		// Workstations read
+		protocol.MethodWorkstationsList,
+		protocol.MethodWorkstationsGet,
+		protocol.MethodWorkstationsPermList,
+		protocol.MethodWorkstationsListActivity,
 	}
 	return slices.Contains(readMethods, method)
 }

@@ -94,14 +94,6 @@ func (m *TeamToolManager) ProcessPendingTasks(ctx context.Context, teamID uuid.U
 		if *task.OwnerAgentID == team.LeadAgentID {
 			continue
 		}
-		hasActive, err := m.teamStore.HasActiveInProgressTaskForAgent(ctx, teamID, *task.OwnerAgentID)
-		if err != nil {
-			slog.Warn("post_turn: active-task check failed", "task_id", task.ID, "agent_id", *task.OwnerAgentID, "error", err)
-			continue
-		}
-		if hasActive {
-			continue
-		}
 		if err := m.teamStore.AssignTask(ctx, task.ID, *task.OwnerAgentID, teamID); err != nil {
 			slog.Warn("post_turn: assign failed", "task_id", task.ID, "error", err)
 			continue

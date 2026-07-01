@@ -65,13 +65,6 @@ func TestSetupToolRegistryExecWorkspacePaths(t *testing.T) {
 	if err := os.WriteFile(protectedPath, []byte("secret"), 0644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	globalSkillScript := filepath.Join(dataDir, "skills", "shipping-doc-processing", "scripts", "generate_shipping_doc.py")
-	if err := os.MkdirAll(filepath.Dir(globalSkillScript), 0755); err != nil {
-		t.Fatalf("MkdirAll() error = %v", err)
-	}
-	if err := os.WriteFile(globalSkillScript, []byte("print('skill-ok')\n"), 0644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
 	symlinkPath := filepath.Join(teamWorkspace, "leak.txt")
 	if err := os.Symlink(protectedPath, symlinkPath); err != nil {
 		t.Fatalf("Symlink() error = %v", err)
@@ -92,7 +85,6 @@ func TestSetupToolRegistryExecWorkspacePaths(t *testing.T) {
 		command    string
 		wantDenied bool
 		wantPath   string
-		wantOutput string
 	}{
 		{
 			name:    "personal_workspace_prefixed_uploads_allowed",
@@ -123,12 +115,6 @@ func TestSetupToolRegistryExecWorkspacePaths(t *testing.T) {
 			wantDenied: true,
 		},
 		{
-			name:       "global_skills_script_allowed",
-			ctx:        tools.WithToolWorkspace(context.Background(), workspace),
-			command:    "python3 " + globalSkillScript,
-			wantOutput: "skill-ok",
-		},
-		{
 			name:       "workspace_local_dotgoclaw_denied",
 			ctx:        tools.WithToolWorkspace(context.Background(), workspace),
 			command:    "printf '%s' " + filepath.Join(workspace, ".goclaw", "secrets.json"),
@@ -149,10 +135,6 @@ func TestSetupToolRegistryExecWorkspacePaths(t *testing.T) {
 			if tc.wantPath != "" {
 				if _, err := os.Stat(tc.wantPath); err != nil {
 					t.Fatalf("expected copied file at %q, got stat error: %v", tc.wantPath, err)
-				}
-			} else if tc.wantOutput != "" {
-				if !strings.Contains(result.ForLLM, tc.wantOutput) {
-					t.Fatalf("expected output to contain %q, got: %s", tc.wantOutput, result.ForLLM)
 				}
 			} else if !tc.wantDenied && !strings.Contains(result.ForLLM, "Quarterly Report.png") {
 				t.Fatalf("expected output to contain quoted file path, got: %s", result.ForLLM)

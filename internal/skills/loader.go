@@ -27,32 +27,18 @@ import (
 
 // Metadata holds parsed SKILL.md frontmatter.
 type Metadata struct {
-	Name               string
-	Description        string
-	Slug               string
-	DisplayName        string
-	Family             string
-	Canonical          bool
-	Replaces           []string
-	Aliases            []string
-	RegressionPrefixes []string
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // Info describes a discovered skill.
 type Info struct {
-	Name        string   `json:"name"`
-	Slug        string   `json:"slug"`    // directory name (unique identifier)
-	Path        string   `json:"path"`    // absolute path to SKILL.md
-	BaseDir     string   `json:"baseDir"` // skill directory (parent of SKILL.md)
-	Source      string   `json:"source"`  // "workspace", "global", "builtin"
-	Description string   `json:"description"`
-	DisplayName string   `json:"displayName,omitempty"`
-	Family      string   `json:"family,omitempty"`
-	Canonical   bool     `json:"canonical,omitempty"`
-	Replaces    []string `json:"replaces,omitempty"`
-	Aliases     []string `json:"aliases,omitempty"`
-	RegressionPrefixes []string `json:"regressionPrefixes,omitempty"`
-	Version             int      `json:"version,omitempty"`
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`    // directory name (unique identifier)
+	Path        string `json:"path"`    // absolute path to SKILL.md
+	BaseDir     string `json:"baseDir"` // skill directory (parent of SKILL.md)
+	Source      string `json:"source"`  // "workspace", "global", "builtin"
+	Description string `json:"description"`
 }
 
 // Loader discovers and loads SKILL.md files from multiple directories.
@@ -92,7 +78,7 @@ func NewLoader(workspace, globalSkills, builtinSkills string) *Loader {
 	// Personal agent skills: ~/.agents/skills/ (matching TS)
 	homeDir, _ := os.UserHomeDir()
 	personalAgentSkills := ""
-	if homeDir != "" {
+	if homeDir != "" && os.Getenv("GOCLAW_DISABLE_PERSONAL_SKILLS") != "1" {
 		personalAgentSkills = filepath.Join(homeDir, ".agents", "skills")
 	}
 
@@ -163,14 +149,6 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 				if meta.Name != "" {
 					info.Name = meta.Name
 				}
-				if hasMetadataGovernance(meta) {
-					info.DisplayName = meta.DisplayName
-					info.Family = meta.Family
-					info.Canonical = meta.Canonical
-					info.Replaces = append([]string(nil), meta.Replaces...)
-					info.Aliases = append([]string(nil), meta.Aliases...)
-					info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
-				}
 			}
 			skills = append(skills, info)
 			seen[d.Name()] = true
@@ -213,14 +191,6 @@ func (l *Loader) ListSkills(_ context.Context) []Info {
 					info.Description = meta.Description
 					if meta.Name != "" {
 						info.Name = meta.Name
-					}
-					if hasMetadataGovernance(meta) {
-						info.DisplayName = meta.DisplayName
-						info.Family = meta.Family
-						info.Canonical = meta.Canonical
-						info.Replaces = append([]string(nil), meta.Replaces...)
-						info.Aliases = append([]string(nil), meta.Aliases...)
-						info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
 					}
 				}
 				skills = append(skills, info)
@@ -266,33 +236,16 @@ func (l *Loader) listManagedSkills() []Info {
 			Path:    skillFile,
 			BaseDir: latestDir,
 			Source:  "managed",
-			Version: latestVersion,
 		}
 		if meta := parseMetadata(skillFile); meta != nil {
 			info.Description = meta.Description
 			if meta.Name != "" {
 				info.Name = meta.Name
 			}
-			if hasMetadataGovernance(meta) {
-				info.DisplayName = meta.DisplayName
-				info.Family = meta.Family
-			info.Canonical = meta.Canonical
-			info.Replaces = append([]string(nil), meta.Replaces...)
-			info.Aliases = append([]string(nil), meta.Aliases...)
-			info.RegressionPrefixes = append([]string(nil), meta.RegressionPrefixes...)
 		}
-	}
 		skills = append(skills, info)
 	}
 	return skills
-}
-
-func hasMetadataGovernance(meta *Metadata) bool {
-	return meta != nil && (strings.TrimSpace(meta.DisplayName) != "" ||
-		strings.TrimSpace(meta.Family) != "" ||
-		meta.Canonical ||
-		len(meta.Replaces) > 0 ||
-		len(meta.Aliases) > 0)
 }
 
 // findLatestVersion finds the highest-numbered version subdirectory for a skill slug.
@@ -444,34 +397,12 @@ func (l *Loader) BuildSummary(ctx context.Context, allowList []string) string {
 	for _, s := range filtered {
 		lines = append(lines, "  <skill>")
 		lines = append(lines, fmt.Sprintf("    <name>%s</name>", escapeXML(s.Name)))
-		display := s.DisplayName
-		if display == "" {
-			display = s.Name
-		}
-		lines = append(lines, fmt.Sprintf("    <display>%s（%s）V%d</display>", escapeXML(s.Slug), escapeXML(display), s.Version))
 		desc := s.Description
 		if len([]rune(desc)) > skillDescMaxLen {
 			desc = string([]rune(desc)[:skillDescMaxLen]) + "…"
 		}
 		lines = append(lines, fmt.Sprintf("    <description>%s</description>", escapeXML(desc)))
 		lines = append(lines, fmt.Sprintf("    <location>%s</location>", escapeXML(s.Path)))
-		family := s.Family
-		if strings.TrimSpace(family) == "" {
-			family = s.Slug
-		}
-		lines = append(lines, fmt.Sprintf("    <family>%s</family>", escapeXML(family)))
-		if s.Canonical {
-			lines = append(lines, "    <canonical>true</canonical>")
-		}
-		if len(s.Aliases) > 0 {
-			lines = append(lines, fmt.Sprintf("    <aliases>%s</aliases>", escapeXML(strings.Join(s.Aliases, ", "))))
-		}
-		if len(s.Replaces) > 0 {
-			lines = append(lines, fmt.Sprintf("    <replaces>%s</replaces>", escapeXML(strings.Join(s.Replaces, ", "))))
-		}
-		if len(s.RegressionPrefixes) > 0 {
-			lines = append(lines, fmt.Sprintf("    <regression_prefixes>%s</regression_prefixes>", escapeXML(strings.Join(s.RegressionPrefixes, ", "))))
-		}
 		lines = append(lines, "  </skill>")
 	}
 	lines = append(lines, "</available_skills>")
@@ -561,30 +492,16 @@ func parseMetadata(path string) *Metadata {
 	}
 
 	// Try JSON first
-	var jm map[string]string
-	if json.Unmarshal([]byte(fm), &jm) == nil && jm["name"] != "" {
-		m := metadataFromFields(jm)
-		return &m
+	var jm Metadata
+	if json.Unmarshal([]byte(fm), &jm) == nil && jm.Name != "" {
+		return &jm
 	}
 
 	// Fall back to simple YAML key: value
 	kv := parseSimpleYAML(fm)
-	m := metadataFromFields(kv)
-	return &m
-}
-
-func metadataFromFields(fields map[string]string) Metadata {
-	g := GovernanceFromFields(fields)
-	return Metadata{
-		Name:               fields["name"],
-		Description:        fields["description"],
-		Slug:               fields["slug"],
-		DisplayName:        g.DisplayName,
-		Family:             g.Family,
-		Canonical:          g.Canonical,
-		Replaces:           g.Replaces,
-		Aliases:            g.Aliases,
-		RegressionPrefixes: g.RegressionPrefixes,
+	return &Metadata{
+		Name:        kv["name"],
+		Description: kv["description"],
 	}
 }
 

@@ -2,17 +2,12 @@ package pg
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/google/uuid"
 
-	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -99,107 +94,6 @@ func (s *PGSkillStore) DeleteSkill(ctx context.Context, id uuid.UUID) error {
 	}
 	s.BumpVersion()
 	return nil
-}
-
-// SaveSkillContentVersion creates a new immutable version for a custom skill by
-// replacing SKILL.md while copying companion files from the previous version.
-func (s *PGSkillStore) SaveSkillContentVersion(ctx context.Context, id uuid.UUID, content string) (int, error) {
-	info, ok := s.GetSkillByID(ctx, id)
-	if !ok {
-		return 0, fmt.Errorf("skill not found")
-	}
-	if info.IsSystem {
-		return 0, fmt.Errorf("cannot edit system skill content")
-	}
-	if info.Status == "deleted" {
-		return 0, fmt.Errorf("skill has been deleted")
-	}
-
-	newVer, commitLock, err := s.GetNextVersionLocked(ctx, info.Slug)
-	if err != nil {
-		return 0, fmt.Errorf("lock version: %w", err)
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = commitLock()
-		}
-	}()
-
-	destDir := filepath.Join(filepath.Dir(info.BaseDir), fmt.Sprintf("%d", newVer))
-	if err := copySkillVersionFiles(info.BaseDir, destDir); err != nil {
-		return 0, fmt.Errorf("copy skill files: %w", err)
-	}
-	contentBytes := []byte(content)
-	if err := os.WriteFile(filepath.Join(destDir, "SKILL.md"), contentBytes, 0644); err != nil {
-		return 0, fmt.Errorf("write SKILL.md: %w", err)
-	}
-
-	name, description, slug, frontmatter := skills.ParseSkillFrontmatter(content)
-	if name == "" {
-		name = info.Name
-	}
-	if slug != "" && slug != info.Slug {
-		return 0, fmt.Errorf("cannot change skill slug from %q to %q", info.Slug, slug)
-	}
-	desc := description
-	if desc == "" {
-		desc = info.Description
-	}
-	hash := sha256.Sum256(contentBytes)
-	fileHash := fmt.Sprintf("%x", hash[:])
-
-	if err := s.UpdateSkill(ctx, id, map[string]any{
-		"name":        name,
-		"description": desc,
-		"version":     newVer,
-		"frontmatter": marshalFrontmatter(frontmatter),
-		"file_path":   destDir,
-		"file_size":   int64(len(contentBytes)),
-		"file_hash":   fileHash,
-		"status":      "active",
-	}); err != nil {
-		return 0, err
-	}
-	if err := commitLock(); err != nil {
-		return 0, fmt.Errorf("commit version lock: %w", err)
-	}
-	committed = true
-	s.BumpVersion()
-	return newVer, nil
-}
-
-func copySkillVersionFiles(srcDir, dstDir string) error {
-	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil || rel == "." {
-			return err
-		}
-		if skills.IsSystemArtifact(rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Type()&os.ModeSymlink != 0 {
-			return nil
-		}
-		target := filepath.Join(dstDir, rel)
-		if d.IsDir() {
-			return os.MkdirAll(target, 0755)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return err
-		}
-		return os.WriteFile(target, data, 0644)
-	})
 }
 
 // tenantSlugAdvisoryLock returns a stable int64 lock key derived from tenant ID + slug,
@@ -415,49 +309,28 @@ func parseFrontmatterAuthor(raw []byte) string {
 	return fm["author"]
 }
 
-func parseFrontmatterGovernance(raw []byte) (displayName, family string, canonical bool, replaces, aliases, regressionPrefixes []string) {
+func parseFrontmatterCreatorAgent(raw []byte) *store.SkillAgentRef {
 	if len(raw) == 0 {
-		return "", "", false, nil, nil, nil
+		return nil
 	}
 	var fm map[string]string
 	if err := json.Unmarshal(raw, &fm); err != nil {
-		return "", "", false, nil, nil, nil
-	}
-	displayName = firstNonEmpty(fm["display_name"], fm["display-name"], fm["display"])
-	family = fm["family"]
-	switch strings.ToLower(strings.TrimSpace(fm["canonical"])) {
-	case "1", "true", "yes", "y", "on":
-		canonical = true
-	}
-	replaces = splitCSVFrontmatterList(fm["replaces"])
-	aliases = splitCSVFrontmatterList(fm["aliases"])
-	regressionPrefixes = splitCSVFrontmatterList(firstNonEmpty(fm["regression_prefixes"], fm["regression-prefixes"]))
-	return
-}
-
-func splitCSVFrontmatterList(v string) []string {
-	v = strings.TrimSpace(v)
-	if v == "" {
 		return nil
 	}
-	v = strings.Trim(v, "[]")
-	parts := strings.FieldsFunc(v, func(r rune) bool {
-		return r == ',' || r == '\n' || r == ';'
-	})
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(strings.Trim(p, `"'`))
-		if p != "" {
-			out = append(out, p)
-		}
+	ref := store.SkillAgentRef{
+		ID:       fm["created_by_agent_id"],
+		AgentKey: firstNonEmpty(fm["created_by_agent_key"], fm["creator_agent_key"]),
 	}
-	return out
+	if ref.ID == "" && ref.AgentKey == "" {
+		return nil
+	}
+	return &ref
 }
 
 func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
+	for _, value := range values {
+		if value != "" {
+			return value
 		}
 	}
 	return ""

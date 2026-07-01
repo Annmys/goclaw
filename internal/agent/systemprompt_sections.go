@@ -25,6 +25,101 @@ const mcpOptionalParamInstruction = "**Optional parameters:** Only include param
 // discoverability with prompt budget.
 const mcpToolDescMaxLen = 200
 
+// buildCRMFreshnessSection emits a Bitrix24-specific data-freshness reminder.
+// LLMs tend to recall CRM record fields from earlier conversation turns;
+// when admin changes the user's CRM permission mid-session, the LLM may
+// surface fields the user no longer can see. Explicit re-fetch instruction
+// nudges it to call MCP tools for record lookups instead of using memory.
+//
+// Scoped to Bitrix24 channel only — other channels don't (yet) have
+// per-user CRM permissions to enforce.
+func buildCRMFreshnessSection() []string {
+	return []string{
+		"## CRM Data Freshness Policy",
+		"",
+		"Bitrix24 CRM permissions can change mid-conversation. When asked about a specific CRM record (lead, deal, contact, task, calendar event):",
+		"",
+		"- ALWAYS call the appropriate MCP tool to fetch current data — do NOT recall field values (amount, status, dates, assignee) from earlier turns in this conversation.",
+		"- For general questions (how to use the bot, explain CRM concepts), memory recall is fine.",
+		"- If a tool call returns 403 / `permission denied` / `Insufficient access`, reply that the user lacks permission — do not work around it with cached data.",
+		"",
+	}
+}
+
+// buildBitrix24EntityLinkSection emits per-tenant Bitrix24 entity URL guidance.
+// Without this, the LLM hallucinates a placeholder domain ("bitrix24.example.com")
+// when asked to share a task/deal/contact link — even though the real domain
+// is known from the channel config, the OAuth event, and the portal DB row.
+//
+// Scoped to Bitrix24 channel only. The portal domain is per-tenant (one portal
+// per tenant install), so we inject it dynamically rather than hardcoding into
+// SOUL.md / AGENTS.md. Domain rotates / portal renames flow through to the
+// prompt automatically on the next turn.
+func buildBitrix24EntityLinkSection(portalDomain, viewerUserID string) []string {
+	// Trim any accidental scheme/path that may have crept into channel config.
+	d := strings.TrimSpace(portalDomain)
+	d = strings.TrimPrefix(d, "https://")
+	d = strings.TrimPrefix(d, "http://")
+	if i := strings.Index(d, "/"); i >= 0 {
+		d = d[:i]
+	}
+	if d == "" {
+		return nil
+	}
+	base := "https://" + d
+
+	// Task URL needs a viewer's Bitrix user_id in the path; without it the
+	// fallback /tasks/task/view/ may 404 or redirect. Prefer the current
+	// sender's numeric id when available — same id the webhook ships as
+	// FROM_USER_ID, so the link opens the task in the asker's own view.
+	taskURL := fmt.Sprintf("`%s/tasks/task/view/{task_id}/`", base)
+	if v := strings.TrimSpace(viewerUserID); v != "" && isNumericID(v) {
+		taskURL = fmt.Sprintf("`%s/company/personal/user/%s/tasks/task/view/{task_id}/`  "+
+			"(replace `%s` with another user's Bitrix24 user_id if you need to share a link from THEIR view; "+
+			"or `%s/workgroups/group/{group_id}/tasks/task/view/{task_id}/` for workgroup tasks)", base, v, v, base)
+	} else {
+		taskURL = fmt.Sprintf("`%s/company/personal/user/{viewer_user_id}/tasks/task/view/{task_id}/`  "+
+			"(replace `{viewer_user_id}` with the current Bitrix24 user_id; "+
+			"or `%s/workgroups/group/{group_id}/tasks/task/view/{task_id}/` for workgroup tasks)", base, base)
+	}
+
+	return []string{
+		"## Bitrix24 Entity URLs",
+		"",
+		"When linking to a Bitrix24 record (task, deal, lead, contact, company, calendar event), build the URL with **this portal's domain** — never use `example.com`, `bitrix24.example.com`, or any placeholder.",
+		"",
+		fmt.Sprintf("- Portal domain: `%s`", d),
+		"- Task:     " + taskURL,
+		fmt.Sprintf("- Deal:     `%s/crm/deal/details/{deal_id}/`", base),
+		fmt.Sprintf("- Lead:     `%s/crm/lead/details/{lead_id}/`", base),
+		fmt.Sprintf("- Contact:  `%s/crm/contact/details/{contact_id}/`", base),
+		fmt.Sprintf("- Company:  `%s/crm/company/details/{company_id}/`", base),
+		fmt.Sprintf("- Order:    `%s/shop/orders/details/{order_id}/`", base),
+		fmt.Sprintf("- Payment:  `%s/shop/orders/payment/details/{payment_id}/`", base),
+		fmt.Sprintf("- Shipment: `%s/shop/orders/shipment/details/{shipment_id}/`", base),
+		fmt.Sprintf("- Calendar: `%s/calendar/?EVENT_ID={event_id}`", base),
+		fmt.Sprintf("- Chat:     `%s/online/?IM_DIALOG={dialog_id}` (e.g. `chat4932`)", base),
+		"",
+		"**Bitrix24 path-based URLs must end with a trailing `/`** (e.g. `/crm/deal/details/123/` — omit it and the portal may redirect or 404). Query-string URLs (`?EVENT_ID=`, `?IM_DIALOG=`) do not need a trailing slash. When a tool result already includes a full URL, use that URL verbatim — do NOT reconstruct it.",
+		"",
+	}
+}
+
+// isNumericID returns true when s is a non-empty all-digit string. Used to
+// gate viewer-id substitution into the Task URL so a non-numeric sender (e.g.
+// a synthetic sender like "ticker:system") never lands in the URL path.
+func isNumericID(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // buildMCPToolsSearchSection generates the MCP tools search instruction block.
 // Shown when mcp_tool_search is registered — may appear alongside the inline
 // section in hybrid mode (some tools inline, rest discoverable via search).
@@ -176,11 +271,7 @@ func buildSkillsHybridSection(pinnedSummary string, hasSearch, hasManage bool) [
 		)
 	}
 	if hasSearch {
-		lines = append(lines,
-			"For other skills, run `skill_search` with **English keywords** describing the domain.",
-			"If a match is found, read its SKILL.md at the returned location, then follow it.",
-			"",
-		)
+		lines = append(lines, skillLoadingProtocolLines()...)
 	}
 	if hasManage {
 		lines = append(lines, "### Skill Creation", "",
@@ -189,6 +280,24 @@ func buildSkillsHybridSection(pinnedSummary string, hasSearch, hasManage bool) [
 			"")
 	}
 	return lines
+}
+
+// skillLoadingProtocolLines is the shared, mechanical protocol for activating
+// and loading skills. Centralized so every skills section (hybrid, inline,
+// search) gives the model identical path-safe steps: read the EXACT location
+// verbatim, never guess a SKILL.md path.
+func skillLoadingProtocolLines() []string {
+	return []string{
+		"Skill loading protocol — follow exactly:",
+		"1. Check the `<available_skills>` list in this prompt.",
+		"2. If a clearly matching skill is listed there: call `use_skill(\"<name>\")`; then, if `use_skill` did not return the skill's full instructions, call `read_file` with the EXACT `<location>` from `<available_skills>` (copy it verbatim, including the leading `/`); then follow the SKILL.md.",
+		"3. If no clear match is listed: call `skill_search` with **English keywords**, pick the most specific result, call `use_skill(\"<name>\")`, then `read_file` the EXACT `location` returned by `skill_search`; then follow the SKILL.md.",
+		"4. Never guess, construct, or modify SKILL.md paths — only use a `location` value copied verbatim.",
+		"5. If `read_file` fails, do not invent another path: call `skill_search` again by skill name and read the `location` it returns.",
+		"6. `use_skill` only activates/traces the skill; it does not load the instructions unless it returns the full content.",
+		"7. Read at most one skill up front; if none apply, proceed normally.",
+		"",
+	}
 }
 
 // buildSandboxSection creates the "## Sandbox" section matching TS system-prompt.ts lines 476-519.
@@ -224,6 +333,7 @@ func buildToolCallStyleSection() []string {
 		"",
 		"Default: call tools without narration. Narrate only for multi-step work or when user asks.",
 		"Never mention tool names or internal mechanics to users.",
+		"If you include a short progress sentence before tool calls, write it naturally in the user's language and describe the user-visible action, not the tool.",
 		"",
 		"WRONG: \"I searched memory_search and...\"  RIGHT: \"I recall you mentioned...\"",
 		"",

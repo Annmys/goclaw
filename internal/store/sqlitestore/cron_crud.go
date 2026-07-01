@@ -28,7 +28,9 @@ func (s *SQLiteCronStore) AddJob(ctx context.Context, name string, schedule stor
 	}
 
 	payload := store.CronPayload{
-		Kind: "agent_turn", Message: message,
+		Kind:             "agent_turn",
+		Message:          message,
+		CredentialUserID: store.ExplicitCredentialUserIDFromContext(ctx),
 	}
 	payloadJSON, _ := json.Marshal(payload)
 
@@ -101,7 +103,7 @@ func (s *SQLiteCronStore) ListJobs(ctx context.Context, includeDisabled bool, ag
 	q := `SELECT id, tenant_id, agent_id, user_id, name, enabled, schedule_kind, cron_expression, run_at, timezone,
 		 interval_ms, payload, delete_after_run, stateless, deliver, deliver_channel, deliver_to, wake_heartbeat,
 		 next_run_at, last_run_at, last_status, last_error,
-		 created_at, updated_at FROM cron_jobs WHERE 1=1`
+		 created_at, updated_at, provider_id, model FROM cron_jobs WHERE 1=1`
 
 	var args []any
 
@@ -301,10 +303,22 @@ func (s *SQLiteCronStore) UpdateJob(ctx context.Context, jobID string, patch sto
 	if patch.WakeHeartbeat != nil {
 		updates["wake_heartbeat"] = *patch.WakeHeartbeat
 	}
+	if patch.ProviderID != nil {
+		updates["provider_id"] = *patch.ProviderID
+	}
+	if patch.Model != nil {
+		updates["model"] = *patch.Model
+	}
 
-	if patch.Message != "" {
+	if patch.Message != "" || patch.Command != nil {
 		payload := current.Payload
-		payload.Message = patch.Message
+		if patch.Message != "" {
+			payload.Message = patch.Message
+		}
+		if patch.Command != nil {
+			payload.Kind = store.CronPayloadKindCommand
+			payload.Command = patch.Command
+		}
 		mergedPayload, err := json.Marshal(payload)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal payload for job %s: %w", jobID, err)
@@ -395,7 +409,6 @@ func (s *SQLiteCronStore) lockCronJobForMutation(ctx context.Context, tx *sql.Tx
 	return &state, nil
 }
 
-
 func execCronJobUpdateTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, updates map[string]any) error {
 	if len(updates) == 0 {
 		return nil
@@ -433,4 +446,3 @@ func execCronJobUpdateTx(ctx context.Context, tx *sql.Tx, id uuid.UUID, updates 
 	}
 	return nil
 }
-

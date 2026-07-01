@@ -16,8 +16,8 @@ import (
 type EditTool struct {
 	workspace       string
 	restrict        bool
-	allowedPrefixes []string                    // extra allowed path prefixes (cross-drive on Windows)
-	deniedPrefixes  []string                    // path prefixes to deny access to (e.g. .goclaw)
+	allowedPrefixes []string // extra allowed path prefixes (cross-drive on Windows)
+	deniedPrefixes  []string // path prefixes to deny access to (e.g. .goclaw)
 	sandboxMgr      sandbox.Manager
 	contextFileIntc *ContextFileInterceptor
 	memIntc         *MemoryInterceptor
@@ -207,18 +207,23 @@ func (t *EditTool) Execute(ctx context.Context, args map[string]any) *Result {
 }
 
 func (t *EditTool) executeInSandbox(ctx context.Context, path, oldStr, newStr string, replaceAll bool, sandboxKey string) *Result {
-	sb, err := t.sandboxMgr.Get(ctx, sandboxKey, t.workspace, SandboxConfigFromCtx(ctx))
+	mountWorkspace, err := effectiveSandboxWorkspace(ctx, t.workspace)
+	if err != nil {
+		return ErrorResult(err.Error())
+	}
+	containerCwd, cwdErr := sandboxCwdForHostPath(mountWorkspace, mountWorkspace, sandbox.DefaultContainerWorkdir)
+	if cwdErr != nil {
+		return ErrorResult(fmt.Sprintf("sandbox path mapping: %v", cwdErr))
+	}
+
+	sb, err := t.sandboxMgr.Get(ctx, sandboxKey, mountWorkspace, SandboxConfigFromCtx(ctx))
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("sandbox error: %v", err))
 	}
 
-	containerCwd, cwdErr := SandboxCwd(ctx, t.workspace, sandbox.DefaultContainerWorkdir)
-	if cwdErr != nil {
-		return ErrorResult(fmt.Sprintf("sandbox path mapping: %v", cwdErr))
-	}
 	containerPath := ResolveSandboxPath(path, containerCwd)
 
-	bridge := sandbox.NewFsBridge(sb.ID(), sandbox.DefaultContainerWorkdir)
+	bridge := sandbox.NewFsBridge(sb.ID(), containerCwd)
 	content, err := bridge.ReadFile(ctx, containerPath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to read file: %v", err) + MaybeFsBridgeHint(err))

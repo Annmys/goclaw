@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"regexp"
 
-	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
@@ -85,18 +84,7 @@ func (m *PairingMethods) handleRequest(ctx context.Context, client *gateway.Clie
 		params.AccountID = "default"
 	}
 
-	meta := map[string]string{}
-	if userID := store.UserIDFromContext(ctx); userID != "" {
-		meta["user_id"] = userID
-	}
-	if tenantSlug := store.TenantSlugFromContext(ctx); tenantSlug != "" {
-		meta["tenant_slug"] = tenantSlug
-	}
-	if tenantID := store.TenantIDFromContext(ctx); tenantID != uuid.Nil {
-		meta["tenant_id"] = tenantID.String()
-	}
-
-	code, err := m.service.RequestPairing(ctx, params.SenderID, params.Channel, params.ChatID, params.AccountID, meta)
+	code, err := m.service.RequestPairing(ctx, params.SenderID, params.Channel, params.ChatID, params.AccountID, nil)
 	if err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, err.Error()))
 		return
@@ -122,10 +110,7 @@ func (m *PairingMethods) handleApprove(ctx context.Context, client *gateway.Clie
 		return
 	}
 	if params.ApprovedBy == "" {
-		params.ApprovedBy = client.UserID()
-		if params.ApprovedBy == "" {
-			params.ApprovedBy = "operator"
-		}
+		params.ApprovedBy = "operator"
 	}
 
 	paired, err := m.service.ApprovePairing(ctx, params.Code, params.ApprovedBy)

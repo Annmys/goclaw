@@ -27,11 +27,12 @@ const (
 	MethodAgentsFileSet  = "agents.files.set"
 
 	// Config
-	MethodConfigGet      = "config.get"
-	MethodConfigApply    = "config.apply"
-	MethodConfigPatch    = "config.patch"
-	MethodConfigSchema   = "config.schema"
-	MethodConfigDefaults = "config.defaults"
+	MethodConfigGet           = "config.get"
+	MethodConfigApply         = "config.apply"
+	MethodConfigPatch         = "config.patch"
+	MethodConfigSchema        = "config.schema"
+	MethodConfigDefaults      = "config.defaults"
+	MethodChatBehaviorPreview = "chat_behavior.preview"
 
 	// Sessions
 	MethodSessionsList    = "sessions.list"
@@ -40,6 +41,7 @@ const (
 	MethodSessionsDelete  = "sessions.delete"
 	MethodSessionsReset   = "sessions.reset"
 	MethodSessionsCompact = "sessions.compact"
+	MethodRunTimelineGet  = "run.timeline.get"
 
 	// System
 	MethodConnect = "connect"
@@ -83,6 +85,8 @@ const (
 
 	MethodQuotaUsage = "quota.usage"
 
+	MethodLLMComplete = "llm.complete"
+
 	MethodSend = "send"
 )
 
@@ -101,6 +105,7 @@ const (
 // Config permissions
 const (
 	MethodConfigPermissionsList   = "config.permissions.list"
+	MethodConfigPermissionsCheck  = "config.permissions.check"
 	MethodConfigPermissionsGrant  = "config.permissions.grant"
 	MethodConfigPermissionsRevoke = "config.permissions.revoke"
 )
@@ -146,21 +151,6 @@ const (
 	MethodTeamsUpdate              = "teams.update"
 	MethodTeamsKnownUsers          = "teams.known_users"
 	MethodTeamsScopes              = "teams.scopes"
-)
-
-// Tenants
-const (
-	MethodTenantsMine         = "tenants.mine"
-	MethodTenantsList         = "tenants.list"
-	MethodTenantsGet          = "tenants.get"
-	MethodTenantsCreate       = "tenants.create"
-	MethodTenantsUpdate       = "tenants.update"
-	MethodTenantsDelete       = "tenants.delete"
-	MethodTenantsUsersList    = "tenants.users.list"
-	MethodTenantsUsersAdd     = "tenants.users.add"
-	MethodTenantsUsersRemove  = "tenants.users.remove"
-	MethodTenantsAccessGet    = "tenants.access.get"
-	MethodTenantsAccessUpdate = "tenants.access.update"
 )
 
 // Team workspace
@@ -211,6 +201,27 @@ const (
 	MethodWhatsAppQRStart = "whatsapp.qr.start"
 )
 
+// Workstations (Standard edition only — gated at router)
+const (
+	MethodWorkstationsList        = "workstations.list"
+	MethodWorkstationsGet         = "workstations.get"
+	MethodWorkstationsCreate      = "workstations.create"
+	MethodWorkstationsUpdate      = "workstations.update"
+	MethodWorkstationsDelete      = "workstations.delete"
+	MethodWorkstationsTest        = "workstations.testConnection"
+	MethodWorkstationsLinkAgent   = "workstations.linkAgent"
+	MethodWorkstationsUnlinkAgent = "workstations.unlinkAgent"
+
+	// Workstation permission allowlist CRUD (Phase 6)
+	MethodWorkstationsPermList   = "workstations.permissions.list"
+	MethodWorkstationsPermAdd    = "workstations.permissions.add"
+	MethodWorkstationsPermRemove = "workstations.permissions.remove"
+	MethodWorkstationsPermToggle = "workstations.permissions.toggle"
+
+	// Workstation activity audit log (Phase 7)
+	MethodWorkstationsListActivity = "workstations.activity.list"
+)
+
 // Agent hooks (Phase 3)
 const (
 	MethodHooksList    = "hooks.list"
@@ -220,4 +231,13 @@ const (
 	MethodHooksToggle  = "hooks.toggle"
 	MethodHooksTest    = "hooks.test"
 	MethodHooksHistory = "hooks.history"
+)
+
+// Bitrix24 portal management (self-service onboarding for the bitrix24 channel).
+// See plans/260513-1648-bitrix24-portal-self-service-ux/phase-02-backend-rpc-portals.md.
+const (
+	MethodBitrixPortalsList          = "bitrix.portals.list"
+	MethodBitrixPortalsCreate        = "bitrix.portals.create"
+	MethodBitrixPortalsGetInstallURL = "bitrix.portals.get_install_url"
+	MethodBitrixPortalsDelete        = "bitrix.portals.delete"
 )

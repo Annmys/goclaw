@@ -1,24 +1,24 @@
-﻿package protocol
+package protocol
 
 // WebSocket event names pushed from server to client.
 const (
-	EventAgent              = "agent"
-	EventChat               = "chat"
-	EventHealth             = "health"
-	EventCron               = "cron"
-	EventHeartbeat          = "heartbeat"
-	EventExecApprovalReq    = "exec.approval.requested"
-	EventExecApprovalRes    = "exec.approval.resolved"
-	EventPresence           = "presence"
-	EventTick               = "tick"
-	EventShutdown           = "shutdown"
-	EventNodePairRequested  = "node.pair.requested"
-	EventNodePairResolved   = "node.pair.resolved"
-	EventDevicePairReq      = "device.pair.requested"
-	EventDevicePairRes      = "device.pair.resolved"
-	EventVoicewakeChanged   = "voicewake.changed"
-	EventConnectChallenge   = "connect.challenge"
-	EventTalkMode           = "talk.mode"
+	EventAgent             = "agent"
+	EventChat              = "chat"
+	EventHealth            = "health"
+	EventCron              = "cron"
+	EventHeartbeat         = "heartbeat"
+	EventExecApprovalReq   = "exec.approval.requested"
+	EventExecApprovalRes   = "exec.approval.resolved"
+	EventPresence          = "presence"
+	EventTick              = "tick"
+	EventShutdown          = "shutdown"
+	EventNodePairRequested = "node.pair.requested"
+	EventNodePairResolved  = "node.pair.resolved"
+	EventDevicePairReq     = "device.pair.requested"
+	EventDevicePairRes     = "device.pair.resolved"
+	EventVoicewakeChanged  = "voicewake.changed"
+	EventConnectChallenge  = "connect.challenge"
+	EventTalkMode          = "talk.mode"
 
 	// Agent summoning events (predefined agent setup via LLM).
 	EventAgentSummoning = "agent.summoning"
@@ -38,19 +38,19 @@ const (
 	EventDelegationAnnounce    = "delegation.announce"
 
 	// Team task lifecycle events.
-	EventTeamTaskClaimed   = "team.task.claimed"
-	EventTeamTaskCancelled = "team.task.cancelled"
-	EventTeamTaskFailed    = "team.task.failed"
-	EventTeamTaskReviewed  = "team.task.reviewed"
-	EventTeamTaskApproved  = "team.task.approved"
-	EventTeamTaskRejected  = "team.task.rejected"
-	EventTeamTaskProgress  = "team.task.progress"
-	EventTeamTaskCommented = "team.task.commented"
-	EventTeamTaskAssigned   = "team.task.assigned"
-	EventTeamTaskDispatched = "team.task.dispatched"
-	EventTeamTaskUpdated   = "team.task.updated"
-	EventTeamTaskDeleted   = "team.task.deleted"
-	EventTeamTaskStale          = "team.task.stale"
+	EventTeamTaskClaimed         = "team.task.claimed"
+	EventTeamTaskCancelled       = "team.task.cancelled"
+	EventTeamTaskFailed          = "team.task.failed"
+	EventTeamTaskReviewed        = "team.task.reviewed"
+	EventTeamTaskApproved        = "team.task.approved"
+	EventTeamTaskRejected        = "team.task.rejected"
+	EventTeamTaskProgress        = "team.task.progress"
+	EventTeamTaskCommented       = "team.task.commented"
+	EventTeamTaskAssigned        = "team.task.assigned"
+	EventTeamTaskDispatched      = "team.task.dispatched"
+	EventTeamTaskUpdated         = "team.task.updated"
+	EventTeamTaskDeleted         = "team.task.deleted"
+	EventTeamTaskStale           = "team.task.stale"
 	EventTeamTaskAttachmentAdded = "team.task.attachment_added"
 
 	// Emitted when leader starts processing completed team task results (before announce run).
@@ -105,7 +105,7 @@ const (
 	EventWhatsAppQRCode = "whatsapp.qr.code"
 	EventWhatsAppQRDone = "whatsapp.qr.done"
 
-	// Tenant access revocation 鈥?forces affected user's UI to logout.
+	// Tenant access revocation — forces affected user's UI to logout.
 	EventTenantAccessRevoked = "tenant.access.revoked"
 
 	// Vault enrichment pipeline progress.
@@ -113,6 +113,18 @@ const (
 
 	// Background worker alerts (non-retryable LLM errors).
 	EventBackgroundError = "background.error"
+
+	// Workstation exec streaming events.
+	// EventWorkstationExecChunk is emitted for each stdout/stderr chunk during remote exec.
+	// Payload: WorkstationExecChunkPayload.
+	EventWorkstationExecChunk = "workstation.exec.chunk"
+	// EventWorkstationExecDone is emitted when a remote exec command finishes.
+	// Payload: WorkstationExecDonePayload.
+	EventWorkstationExecDone = "workstation.exec.done"
+
+	// MCP OAuth flow completion — fired after callback token exchange succeeds or fails.
+	// Payload: MCPOAuthCompletePayload.
+	EventMCPOAuthComplete = "mcp.oauth_complete"
 )
 
 // Agent event subtypes (in payload.type)
@@ -128,9 +140,15 @@ const (
 	AgentEventActivity     = "activity" // agent phase transitions: thinking, tool_exec, compacting
 )
 
+// block.reply payload source values.
+const (
+	BlockReplySourceLLMProgress      = "llm_progress"
+	BlockReplySourceToolAnnouncement = "tool_announcement"
+)
+
 // Chat event subtypes (in payload.type)
 const (
-	ChatEventChunk     = "chunk"
-	ChatEventMessage   = "message"
-	ChatEventThinking  = "thinking"
+	ChatEventChunk    = "chunk"
+	ChatEventMessage  = "message"
+	ChatEventThinking = "thinking"
 )

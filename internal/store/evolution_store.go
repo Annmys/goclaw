@@ -12,11 +12,8 @@ import (
 type MetricType string
 
 const (
-	MetricRetrieval  MetricType = "retrieval"
-	MetricTool       MetricType = "tool"
-	MetricFeedback   MetricType = "feedback"
-	MetricRegression MetricType = "regression"
-	MetricAudit      MetricType = "audit"
+	MetricRetrieval MetricType = "retrieval"
+	MetricTool      MetricType = "tool"
 )
 
 // EvolutionMetric is a single recorded metric data point.
@@ -39,22 +36,10 @@ type ToolAggregate struct {
 	AvgDurationMs float64 `json:"avg_duration_ms"` // milliseconds (not time.Duration — JSON-friendly)
 }
 
-// SkillQualityScore combines skill calls, feedback, and regression signals.
-type SkillQualityScore struct {
-	SkillName           string  `json:"skill_name"`
-	CallCount           int     `json:"call_count"`
-	SuccessRate         float64 `json:"success_rate"`
-	AvgDurationMs       float64 `json:"avg_duration_ms"`
-	FeedbackCorrections int     `json:"feedback_corrections"`
-	RegressionFailures  int     `json:"regression_failures"`
-	QualityScore        int     `json:"quality_score"`
-	RiskLevel           string  `json:"risk_level"`
-}
-
 // RetrievalAggregate summarizes per-source retrieval metrics.
 type RetrievalAggregate struct {
 	Source     string  `json:"source"`
-	QueryCount int     `json:"query_count"`
+	QueryCount int    `json:"query_count"`
 	UsageRate  float64 `json:"usage_rate"` // fraction of results used in reply
 	AvgScore   float64 `json:"avg_score"`
 }
@@ -72,11 +57,9 @@ type EvolutionMetricsStore interface {
 type SuggestionType string
 
 const (
-	SuggestThreshold          SuggestionType = "threshold"
-	SuggestToolOrder          SuggestionType = "tool_order"
-	SuggestSkillAdd           SuggestionType = "skill_add"
-	SuggestFeedbackCorrection SuggestionType = "feedback_correction"
-	SuggestSkillRepair        SuggestionType = "skill_repair"
+	SuggestThreshold SuggestionType = "threshold"
+	SuggestToolOrder SuggestionType = "tool_order"
+	SuggestSkillAdd  SuggestionType = "skill_add"
 )
 
 // EvolutionSuggestion is a data-driven suggestion for agent improvement.

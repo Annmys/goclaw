@@ -5,7 +5,7 @@ family: excel-type-identify
 display_name: excel类型识别
 aliases: excel-type-identify, excel类型识别, Excel 类型识别, 文件类型识别
 regression_prefixes: excel_type_, excel_detect_
-description: 识别用户上传的 Excel 文件属于什么业务类型，并判断下一步应该交给哪个专门的核心 skill 或处理流程。用于 .xls、.xlsx、.csv 文件的首轮分流，不直接执行复杂业务补全。遇到船务清单时，只负责识别并移交给核心 skill 船务清单处理，不在本 skill 内直接补全 EPL/PL。
+description: 识别用户上传的 Excel 文件属于什么业务类型，并判断下一步应该交给哪个专门的核心 skill 或处理流程。用于 .xls、.xlsx、.csv 文件的首轮分流，不直接执行复杂业务补全。遇到船务清单/预估箱单时，只负责识别并移交给自定义 skill epl-core-workflow（预估箱单制作核心流程）V2，不在本 skill 内直接补全 EPL/PL。
 ---
 
 # excel类型识别
@@ -30,7 +30,7 @@ description: 识别用户上传的 Excel 文件属于什么业务类型，并判
 - 如果识别为 `船务清单`：
   - 不要在本 skill 内查询流转单
   - 不要在本 skill 内补 EPL/PL
-  - 立即调用核心 skill `船务清单处理`
+  - 立即移交自定义 skill `epl-core-workflow（预估箱单制作核心流程）V2`
 - 如果识别为 `流转单`：
   - 建议进入流转单查询或索引流程
 - 如果识别为 `订单映射表`：
@@ -38,7 +38,7 @@ description: 识别用户上传的 Excel 文件属于什么业务类型，并判
 - 如果识别为 `商业发票/CI` 或 `装箱单/PL/EPL`：
   - 先判断是否属于船务清单上下文
   - 如果文件中带有 `XS` 订单号，且明显是待补全的 CI-only / PL-only 文件，也视为船务清单处理范围
-  - 若属于完整或待补全船务清单，移交 `船务清单处理`
+  - 若属于完整或待补全船务清单，移交 `epl-core-workflow（预估箱单制作核心流程）V2`
 - 如果识别结果置信度低：
   - 再人工查看文件名、sheet 名、前 10 行表头
 

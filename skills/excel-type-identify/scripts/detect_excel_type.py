@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 import csv
 import json
 import re
@@ -32,13 +32,13 @@ RULES = [
     {
         "type": "装箱单/PL/EPL",
         "keywords": ["packing list", "estimated packing list", "c/n", "dimension", "cbm"],
-        "next_actions": ["核对箱数和尺寸", "判断是否属于船务清单处理范围"],
+        "next_actions": ["核对箱数和尺寸", "判断是否属于预估箱单制作范围"],
         "handoff_skill": "",
     },
     {
         "type": "商业发票/CI",
         "keywords": ["commercial invoice", "invoice", "amount", "usd"],
-        "next_actions": ["提取金额和明细", "判断是否属于船务清单处理范围"],
+        "next_actions": ["提取金额和明细", "判断是否属于预估箱单制作范围"],
         "handoff_skill": "",
     },
     {
@@ -137,7 +137,7 @@ def detect_shipping_doc(sheet_names: list[str], values: list[str]) -> tuple[bool
         "has_invoice_keywords": has_invoice_keywords,
         "has_packing_keywords": has_packing_keywords,
         "missing_items": missing,
-        "handoff_skill": "船务清单处理",
+        "handoff_skill": "epl-core-workflow（预估箱单制作核心流程）V2",
     }
     matched = (has_ci_sheet and has_pl_sheet) or (has_invoice_keywords and has_packing_keywords)
     return matched, detail
@@ -158,11 +158,11 @@ def detect_type(path: Path) -> dict:
             "xs_order_no": xs_order_no,
             "matched_rules": ["具备船务清单典型 sheet 或关键词特征"],
             "next_actions": [
-                "调用核心 skill 船务清单处理",
+                "调用核心 skill epl-core-workflow（预估箱单制作核心流程）V2",
                 "检查 CI 和 EPL/PL 是否完整",
-                "如需补全，由船务清单处理 skill 负责后续流转单查询和包装补全",
+                "如需补全，由epl-core-workflow（预估箱单制作核心流程）V2 skill 负责后续流转单查询和包装补全",
             ],
-            "handoff_skill": "船务清单处理",
+            "handoff_skill": "epl-core-workflow（预估箱单制作核心流程）V2",
             "shipping_summary": shipping_detail,
         }
 
@@ -175,18 +175,18 @@ def detect_type(path: Path) -> dict:
             "xs_order_no": xs_order_no,
             "matched_rules": ["CI-only 文件包含 XS 订单号，判定为待补全船务清单"],
             "next_actions": [
-                "调用核心 skill 船务清单处理",
+                "调用核心 skill epl-core-workflow（预估箱单制作核心流程）V2",
                 "补齐缺少的 EPL/PL",
                 "根据流转单和产品包装重量表生成完成版船务清单",
             ],
-            "handoff_skill": "船务清单处理",
+            "handoff_skill": "epl-core-workflow（预估箱单制作核心流程）V2",
             "shipping_summary": {
                 "has_ci_sheet": any(name.lower() in ["ci", "invoice"] for name in sheet_names),
                 "has_pl_sheet": any(name.lower() in ["pl", "epl", "packing list"] for name in sheet_names),
                 "has_invoice_keywords": "commercial invoice" in combined,
                 "has_packing_keywords": "packing list" in combined or "g.w.(kg)" in combined or "dimension" in combined,
                 "missing_items": ["缺少 PL/EPL sheet"],
-                "handoff_skill": "船务清单处理",
+                "handoff_skill": "epl-core-workflow（预估箱单制作核心流程）V2",
             },
         }
 

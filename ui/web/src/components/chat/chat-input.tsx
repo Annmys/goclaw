@@ -11,7 +11,7 @@ export interface AttachedFile {
 
 interface ChatInputProps {
   onSend: (message: string, files?: AttachedFile[]) => void;
-  onAbort: () => void;
+  onAbort?: () => void;
   /** True when main agent or team tasks are active — controls stop button, file attach */
   isBusy: boolean;
   disabled?: boolean;
@@ -19,6 +19,10 @@ interface ChatInputProps {
   onFilesChange: (files: AttachedFile[]) => void;
   onExport?: () => void;
   canExport?: boolean;
+  placeholder?: string;
+  showVoice?: boolean;
+  showExport?: boolean;
+  showAbort?: boolean;
 }
 
 function ImageAttachmentPreview({ file }: { file: File }) {
@@ -43,6 +47,10 @@ export function ChatInput({
   onFilesChange,
   onExport,
   canExport = false,
+  placeholder,
+  showVoice = true,
+  showExport = true,
+  showAbort = true,
 }: ChatInputProps) {
   const { t } = useTranslation("common");
   const [value, setValue] = useState("");
@@ -198,7 +206,7 @@ export function ChatInput({
         </button>
 
         {/* Voice record button - hidden when recording */}
-        {!voiceRecorder.isRecording && (
+        {showVoice && !voiceRecorder.isRecording && (
           <button
             type="button"
             onClick={handleVoiceToggle}
@@ -238,7 +246,7 @@ export function ChatInput({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             onInput={handleInput}
-            placeholder={t("sendMessage")}
+            placeholder={placeholder ?? t("sendMessage")}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none bg-transparent py-3 px-0 text-base md:text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
@@ -268,15 +276,17 @@ export function ChatInput({
             </>
           ) : isBusy ? (
             <>
-              <button
-                type="button"
-                onClick={onExport}
-                disabled={!canExport}
-                title="Export chat history"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Download className="h-4 w-4" />
-              </button>
+              {showExport ? (
+                <button
+                  type="button"
+                  onClick={onExport}
+                  disabled={!canExport}
+                  title="Export chat history"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={handleSend}
@@ -286,26 +296,30 @@ export function ChatInput({
               >
                 <Send className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                onClick={onAbort}
-                title={t("stopGeneration")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-              >
-                <Square className="h-3.5 w-3.5" />
-              </button>
+              {showAbort && onAbort ? (
+                <button
+                  type="button"
+                  onClick={onAbort}
+                  title={t("stopGeneration")}
+                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+                >
+                  <Square className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={onExport}
-                disabled={!canExport}
-                title="Export chat history"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                <Download className="h-4 w-4" />
-              </button>
+              {showExport ? (
+                <button
+                  type="button"
+                  onClick={onExport}
+                  disabled={!canExport}
+                  title="Export chat history"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <Download className="h-4 w-4" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={handleSend}

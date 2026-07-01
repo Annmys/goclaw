@@ -10,19 +10,23 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway/methods"
+	"github.com/nextlevelbuilder/goclaw/internal/providers"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/internal/tools"
+	usagecaps "github.com/nextlevelbuilder/goclaw/internal/usage/caps"
 )
 
-func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore store.SessionStore, cronStore store.CronStore, pairingStore store.PairingStore, cfg *config.Config, cfgPath, workspace, dataDir string, msgBus *bus.MessageBus, execApprovalMgr *tools.ExecApprovalManager, agentStore store.AgentStore, skillStore store.SkillStore, configSecretsStore store.ConfigSecretsStore, teamStore store.TeamStore, contextFileInterceptor *tools.ContextFileInterceptor, logTee *gateway.LogTee, heartbeatStore store.HeartbeatStore, configPermStore store.ConfigPermissionStore, sysConfigStore store.SystemConfigStore, tenantStore store.TenantStore, skillTenantCfgStore store.SkillTenantConfigStore, audioMgr *audio.Manager) (*methods.PairingMethods, *methods.HeartbeatMethods, *methods.ChatMethods, *methods.ConfigPermissionsMethods) {
+func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore store.SessionStore, runTimeline store.RunTimelineStore, cronStore store.CronStore, pairingStore store.PairingStore, cfg *config.Config, cfgPath, workspace, dataDir string, msgBus *bus.MessageBus, execApprovalMgr *tools.ExecApprovalManager, agentStore store.AgentStore, skillStore store.SkillStore, configSecretsStore store.ConfigSecretsStore, teamStore store.TeamStore, contextFileInterceptor *tools.ContextFileInterceptor, logTee *gateway.LogTee, heartbeatStore store.HeartbeatStore, configPermStore store.ConfigPermissionStore, sysConfigStore store.SystemConfigStore, tenantStore store.TenantStore, skillTenantCfgStore store.SkillTenantConfigStore, audioMgr *audio.Manager, usageCapSvc *usagecaps.Service, providerReg *providers.Registry) (*methods.PairingMethods, *methods.HeartbeatMethods, *methods.ChatMethods, *methods.ConfigPermissionsMethods) {
 	router := server.Router()
 
 	// Phase 1: Core methods
 	chatMethods := methods.NewChatMethods(agents, sessStore, cfg, server.RateLimiter(), msgBus)
 	chatMethods.SetAudioManager(audioMgr) // Wire TTS auto-apply for WS responses
+	chatMethods.SetUsageCapService(usageCapSvc)
 	chatMethods.Register(router)
 	methods.NewAgentsMethods(agents, cfg, cfgPath, workspace, agentStore, contextFileInterceptor, msgBus).Register(router)
 	methods.NewSessionsMethods(sessStore, msgBus, cfg).Register(router)
+	methods.NewRunTimelineMethods(runTimeline, cfg).Register(router)
 	configMethods := methods.NewConfigMethods(cfg, cfgPath, configSecretsStore, msgBus)
 	if sysConfigStore != nil {
 		configMethods.SetSystemConfigSync(func(ctx context.Context, c *config.Config) {
@@ -62,6 +66,7 @@ func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore 
 
 	// Phase 2: Usage (queries SessionStore for real token data)
 	methods.NewUsageMethods(sessStore).Register(router)
+	methods.NewLLMMethods(providerReg, cfg.Gateway.BackgroundProvider, cfg.Gateway.BackgroundModel).Register(router)
 
 	// Phase 2: Exec approval (always registered — returns empty when manager is nil)
 	methods.NewExecApprovalMethods(execApprovalMgr, msgBus).Register(router)
@@ -74,7 +79,7 @@ func registerAllMethods(server *gateway.Server, agents *agent.Router, sessStore 
 
 	slog.Info("registered all RPC methods",
 		"phase1", []string{"chat", "agents", "sessions", "config"},
-		"phase2", []string{"skills", "cron", "heartbeat", "pairing", "usage", "exec_approval", "send"},
+		"phase2", []string{"skills", "cron", "heartbeat", "pairing", "usage", "llm", "exec_approval", "send"},
 	)
 
 	return pairingMethods, heartbeatMethods, chatMethods, cfgPerms

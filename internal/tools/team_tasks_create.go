@@ -15,78 +15,6 @@ import (
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
-func isHumanResourcesTeam(team *store.TeamData) bool {
-	if team == nil {
-		return false
-	}
-	if team.Name == "人力资源管理中心" {
-		return true
-	}
-	if scope := strings.TrimSpace(string(team.Settings)); scope != "" {
-		return strings.Contains(scope, "human-resources-center")
-	}
-	return false
-}
-
-func (t *TeamTasksTool) createHRV2CompanionTask(
-	ctx context.Context,
-	team *store.TeamData,
-	creatorAgentID uuid.UUID,
-	ownerKey string,
-	subject string,
-	description string,
-	chatID string,
-	workspace string,
-	blockedBy []uuid.UUID,
-	template *store.TeamTaskData,
-) (*store.TeamTaskData, error) {
-	ownerID, err := t.manager.ResolveAgentByKey(ctx, ownerKey)
-	if err != nil {
-		return nil, err
-	}
-	status := store.TeamTaskStatusPending
-	if len(blockedBy) > 0 {
-		status = store.TeamTaskStatusBlocked
-	}
-	meta := map[string]any{
-		TaskMetaTeamWorkspace: workspace,
-		"hr_v2_companion":     true,
-	}
-	if template != nil {
-		for _, key := range []string{TaskMetaPeerKind, TaskMetaLocalKey, TaskMetaOriginSession, TaskMetaOriginTrace, TaskMetaOriginRootSpan, "origin_sender_id", "origin_role"} {
-			if v, ok := template.Metadata[key]; ok {
-				meta[key] = v
-			}
-		}
-	}
-	if len(blockedBy) > 0 {
-		ids := make([]string, len(blockedBy))
-		for i, id := range blockedBy {
-			ids[i] = id.String()
-		}
-		meta["original_blocked_by"] = ids
-	}
-	task := &store.TeamTaskData{
-		TeamID:           team.ID,
-		Subject:          subject,
-		Description:      description,
-		Status:           status,
-		BlockedBy:        blockedBy,
-		Priority:         0,
-		UserID:           template.UserID,
-		Channel:          template.Channel,
-		TaskType:         "request",
-		CreatedByAgentID: &creatorAgentID,
-		ChatID:           chatID,
-		Metadata:         meta,
-		OwnerAgentID:     &ownerID,
-	}
-	if err := t.manager.Store().CreateTask(ctx, task); err != nil {
-		return nil, err
-	}
-	return task, nil
-}
-
 func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) *Result {
 	team, agentID, err := t.manager.ResolveTeam(ctx)
 	if err != nil {
@@ -287,12 +215,12 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 	}
 
 	task := &store.TeamTaskData{
-		TeamID:      team.ID,
-		Subject:     subject,
-		Description: description,
-		Status:      status,
-		BlockedBy:   blockedBy,
-		Priority:    priority,
+		TeamID:           team.ID,
+		Subject:          subject,
+		Description:      description,
+		Status:           status,
+		BlockedBy:        blockedBy,
+		Priority:         priority,
 		// SCOPE-intentional (#915 audit 2026-04-16): team task visibility is
 		// per-chat, not per-user. team_tasks_read.go filters end-user lists by
 		// this same UserID. Migrating to ActorIDFromContext would hide group
@@ -317,50 +245,6 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 
 	if err := t.manager.Store().CreateTask(ctx, task); err != nil {
 		return ErrorResult("failed to create task: " + err.Error())
-	}
-
-	// HR V2.0 hard rule: feedback/repair workflows must always go through
-	// knowledge + review companion tasks, instead of only producing one task.
-	hrWorkflow := false
-	if isHumanResourcesTeam(team) && taskType == "request" {
-		lowerSubject := strings.ToLower(subject)
-		lowerDesc := strings.ToLower(description)
-		hrWorkflow = strings.Contains(lowerSubject, "feedback") || strings.Contains(lowerSubject, "反馈") ||
-			strings.Contains(lowerSubject, "review") || strings.Contains(lowerSubject, "审核") ||
-			strings.Contains(lowerSubject, "repair") || strings.Contains(lowerSubject, "返工") ||
-			strings.Contains(lowerSubject, "fix") || strings.Contains(lowerSubject, "修复") ||
-			strings.Contains(lowerDesc, "feedback") || strings.Contains(lowerDesc, "反馈") ||
-			strings.Contains(lowerDesc, "review") || strings.Contains(lowerDesc, "审核") ||
-			strings.Contains(lowerDesc, "repair") || strings.Contains(lowerDesc, "返工") ||
-			strings.Contains(lowerDesc, "fix") || strings.Contains(lowerDesc, "修复")
-		if hrWorkflow {
-			taskMeta["hr_v2_feedback_flow"] = true
-			taskMeta["hr_v2_requires_knowledge"] = true
-			taskMeta["hr_v2_requires_review"] = true
-			if err := t.manager.Store().UpdateTask(ctx, task.ID, map[string]any{"metadata": taskMeta}); err != nil {
-				slog.Warn("team_tasks.create: failed to persist hr v2 metadata", "task_id", task.ID, "error", err)
-			}
-		}
-	}
-	var companionTasks []*store.TeamTaskData
-	if hrWorkflow {
-		knowledgeDesc := fmt.Sprintf("HR V2.0 knowledge task for feedback workflow.\n\nOriginal task: %s\nOriginal description:\n%s\n\nRequired output: 反馈记录、根因分析、偶发/系统性判定、是否需要修改 skill、后续审核规则建议。", subject, description)
-		if kt, err := t.createHRV2CompanionTask(ctx, team, agentID, "hr-knowledge", "【知识沉淀】"+subject, knowledgeDesc, chatID, teamWsDir, nil, task); err != nil {
-			slog.Warn("team_tasks.create: failed to create hr knowledge companion", "task_id", task.ID, "error", err)
-		} else {
-			companionTasks = append(companionTasks, kt)
-			if status == store.TeamTaskStatusPending && !skipAutoDispatch {
-				if ptd := PendingTeamDispatchFromCtx(ctx); ptd != nil {
-					ptd.Add(team.ID, kt.ID)
-				}
-			}
-		}
-		reviewDesc := fmt.Sprintf("HR V2.0 review task. Audit the output of task %s before user delivery.\n\nRequired checks: 数据准确性、Excel/文件格式、输出路径、用户要求满足度、剩余风险。Result 必须写明通过/失败。", task.ID)
-		if rt, err := t.createHRV2CompanionTask(ctx, team, agentID, "hr-review", "【审核】"+subject, reviewDesc, chatID, teamWsDir, []uuid.UUID{task.ID}, task); err != nil {
-			slog.Warn("team_tasks.create: failed to create hr review companion", "task_id", task.ID, "error", err)
-		} else {
-			companionTasks = append(companionTasks, rt)
-		}
 	}
 
 	// Auto-copy files referenced in subject+description from leader's personal workspace
@@ -418,12 +302,7 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 			ptd.Add(team.ID, task.ID)
 		} else {
 			// Fallback: assign (pending → in_progress + lock) then dispatch.
-			hasActive, err := t.manager.Store().HasActiveInProgressTaskForAgent(ctx, team.ID, assigneeID)
-			if err != nil {
-				slog.Warn("executeCreate: active-task check failed", "task_id", task.ID, "agent_id", assigneeID, "error", err)
-			} else if hasActive {
-				slog.Info("executeCreate: fallback dispatch skipped because assignee is busy", "task_id", task.ID, "agent_id", assigneeID)
-			} else if err := t.manager.Store().AssignTask(ctx, task.ID, assigneeID, team.ID); err != nil {
+			if err := t.manager.Store().AssignTask(ctx, task.ID, assigneeID, team.ID); err != nil {
 				slog.Warn("executeCreate: fallback assign failed", "task_id", task.ID, "error", err)
 			} else {
 				t.manager.BroadcastTeamEvent(ctx, protocol.EventTeamTaskDispatched, BuildTaskEventPayload(
@@ -447,12 +326,6 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 		assigneeName = t.manager.AgentKeyFromID(ctx, assigneeID)
 	}
 	msg := fmt.Sprintf("Task created: %s (id=%s, task_number=%d, status=%s, assignee=%s)", subject, task.ID, task.TaskNumber, status, assigneeName)
-	if hrWorkflow {
-		msg += "\n\nHR V2.0 note: this task was tagged as a feedback/repair workflow. It must be paired with knowledge capture and review before final user delivery."
-		if len(companionTasks) > 0 {
-			msg += fmt.Sprintf(" Created %d companion task(s): knowledge capture and review.", len(companionTasks))
-		}
-	}
 
 	// Soft guardrail: warn if subject suggests multiple deliverables.
 	// Only checks subject (not description) — detailed descriptions are fine.

@@ -5,9 +5,8 @@ import (
 	crypto_rand "crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
-	"encoding/json"
 	"fmt"
-	"path/filepath"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -59,62 +58,10 @@ func VerifyFileToken(token, path, secret string) bool {
 	return hmac.Equal([]byte(parts[0]), []byte(expected))
 }
 
-// ScopedFileTokenClaims binds a file token to a specific delivery context.
-// The same path is still required, but the token is additionally tied to the
-// user/team/task scope that received it.
-type ScopedFileTokenClaims struct {
-	UserID   string `json:"user_id,omitempty"`
-	TenantID string `json:"tenant_id,omitempty"`
-	TeamID   string `json:"team_id,omitempty"`
-	TaskID   string `json:"task_id,omitempty"`
-}
-
-// SignScopedFileToken creates a short-lived HMAC token with delivery scope.
-// Format: v2.{sig}.{expiry}.{claimsB64}
-func SignScopedFileToken(path, secret string, ttl time.Duration, claims ScopedFileTokenClaims) string {
-	expiry := time.Now().Add(ttl).Unix()
-	payload, _ := json.Marshal(claims)
-	claimsB64 := base64.RawURLEncoding.EncodeToString(payload)
-	sig := scopedFileTokenHMAC(path, secret, expiry, claimsB64)
-	return fmt.Sprintf("v2.%s.%d.%s", sig, expiry, claimsB64)
-}
-
-// VerifyScopedFileToken validates a scoped file token against a path.
-// Returns the claims if the token is valid.
-func VerifyScopedFileToken(token, path, secret string) (ScopedFileTokenClaims, bool) {
-	parts := strings.SplitN(token, ".", 4)
-	if len(parts) != 4 || parts[0] != "v2" {
-		return ScopedFileTokenClaims{}, false
-	}
-	expiry, err := strconv.ParseInt(parts[2], 10, 64)
-	if err != nil || time.Now().Unix() > expiry {
-		return ScopedFileTokenClaims{}, false
-	}
-	expected := scopedFileTokenHMAC(path, secret, expiry, parts[3])
-	if !hmac.Equal([]byte(parts[1]), []byte(expected)) {
-		return ScopedFileTokenClaims{}, false
-	}
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[3])
-	if err != nil {
-		return ScopedFileTokenClaims{}, false
-	}
-	var claims ScopedFileTokenClaims
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		return ScopedFileTokenClaims{}, false
-	}
-	return claims, true
-}
-
 // fileTokenHMAC computes the HMAC signature component.
 func fileTokenHMAC(path, secret string, expiry int64) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write(fmt.Appendf(nil, "%s:%d", path, expiry))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-func scopedFileTokenHMAC(path, secret string, expiry int64, claimsB64 string) string {
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(fmt.Appendf(nil, "%s:%d:%s", path, expiry, claimsB64))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
@@ -130,19 +77,24 @@ func SignMediaPath(rawPath, secret string) string {
 		return ""
 	}
 	// Strip stale ?ft= tokens
-	path := staleTokenRe.ReplaceAllString(rawPath, "")
-	path = strings.TrimRight(path, "?&")
+	cleanPath := filepathToURLPath(rawPath)
+	cleanPath = staleTokenRe.ReplaceAllString(cleanPath, "")
+	cleanPath = strings.TrimRight(cleanPath, "?&")
 	// Strip all /v1/files/ and /v1/media/ prefixes (may be stacked from legacy bugs)
-	for strings.Contains(path, "/v1/files/") {
-		path = strings.Replace(path, "/v1/files/", "/", 1)
+	for strings.Contains(cleanPath, "/v1/files/") {
+		cleanPath = strings.Replace(cleanPath, "/v1/files/", "/", 1)
 	}
-	for strings.Contains(path, "/v1/media/") {
-		path = strings.Replace(path, "/v1/media/", "/", 1)
+	for strings.Contains(cleanPath, "/v1/media/") {
+		cleanPath = strings.Replace(cleanPath, "/v1/media/", "/", 1)
 	}
-	path = filepath.Clean(path)
-	urlPath := "/v1/files/" + strings.TrimPrefix(path, "/")
+	cleanPath = path.Clean(cleanPath)
+	urlPath := "/v1/files/" + strings.TrimPrefix(cleanPath, "/")
 	ft := SignFileToken(urlPath, secret, FileTokenTTL)
 	return urlPath + "?ft=" + ft
+}
+
+func filepathToURLPath(rawPath string) string {
+	return strings.ReplaceAll(rawPath, `\`, "/")
 }
 
 // fileURLRe matches /v1/files/... and /v1/media/... URLs in markdown and plain text.

@@ -27,7 +27,7 @@ func NewPipeline(setup, iteration, finalize []Stage, deps PipelineDeps) *Pipelin
 }
 
 // NewDefaultPipeline creates the standard 8-stage pipeline.
-// Setup: [ContextStage]. Iteration: [ThinkStage, PruneStage, ToolStage, ObserveStage, CheckpointStage].
+// Setup: [ContextStage]. Iteration: [PruneStage, ThinkStage, ToolStage, ObserveStage, CheckpointStage].
 // Finalize: [FinalizeStage].
 func NewDefaultPipeline(deps PipelineDeps) *Pipeline {
 	d := &deps
@@ -37,8 +37,8 @@ func NewDefaultPipeline(deps PipelineDeps) *Pipeline {
 		NewContextStage(d),
 	}
 	iteration := []Stage{
-		NewThinkStage(d),
 		NewPruneStage(d, memFlush),
+		NewThinkStage(d),
 		NewToolStage(d),
 		NewObserveStage(d),
 		NewCheckpointStage(d),
@@ -91,6 +91,11 @@ func (p *Pipeline) Run(ctx context.Context, state *RunState) (*RunResult, error)
 			}
 		}
 		if state.ExitCode == BreakLoop {
+			if state.Observe.ContinueAfterFinal {
+				state.Observe.ContinueAfterFinal = false
+				state.ExitCode = Continue
+				continue
+			}
 			break
 		}
 		if ctx.Err() != nil {
@@ -110,5 +115,8 @@ func (p *Pipeline) Run(ctx context.Context, state *RunState) (*RunResult, error)
 
 	result := state.BuildResult()
 	result.Duration = time.Since(start)
+	if result.Duration <= 0 {
+		result.Duration = time.Nanosecond
+	}
 	return result, nil
 }

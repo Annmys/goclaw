@@ -91,9 +91,6 @@ func (b *baseNoopTeamStore) ClaimTask(_ context.Context, _, _, _ uuid.UUID) erro
 func (b *baseNoopTeamStore) AssignTask(_ context.Context, _, _, _ uuid.UUID) error {
 	return fmt.Errorf("not implemented: AssignTask")
 }
-func (b *baseNoopTeamStore) HasActiveInProgressTaskForAgent(_ context.Context, _ uuid.UUID, _ uuid.UUID) (bool, error) {
-	return false, fmt.Errorf("not implemented: HasActiveInProgressTaskForAgent")
-}
 func (b *baseNoopTeamStore) CompleteTask(_ context.Context, _, _ uuid.UUID, _ string) error {
 	return fmt.Errorf("not implemented: CompleteTask")
 }
@@ -431,23 +428,6 @@ func (s *mockTaskStore) AssignTask(_ context.Context, taskID, agentID, _ uuid.UU
 	t.LockedAt = &now
 	t.UpdatedAt = now
 	return nil
-}
-
-func (s *mockTaskStore) HasActiveInProgressTaskForAgent(_ context.Context, teamID, agentID uuid.UUID) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, t := range s.tasks {
-		if t.TeamID != teamID {
-			continue
-		}
-		if t.Status != store.TeamTaskStatusInProgress || t.OwnerAgentID == nil {
-			continue
-		}
-		if *t.OwnerAgentID == agentID {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func (s *mockTaskStore) CompleteTask(_ context.Context, taskID, _ uuid.UUID, result string) error {
@@ -826,8 +806,8 @@ func (mb *mockBackend) CachedGetAgentByID(_ context.Context, id uuid.UUID) (*sto
 	return nil, fmt.Errorf("agent not found: %s", id)
 }
 
-func (mb *mockBackend) PreWarmAgentKeyCache(_ context.Context, _ []string)   {}
-func (mb *mockBackend) PreWarmAgentIDCache(_ context.Context, _ []uuid.UUID) {}
+func (mb *mockBackend) PreWarmAgentKeyCache(_ context.Context, _ []string)    {}
+func (mb *mockBackend) PreWarmAgentIDCache(_ context.Context, _ []uuid.UUID)  {}
 
 func (mb *mockBackend) BroadcastTeamEvent(_ context.Context, name string, payload any) {
 	mb.mu.Lock()
@@ -848,27 +828,25 @@ func (mb *mockBackend) TryPublishInbound(msg bus.InboundMessage) bool {
 	return true
 }
 
-func (mb *mockBackend) BuildBlockerResultsSummary(_ context.Context, _ *store.TeamTaskData) string {
-	return ""
-}
-func (mb *mockBackend) BuildRecentCommentsSummary(_ context.Context, _ uuid.UUID) string { return "" }
+func (mb *mockBackend) BuildBlockerResultsSummary(_ context.Context, _ *store.TeamTaskData) string { return "" }
+func (mb *mockBackend) BuildRecentCommentsSummary(_ context.Context, _ uuid.UUID) string           { return "" }
 func (mb *mockBackend) RestoreTraceContext(ctx context.Context, _ *store.TeamTaskData) context.Context {
 	return ctx
 }
-func (mb *mockBackend) FollowupDelayMinutes(_ *store.TeamData) int { return 30 }
-func (mb *mockBackend) FollowupMaxReminders(_ *store.TeamData) int { return 0 }
-func (mb *mockBackend) DataDir() string                            { return "/tmp/test" }
+func (mb *mockBackend) FollowupDelayMinutes(_ *store.TeamData) int  { return 30 }
+func (mb *mockBackend) FollowupMaxReminders(_ *store.TeamData) int  { return 0 }
+func (mb *mockBackend) DataDir() string                             { return "/tmp/test" }
 
 // ============================================================
 // newTestTeamSetup — standard test fixture
 // ============================================================
 
 var (
-	testTeamID    = uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	testLeadID    = uuid.MustParse("00000000-0000-0000-0000-000000000002")
-	testMemberID  = uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	testTeamID   = uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	testLeadID   = uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	testMemberID = uuid.MustParse("00000000-0000-0000-0000-000000000003")
 	testMember2ID = uuid.MustParse("00000000-0000-0000-0000-000000000004")
-	testTenantID  = uuid.MustParse("00000000-0000-0000-0000-000000000099")
+	testTenantID = uuid.MustParse("00000000-0000-0000-0000-000000000099")
 )
 
 func newTestTeamSetup() (*mockBackend, *TeamTasksTool, uuid.UUID, uuid.UUID, context.Context) {

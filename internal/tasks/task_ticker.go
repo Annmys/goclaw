@@ -31,7 +31,6 @@ type TaskTicker struct {
 	teams    store.TeamStore
 	agents   store.AgentStore
 	msgBus   *bus.MessageBus
-	postTurn tools.PostTurnProcessor
 	interval time.Duration
 
 	stopCh chan struct{}
@@ -41,20 +40,15 @@ type TaskTicker struct {
 	lastFollowupSent map[uuid.UUID]time.Time // taskID → last followup sent time
 }
 
-func NewTaskTicker(teams store.TeamStore, agents store.AgentStore, msgBus *bus.MessageBus, intervalSec int, postTurn ...tools.PostTurnProcessor) *TaskTicker {
+func NewTaskTicker(teams store.TeamStore, agents store.AgentStore, msgBus *bus.MessageBus, intervalSec int) *TaskTicker {
 	interval := defaultRecoveryInterval
 	if intervalSec > 0 {
 		interval = time.Duration(intervalSec) * time.Second
-	}
-	var processor tools.PostTurnProcessor
-	if len(postTurn) > 0 {
-		processor = postTurn[0]
 	}
 	return &TaskTicker{
 		teams:            teams,
 		agents:           agents,
 		msgBus:           msgBus,
-		postTurn:         processor,
 		interval:         interval,
 		stopCh:           make(chan struct{}),
 		lastFollowupSent: make(map[uuid.UUID]time.Time),
@@ -126,7 +120,6 @@ func (t *TaskTicker) recoverAll(forceRecover bool) {
 				"To re-dispatch: use team_tasks(action=\"retry\", task_id=\"<task_id>\") for each task above.\n"+
 				"To cancel: use team_tasks(action=\"update\", task_id=\"<task_id>\", status=\"cancelled\").\n"+
 				"To view all tasks: use team_tasks(action=\"list\").")
-		t.dispatchRecovered(recoverCtx, recovered)
 	}
 
 	// Step 3: Batch mark stale — pending tasks older than 2h.
@@ -171,33 +164,10 @@ func (t *TaskTicker) recoverAll(forceRecover bool) {
 		t.notifyLeaders(recoverCtx, fixed, "auto-unblocked (all blockers resolved)",
 			"These blocked tasks were automatically unblocked because all their dependencies completed.\n"+
 				"They are now pending and will be dispatched if assigned.")
-		t.dispatchRecovered(recoverCtx, fixed)
 	}
 
 	// Step 6: Prune old cooldown entries to prevent memory leak.
 	t.pruneCooldowns()
-}
-
-func (t *TaskTicker) dispatchRecovered(ctx context.Context, tasks []store.RecoveredTaskInfo) {
-	if t.postTurn == nil || len(tasks) == 0 {
-		return
-	}
-	seen := map[uuid.UUID]store.RecoveredTaskInfo{}
-	for _, task := range tasks {
-		if task.TeamID == uuid.Nil {
-			continue
-		}
-		if _, ok := seen[task.TeamID]; !ok {
-			seen[task.TeamID] = task
-		}
-	}
-	for teamID, task := range seen {
-		teamCtx := ctx
-		if task.TenantID != uuid.Nil {
-			teamCtx = store.WithTenantID(ctx, task.TenantID)
-		}
-		t.postTurn.DispatchUnblockedTasks(teamCtx, teamID)
-	}
 }
 
 // ============================================================

@@ -22,7 +22,6 @@ type SystemSkillStore interface {
 	BumpVersion()
 	UpdateSkill(ctx context.Context, id uuid.UUID, updates map[string]interface{}) error
 	StoreMissingDeps(ctx context.Context, id uuid.UUID, missing []string) error
-	IsCustomSkillSlug(ctx context.Context, slug string) bool
 }
 
 // seededSkill tracks a skill that was seeded and needs async dep checking.
@@ -66,11 +65,6 @@ func (s *Seeder) Seed(ctx context.Context) (seeded int, skipped int, skills []se
 		// Skip _shared/ directories (not skills, just shared code)
 		if strings.HasPrefix(slug, "_") {
 			s.copySharedDir(slug)
-			continue
-		}
-		if s.store.IsCustomSkillSlug(ctx, slug) {
-			slog.Info("seeder: skip custom-managed skill", "slug", slug)
-			skipped++
 			continue
 		}
 

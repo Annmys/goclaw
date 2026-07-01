@@ -1,7 +1,0 @@
-interface:
-  display_name: "船务清单处理"
-  short_description: "通过内置脚本生成船务清单完成版，补全 EPL/PL 包装信息。"
-  default_prompt: "Use $船务清单处理. If the user asks to complete or return a shipping workbook, read this skill's SKILL.md, use that SKILL.md directory as baseDir, then run baseDir/scripts/generate_shipping_doc.py to create the final Excel file. Do not manually build EPL/PL from resolve_shipping_doc.py output. The final reply must include the generated file's full path."
-
-policy:
-  allow_implicit_invocation: true

@@ -57,22 +57,6 @@ func (s *PGTeamStore) AssignTask(ctx context.Context, taskID, agentID, teamID uu
 	return nil
 }
 
-func (s *PGTeamStore) HasActiveInProgressTaskForAgent(ctx context.Context, teamID, agentID uuid.UUID) (bool, error) {
-	tid := tenantIDForInsert(ctx)
-	var exists bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM team_tasks
-			WHERE team_id = $1
-			  AND owner_agent_id = $2
-			  AND status = $3
-			  AND tenant_id = $4
-		)`,
-		teamID, agentID, store.TeamTaskStatusInProgress, tid,
-	).Scan(&exists)
-	return exists, err
-}
-
 func (s *PGTeamStore) CompleteTask(ctx context.Context, taskID, teamID uuid.UUID, result string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

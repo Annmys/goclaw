@@ -3,8 +3,12 @@ package tools
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 // SandboxCwd maps the current effective workspace (from context) to its
@@ -30,16 +34,66 @@ func SandboxCwd(ctx context.Context, globalWorkspace, containerBase string) (str
 	if rel == "." {
 		return containerBase, nil
 	}
-	return filepath.Join(containerBase, rel), nil
+	return path.Join(filepath.ToSlash(containerBase), filepath.ToSlash(rel)), nil
+}
+
+func effectiveSandboxWorkspace(ctx context.Context, globalWorkspace string) (string, error) {
+	if ws := ToolWorkspaceFromCtx(ctx); ws != "" {
+		return canonicalSandboxWorkspace(ws), nil
+	}
+	if globalWorkspace != "" && store.IsMasterScope(ctx) {
+		slog.Warn("security.sandbox_global_workspace_fallback",
+			"workspace", globalWorkspace,
+			"tenant_id", store.TenantIDFromContext(ctx),
+			"agent_id", store.AgentIDFromContext(ctx))
+		return canonicalSandboxWorkspace(globalWorkspace), nil
+	}
+	return "", fmt.Errorf("sandbox workspace unavailable for tenant-scoped execution")
+}
+
+func canonicalSandboxWorkspace(workspace string) string {
+	clean := filepath.Clean(workspace)
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		return real
+	}
+	return clean
+}
+
+func sandboxCwdForHostPath(hostCwd, mountWorkspace, containerBase string) (string, error) {
+	if hostCwd == "" {
+		hostCwd = mountWorkspace
+	}
+	if containerBase == "" {
+		containerBase = "/workspace"
+	}
+	cleanMount := filepath.Clean(mountWorkspace)
+	cleanCwd := filepath.Clean(hostCwd)
+	rel, err := filepath.Rel(cleanMount, cleanCwd)
+	if err != nil || strings.HasPrefix(filepath.Clean(rel), "..") {
+		return "", fmt.Errorf("working directory %q is outside sandbox mount %q", hostCwd, mountWorkspace)
+	}
+	if rel == "." {
+		return filepath.ToSlash(containerBase), nil
+	}
+	return path.Join(filepath.ToSlash(containerBase), filepath.ToSlash(rel)), nil
 }
 
 // ResolveSandboxPath resolves a tool-provided path (relative or absolute)
-// against the sandbox container CWD. If the path is relative, it is joined
-// with containerCwd. Absolute paths are returned as-is (the sandbox
-// filesystem already restricts access to the mounted volume).
-func ResolveSandboxPath(path, containerCwd string) string {
-	if filepath.IsAbs(path) {
-		return path
+// against the sandbox container CWD. Escapes are rejected to containerCwd so a
+// tool scoped to /workspace/agent-a cannot address /workspace/agent-b.
+func ResolveSandboxPath(filePath, containerCwd string) string {
+	cwd := path.Clean(containerCwd)
+	if cwd == "." || cwd == "/" {
+		cwd = "/workspace"
 	}
-	return filepath.Join(containerCwd, path)
+	var resolved string
+	if strings.HasPrefix(filePath, "/") {
+		resolved = path.Clean(filePath)
+	} else {
+		resolved = path.Clean(path.Join(cwd, filePath))
+	}
+	if resolved == cwd || strings.HasPrefix(resolved, cwd+"/") {
+		return resolved
+	}
+	return cwd
 }

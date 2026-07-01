@@ -20,16 +20,24 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body any) (io.ReadCloser
 		return nil, fmt.Errorf("%s: marshal request: %w", p.name, err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", p.apiBase+p.chatPath, bytes.NewReader(data))
+	// Ollama: route to native /api/chat so options.num_ctx is honored.
+	// The OpenAI-compat shim at /v1/chat/completions silently ignores options.num_ctx.
+	url := p.apiBase + p.chatPath
+	if p.isOllamaEndpoint() {
+		url = p.ollamaNativeURL()
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("%s: create request: %w", p.name, err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
-	// Azure OpenAI/Foundry support for now atleast
-	if strings.Contains(strings.ToLower(p.apiBase), "azure.com") {
+	switch {
+	case p.noAuthHeader:
+		// Caller-supplied transport (e.g. Vertex oauth2.Transport) injects Authorization itself.
+	case strings.Contains(strings.ToLower(p.apiBase), "azure.com"):
 		httpReq.Header.Set("api-key", p.apiKey)
-	} else {
+	default:
 		prefix := p.authPrefix
 		if prefix == "" {
 			prefix = "Bearer "
@@ -42,6 +50,11 @@ func (p *OpenAIProvider) doRequest(ctx context.Context, body any) (io.ReadCloser
 	}
 	if p.siteTitle != "" {
 		httpReq.Header.Set("X-Title", p.siteTitle)
+	}
+	// Static per-provider headers (e.g. fixed User-Agent for kimi_coding).
+	// Applied after the standard headers so providers can override them if needed.
+	for k, v := range p.extraHeaders {
+		httpReq.Header.Set(k, v)
 	}
 
 	resp, err := p.client.Do(httpReq)
@@ -123,12 +136,18 @@ func (p *OpenAIProvider) parseResponse(resp *openAIResponse) *ChatResponse {
 			PromptTokens:     resp.Usage.PromptTokens,
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
+			RequestCount:     1,
 		}
 		if resp.Usage.PromptTokensDetails != nil {
 			result.Usage.CacheReadTokens = resp.Usage.PromptTokensDetails.CachedTokens
+			result.Usage.CacheCreationTokens = resp.Usage.PromptTokensDetails.CacheWriteTokens + resp.Usage.PromptTokensDetails.CacheCreationInputTokens
+			result.Usage.PromptTokensIncludeCachedSegments = true
 		}
 		if resp.Usage.CompletionTokensDetails != nil && resp.Usage.CompletionTokensDetails.ReasoningTokens > 0 {
 			result.Usage.ThinkingTokens = resp.Usage.CompletionTokensDetails.ReasoningTokens
+		}
+		if resp.Usage.ServerToolUse != nil {
+			result.Usage.WebSearchCount = resp.Usage.ServerToolUse.WebSearchRequests
 		}
 	}
 

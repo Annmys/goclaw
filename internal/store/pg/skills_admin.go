@@ -105,22 +105,3 @@ func (s *PGSkillStore) IsSystemSkill(slug string) bool {
 	).Scan(&isSystem)
 	return err == nil && isSystem
 }
-
-// IsCustomSkillSlug reports whether a slug already belongs to a custom skill in
-// the current tenant. Seeders use this to avoid converting admin-managed skills
-// back into system skills during restart.
-func (s *PGSkillStore) IsCustomSkillSlug(ctx context.Context, slug string) bool {
-	tid := store.TenantIDFromContext(ctx)
-	if tid == uuid.Nil {
-		tid = store.MasterTenantID
-	}
-	var exists bool
-	err := s.db.QueryRowContext(ctx,
-		`SELECT EXISTS(
-			SELECT 1 FROM skills
-			WHERE slug = $1 AND tenant_id = $2 AND is_system = false AND status != 'deleted'
-		)`,
-		slug, tid,
-	).Scan(&exists)
-	return err == nil && exists
-}

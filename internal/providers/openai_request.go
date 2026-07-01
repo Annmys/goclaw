@@ -19,7 +19,9 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 	supportsThoughtSignature := strings.Contains(strings.ToLower(p.providerType), "gemini") ||
 		strings.Contains(strings.ToLower(p.name), "gemini") ||
 		strings.Contains(strings.ToLower(p.apiBase), "generativelanguage") ||
-		strings.Contains(strings.ToLower(model), "gemini")
+		strings.Contains(strings.ToLower(model), "gemini") ||
+		strings.ToLower(p.providerType) == "vertex" ||
+		strings.Contains(strings.ToLower(p.apiBase), "aiplatform")
 
 	if supportsThoughtSignature {
 		inputMessages = collapseToolCallsWithoutSig(inputMessages)
@@ -56,19 +58,27 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 
 		// Echo reasoning_content only for APIs/models that accept it on assistant history.
 		// Together Qwen and many OpenAI-compat gateways reject unknown message fields → HTTP 400.
-		wireReasoning := openAIWireAssistantReasoningContent(model) ||
-			strings.Contains(strings.ToLower(p.apiBase), "kimi.com")
-		if m.Role == "assistant" && wireReasoning {
-			if m.Thinking != "" || len(m.ToolCalls) > 0 {
+		//
+		// Kimi Coding is stricter: when its server-side thinking is on (always-on for
+		// kimi-k2-turbo-preview), assistant tool-call messages MUST carry
+		// reasoning_content even if empty — otherwise upstream returns 400 "thinking
+		// is enabled but reasoning_content is missing in assistant tool call message".
+		if m.Role == "assistant" && openAIWireAssistantReasoningContent(model) {
+			switch {
+			case m.Thinking != "":
 				msg["reasoning_content"] = m.Thinking
+			case p.providerType == "kimi_coding":
+				// Send empty string rather than omit the field — satisfies Kimi's
+				// "must be present" check without inventing reasoning content.
+				msg["reasoning_content"] = ""
 			}
 		}
 
 		// Include content; omit empty content for assistant messages with tool_calls
 		// (Gemini rejects empty content → "must include at least one parts field").
-		if m.Role == "user" && len(m.Images) > 0 {
+		if m.Role == "user" && (len(m.Images) > 0 || len(m.Videos) > 0) {
 			var parts []map[string]any
-			// Text before images — Together / Qwen vision examples use this order; OpenAI accepts both.
+			// Text before images/videos — Together / Qwen vision examples use this order; OpenAI accepts both.
 			if m.Content != "" {
 				parts = append(parts, map[string]any{
 					"type": "text",
@@ -76,10 +86,26 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 				})
 			}
 			for _, img := range m.Images {
+				urlVal := img.URL
+				if urlVal == "" {
+					urlVal = fmt.Sprintf("data:%s;base64,%s", img.MimeType, img.Data)
+				}
 				parts = append(parts, map[string]any{
 					"type": "image_url",
 					"image_url": map[string]any{
-						"url": fmt.Sprintf("data:%s;base64,%s", img.MimeType, img.Data),
+						"url": urlVal,
+					},
+				})
+			}
+			for _, vid := range m.Videos {
+				urlVal := vid.URL
+				if urlVal == "" {
+					urlVal = fmt.Sprintf("data:%s;base64,%s", vid.MimeType, vid.Data)
+				}
+				parts = append(parts, map[string]any{
+					"type": "video_url",
+					"video_url": map[string]any{
+						"url": urlVal,
 					},
 				})
 			}
@@ -133,6 +159,15 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 		msgs = append(msgs, msg)
 	}
 
+	// Apply DashScope cache_control wrapping (verified live 2026-05-08).
+	// Uses 3-source detection from p.isDashScope() (URL + providerType + name)
+	// to handle reverse-proxied endpoints. No-op for non-DashScope endpoints
+	// or when env disabled. For native OpenAI, role mapping above renames
+	// "system"→"developer" so wrap is a no-op (role guard).
+	if p.isDashScope() && !dashScopeCacheDisabled() && len(msgs) > 0 {
+		msgs[0] = wrapSystemForDashScopeCache(msgs[0])
+	}
+
 	// Safety net: strip trailing assistant message to prevent HTTP 400 from
 	// proxy providers (LiteLLM, OpenRouter) that don't support assistant prefill.
 	// This should rarely trigger — the agent loop ensures user message is last.
@@ -152,7 +187,24 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 
 	if len(req.Tools) > 0 {
 		body["tools"] = buildToolsPayload(p.schemaProviderName(), req.Tools)
-		body["tool_choice"] = "auto"
+		if tc, ok := req.Options[OptToolChoice]; ok && tc != nil {
+			body["tool_choice"] = tc
+		} else {
+			body["tool_choice"] = "auto"
+		}
+	}
+
+	// DashScope tool prefix cache: cache_control on last tool definition
+	// caches the entire tools array (descriptions + schemas, ~5-10K tokens).
+	// Combined with system block cache: 2/4 markers used, 99.5% hit rate verified.
+	if p.isDashScope() && !dashScopeCacheDisabled() {
+		if t, ok := body["tools"].([]map[string]any); ok && len(t) > 0 {
+			markersFromSystem := 0
+			if len(msgs) > 0 {
+				markersFromSystem = countCacheControlMarkers(msgs[0])
+			}
+			body["tools"] = applyDashScopeToolPrefixCache(t, markersFromSystem)
+		}
 	}
 
 	// Together returns HTTP 400 on some requests when stream_options is present.
@@ -183,32 +235,25 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 	if v, ok := req.Options[OptTemperature]; ok {
 		// Certain model families don't support custom temperature (locked to default).
 		// This is a model-level constraint, not provider-specific — applies to both OpenAI and Azure.
-		// Note: gpt-5.X flagship models (gpt-5.1, gpt-5.4) DO support temperature;
+		// Note: gpt-5.X flagship models (gpt-5.1, gpt-5.4, gpt-5.5) DO support temperature;
 		// only the mini/nano reasoning variants reject it.
-		skipTemp := strings.HasPrefix(capabilityModel, "gpt-5-mini") ||
-			strings.HasPrefix(capabilityModel, "gpt-5-nano") ||
-			strings.HasPrefix(capabilityModel, "o1") ||
-			strings.HasPrefix(capabilityModel, "o3") ||
-			strings.HasPrefix(capabilityModel, "o4") ||
-			strings.Contains(strings.ToLower(p.apiBase), "api.kimi.com/coding")
+		skipTemp := strings.HasPrefix(capabilityModel, "gpt-5-mini") || strings.HasPrefix(capabilityModel, "gpt-5-nano") || strings.HasPrefix(capabilityModel, "o1") || strings.HasPrefix(capabilityModel, "o3") || strings.HasPrefix(capabilityModel, "o4")
+		// Kimi Coding rejects any temperature override — `invalid temperature: only
+		// 1 is allowed for this model`. Skip sending so the upstream applies its
+		// own default (1). Matches the model-locked behavior of o1/o3/o4.
+		if p.providerType == "kimi_coding" {
+			skipTemp = true
+		}
 		if !skipTemp {
 			body["temperature"] = v
 		}
 	}
 
 	// reasoning_effort is OpenAI-specific; do not send to third-party OpenAI-compatible APIs.
-	isKimi := strings.Contains(strings.ToLower(p.apiBase), "kimi.com") ||
-		strings.Contains(strings.ToLower(model), "kimi")
 	if level, ok := req.Options[OptThinkingLevel].(string); ok && level != "" && level != "off" {
-		if openAIModelSupportsReasoningEffort(model) || isKimi {
+		if openAIModelSupportsReasoningEffort(model) {
 			body[OptReasoningEffort] = level
 		}
-	}
-	if isKimi {
-		// Do not auto-enable reasoning for Kimi Coding based solely on tool-call
-		// replay. Agents can explicitly request reasoning via thinking_level /
-		// reasoning_effort, but forcing it on makes Kimi validate historical
-		// assistant tool-call messages more strictly and breaks normal tool loops.
 	}
 
 	// Gemini (Google OpenAI-compat) accepts reasoning_effort mapped to thinking_config.
@@ -224,8 +269,41 @@ func (p *OpenAIProvider) buildRequestBody(model string, req ChatRequest, stream 
 		}
 	}
 
+	// Ollama-specific: inject options.num_ctx to set the context window size.
+	// Without this, Ollama defaults to a small context (often 2048) and returns
+	// context-window errors on long conversations.
+	// Priority: user-configured ollamaNumCtx > pre-queried /api/show value > 131072 default.
+	if p.isOllamaEndpoint() {
+		numCtx := OllamaDefaultNumCtx
+		numCtxSource := "default"
+		if p.ollamaNumCtx != nil {
+			numCtx = *p.ollamaNumCtx
+			numCtxSource = "configured"
+		}
+		slog.Debug("ollama.request: injecting num_ctx into options",
+			"provider", p.name,
+			"model", model,
+			"num_ctx", numCtx,
+			"source", numCtxSource,
+		)
+		body["options"] = map[string]any{
+			"num_ctx": numCtx,
+		}
+		if bodyBytes, err := json.Marshal(body); err == nil {
+			raw := string(bodyBytes)
+			if len(raw) > 500 {
+				raw = raw[:500] + "..."
+			}
+			slog.Debug("ollama.request: final request body (first 500 chars)", "provider", p.name, "model", model, "body_prefix", raw)
+		}
+	}
+
 	// DashScope-specific passthrough keys — never send to other OpenAI-compat hosts.
 	if p.dashScopePassthroughKeys() {
+		if level, ok := req.Options[OptThinkingLevel].(string); ok && level != "" && level != "off" && dashscopeThinkingModels[model] {
+			body[OptEnableThinking] = true
+			body[OptThinkingBudget] = dashscopeThinkingBudget(level)
+		}
 		if v, ok := req.Options[OptEnableThinking]; ok {
 			body[OptEnableThinking] = v
 		}

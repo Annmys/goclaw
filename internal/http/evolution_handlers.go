@@ -2,7 +2,6 @@ package http
 
 import (
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
-	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/skills"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
@@ -20,16 +18,12 @@ import (
 type EvolutionHandler struct {
 	metrics     store.EvolutionMetricsStore
 	suggestions store.EvolutionSuggestionStore
-	engine      *agent.SuggestionEngine
 
 	// Optional: skill creation on SuggestSkillAdd approval.
 	// Nil-safe — skill creation disabled if any is nil.
 	skillStore  store.SkillManageStore
 	skillLoader *skills.Loader
 	dataDir     string
-
-	// Optional: skill read access for non-destructive business smoke tests.
-	skillReader store.SkillStore
 
 	// Optional: agent store for applying threshold suggestions.
 	agentStore store.AgentStore
@@ -45,15 +39,9 @@ type EvolutionHandlerOpt func(*EvolutionHandler)
 func WithSkillCreation(ss store.SkillManageStore, loader *skills.Loader, dataDir string) EvolutionHandlerOpt {
 	return func(h *EvolutionHandler) {
 		h.skillStore = ss
-		h.skillReader = ss
 		h.skillLoader = loader
 		h.dataDir = dataDir
 	}
-}
-
-// WithSkillReader enables non-destructive skill smoke checks without enabling skill creation.
-func WithSkillReader(ss store.SkillStore) EvolutionHandlerOpt {
-	return func(h *EvolutionHandler) { h.skillReader = ss }
 }
 
 // WithAgentStore enables threshold suggestion auto-apply on approval.
@@ -66,11 +54,6 @@ func WithToolTenantCfgs(tc store.BuiltinToolTenantConfigStore) EvolutionHandlerO
 	return func(h *EvolutionHandler) { h.toolTenantCfgs = tc }
 }
 
-// WithSuggestionEngine enables manual analysis from the admin evolution center.
-func WithSuggestionEngine(engine *agent.SuggestionEngine) EvolutionHandlerOpt {
-	return func(h *EvolutionHandler) { h.engine = engine }
-}
-
 func NewEvolutionHandler(m store.EvolutionMetricsStore, s store.EvolutionSuggestionStore, opts ...EvolutionHandlerOpt) *EvolutionHandler {
 	h := &EvolutionHandler{metrics: m, suggestions: s}
 	for _, opt := range opts {
@@ -80,47 +63,21 @@ func NewEvolutionHandler(m store.EvolutionMetricsStore, s store.EvolutionSuggest
 }
 
 func (h *EvolutionHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/metrics", h.adminAuth(h.handleGetMetrics))
-	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/feedback", h.adminAuth(h.handleListFeedback))
-	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/feedback", h.auth(h.handleCreateFeedback))
-	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/suggestions", h.adminAuth(h.handleListSuggestions))
-	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/suggestions/analyze", h.adminAuth(h.handleAnalyzeSuggestions))
-	mux.HandleFunc("PATCH /v1/agents/{agentID}/evolution/suggestions/{suggestionID}", h.adminAuth(h.handleUpdateSuggestion))
-	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/regression-tests", h.adminAuth(h.handleListRegressionRuns))
-	mux.HandleFunc("POST /v1/agents/{agentID}/evolution/regression-tests/run", h.adminAuth(h.handleRunRegression))
-	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/audit", h.adminAuth(h.handleListAudit))
+	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/metrics", h.auth(h.handleGetMetrics))
+	mux.HandleFunc("GET /v1/agents/{agentID}/evolution/suggestions", h.auth(h.handleListSuggestions))
+	mux.HandleFunc("PATCH /v1/agents/{agentID}/evolution/suggestions/{suggestionID}", h.auth(h.handleUpdateSuggestion))
 }
 
 func (h *EvolutionHandler) auth(next http.HandlerFunc) http.HandlerFunc {
 	return requireAuth("", next)
 }
 
-func (h *EvolutionHandler) adminAuth(next http.HandlerFunc) http.HandlerFunc {
-	return requireAuth(permissions.RoleAdmin, next)
-}
-
-func (h *EvolutionHandler) resolveAgentID(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	raw := r.PathValue("agentID")
-	if id, err := uuid.Parse(raw); err == nil {
-		return id, true
-	}
-	if h.agentStore == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
-		return uuid.Nil, false
-	}
-	ag, err := h.agentStore.GetByKey(r.Context(), raw)
-	if err != nil || ag == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
-		return uuid.Nil, false
-	}
-	return ag.ID, true
-}
-
 // handleGetMetrics returns raw or aggregated evolution metrics for an agent.
 // Query params: type (tool|retrieval|feedback), since (ISO timestamp), aggregate (true/false).
 func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Request) {
-	agentID, ok := h.resolveAgentID(w, r)
-	if !ok {
+	agentID, err := uuid.Parse(r.PathValue("agentID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
 		return
 	}
 
@@ -156,16 +113,9 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 		if retrievalAggs == nil {
 			retrievalAggs = []store.RetrievalAggregate{}
 		}
-		skillScores, err := agent.BuildSkillQualityScores(ctx, h.metrics, h.skillReader, agentID, since, toolAggs)
-		if err != nil {
-			slog.Warn("evolution.skill_quality_scores failed", "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-			return
-		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"tool_aggregates":      toolAggs,
 			"retrieval_aggregates": retrievalAggs,
-			"skill_quality_scores": skillScores,
 		})
 		return
 	}
@@ -193,8 +143,9 @@ func (h *EvolutionHandler) handleGetMetrics(w http.ResponseWriter, r *http.Reque
 // handleListSuggestions returns evolution suggestions for an agent.
 // Query params: status (pending|approved|applied|rejected|rolled_back), limit.
 func (h *EvolutionHandler) handleListSuggestions(w http.ResponseWriter, r *http.Request) {
-	agentID, ok := h.resolveAgentID(w, r)
-	if !ok {
+	agentID, err := uuid.Parse(r.PathValue("agentID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
 		return
 	}
 
@@ -219,39 +170,12 @@ func (h *EvolutionHandler) handleListSuggestions(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, suggestions)
 }
 
-// handleAnalyzeSuggestions runs the suggestion engine immediately for one agent.
-// It only creates pending suggestions and never applies changes directly.
-func (h *EvolutionHandler) handleAnalyzeSuggestions(w http.ResponseWriter, r *http.Request) {
-	agentID, ok := h.resolveAgentID(w, r)
-	if !ok {
-		return
-	}
-	if h.engine == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "suggestion analysis is not configured"})
-		return
-	}
-	created, err := h.engine.Analyze(r.Context(), agentID)
-	if err != nil {
-		slog.Warn("evolution.analyze_suggestions failed", "agent", agentID, "error", err)
-		h.recordAuditEvent(r, agentID, "suggestions_analyze", "", "failed", "failed", err.Error())
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		return
-	}
-	h.autoApplyPendingSuggestions(r, agentID, 100)
-	h.recordAuditEvent(r, agentID, "suggestions_analyze", "", "pending", "ok",
-		fmt.Sprintf("manual analysis created %d suggestions and triggered auto-evolution", len(created)))
-	writeJSON(w, http.StatusCreated, map[string]any{
-		"status":  "ok",
-		"created": len(created),
-		"items":   created,
-	})
-}
-
 // handleUpdateSuggestion updates a suggestion's status (approve/reject/rollback).
 func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http.Request) {
 	locale := extractLocale(r)
-	agentID, ok := h.resolveAgentID(w, r)
-	if !ok {
+	agentID, err := uuid.Parse(r.PathValue("agentID"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid agent ID"})
 		return
 	}
 
@@ -298,72 +222,12 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 
 	// Handle approval: dispatch by suggestion type.
 	if body.Status == "approved" {
-		preflightScope := approvalPreflightScope(existing.SuggestionType)
-		preflight := h.executeRegressionRun(r, agentID, preflightScope, suggestionID.String())
-		if err := h.recordRegressionRun(r, agentID, preflight); err != nil {
-			slog.Warn("evolution.approval_preflight.record_failed", "suggestion", suggestionID, "error", err)
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record approval preflight regression"})
-			return
-		}
-		if preflight.Status != "passed" {
-			h.recordAuditEvent(r, agentID, "suggestion_approval_blocked", suggestionID.String(), "blocked", "failed",
-				"approval preflight regression failed: "+preflightScope)
-			writeJSON(w, http.StatusBadRequest, map[string]string{
-				"error": "approval preflight regression failed; fix failed cases before applying this suggestion",
-				"scope": preflightScope,
-			})
-			return
-		}
-
 		switch existing.SuggestionType {
-		case store.SuggestFeedbackCorrection:
-			if err := h.suggestions.UpdateSuggestionStatus(r.Context(), suggestionID, "approved", reviewedBy); err != nil {
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
-				return
-			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "approved", "ok", "feedback correction approved for manual follow-up")
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "feedback_correction_approved"})
-			return
-
-		case store.SuggestSkillRepair:
-			if err := h.applySkillRepair(r.Context(), *existing, reviewedBy); err != nil {
-				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-				return
-			}
-			postflight := h.executeRegressionRun(r, agentID, "business_workflow_smoke", suggestionID.String())
-			if err := h.recordRegressionRun(r, agentID, postflight); err != nil {
-				slog.Warn("evolution.skill_repair.postflight.record_failed", "suggestion", suggestionID, "error", err)
-				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to record skill repair postflight regression"})
-				return
-			}
-			if postflight.Status != "passed" {
-				if err := h.rollbackSkillRepair(r.Context(), *existing, reviewedBy); err != nil {
-					h.recordAuditEvent(r, agentID, "skill_repair_postflight_rollback_failed", suggestionID.String(), "applied", "failed", err.Error())
-					writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed and rollback failed: " + err.Error()})
-					return
-				}
-				h.recordAuditEvent(r, agentID, "skill_repair_postflight_failed", suggestionID.String(), "rolled_back", "failed", "business_workflow_smoke failed after skill repair; rollback version published")
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": "skill repair postflight failed; rollback version published"})
-				return
-			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "skill repair version published")
-			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "skill_repair_applied"})
-			return
-
 		case store.SuggestSkillAdd:
-			result, err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy)
-			if err != nil {
-				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
+			if err := h.applySkillDraft(r.Context(), *existing, body.SkillDraft, reviewedBy); err != nil {
 				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 				return
 			}
-			if action, err := h.postflightSkillAddApplication(r, agentID, *existing, result, reviewedBy); err != nil {
-				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
-				writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error(), "action": action})
-				return
-			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "skill draft created")
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "skill_created"})
 			return
 
@@ -387,7 +251,6 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", action)
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": action})
 			return
 
@@ -410,26 +273,13 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 				return
 			}
 			if err := agent.ApplySuggestion(r.Context(), h.agentStore, h.suggestions, *existing, guardrails); err != nil {
-				h.recordAuditEvent(r, agentID, "suggestion_approve_failed", suggestionID.String(), "approved", "failed", err.Error())
 				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 				return
 			}
-			h.recordAuditEvent(r, agentID, "suggestion_approved", suggestionID.String(), "applied", "ok", "threshold suggestion applied with rollback baseline")
 			writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "threshold_applied"})
 			return
 		}
 		// Other types: fall through to status-only update.
-	}
-
-	if body.Status == "rolled_back" {
-		if err := h.rollbackSuggestion(r, *existing, reviewedBy); err != nil {
-			h.recordAuditEvent(r, agentID, "suggestion_rollback_failed", suggestionID.String(), "rolled_back", "failed", err.Error())
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		h.recordAuditEvent(r, agentID, "suggestion_rolled_back", suggestionID.String(), "rolled_back", "ok", "rollback completed")
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "action": "rolled_back"})
-		return
 	}
 
 	if err := h.suggestions.UpdateSuggestionStatus(r.Context(), suggestionID, body.Status, reviewedBy); err != nil {
@@ -437,23 +287,5 @@ func (h *EvolutionHandler) handleUpdateSuggestion(w http.ResponseWriter, r *http
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
-	h.recordAuditEvent(r, agentID, "suggestion_"+body.Status, suggestionID.String(), body.Status, "ok", "suggestion status updated")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-func approvalPreflightScope(suggestionType store.SuggestionType) string {
-	switch suggestionType {
-	case store.SuggestFeedbackCorrection:
-		return "business_workflow_smoke"
-	case store.SuggestSkillRepair:
-		return "business_workflow_smoke"
-	case store.SuggestSkillAdd:
-		return "core_skill_smoke"
-	case store.SuggestToolOrder:
-		return "business_workflow_smoke"
-	case store.SuggestThreshold:
-		return "agent_safety"
-	default:
-		return "agent_safety"
-	}
 }

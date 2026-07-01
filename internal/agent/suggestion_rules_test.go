@@ -130,34 +130,3 @@ func TestRepeatedToolRule_IncludesSkillDraft(t *testing.T) {
 		t.Error("skill_draft missing tool name")
 	}
 }
-
-func TestSkillQualityRepairRule(t *testing.T) {
-	rule := &SkillQualityRepairRule{}
-	tests := []struct {
-		name    string
-		scores  []store.SkillQualityScore
-		wantNil bool
-	}{
-		{"empty scores -> skip", nil, true},
-		{"healthy score -> skip", []store.SkillQualityScore{{SkillName: "shipping-doc-processing", QualityScore: 92, RiskLevel: "low"}}, true},
-		{"high risk triggers", []store.SkillQualityScore{{SkillName: "shipping-doc-processing", QualityScore: 68, RiskLevel: "high", FeedbackCorrections: 4}}, false},
-		{"low numeric score triggers", []store.SkillQualityScore{{SkillName: "label-generate", QualityScore: 69, RiskLevel: "medium", RegressionFailures: 1}}, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sg, err := rule.Evaluate(context.Background(), uuid.New(), AnalysisInput{SkillQualityScores: tt.scores})
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if tt.wantNil && sg != nil {
-				t.Errorf("expected nil, got %+v", sg)
-			}
-			if !tt.wantNil && sg == nil {
-				t.Fatal("expected suggestion, got nil")
-			}
-			if !tt.wantNil && sg.SuggestionType != store.SuggestSkillRepair {
-				t.Errorf("expected SuggestSkillRepair, got %q", sg.SuggestionType)
-			}
-		})
-	}
-}

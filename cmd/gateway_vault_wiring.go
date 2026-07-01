@@ -52,14 +52,14 @@ func wireVault(stores *store.Stores, toolsReg *tools.Registry, workspace string,
 			wt.SetVaultInterceptor(vaultIntc)
 		}
 	}
-	
+
 	// Wire interceptor into read_file (lazy hash sync on read).
 	if readTool, ok := toolsReg.Get("read_file"); ok {
 		if rt, ok := readTool.(*tools.ReadFileTool); ok {
 			rt.SetVaultInterceptor(vaultIntc)
 		}
 	}
-	
+
 	// Wire interceptor into media generation tools.
 	if imgTool, ok := toolsReg.Get("create_image"); ok {
 		if it, ok := imgTool.(*tools.CreateImageTool); ok {

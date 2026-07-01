@@ -25,6 +25,8 @@ type RunContext struct {
 	AgentKey         string
 	TenantID         uuid.UUID
 	UserID           string
+	RunID            string
+	SessionKey       string
 	CredentialUserID string // resolved tenant user for credential lookups (empty = use UserID)
 	AgentType        string
 	SenderID         string
@@ -34,16 +36,20 @@ type RunContext struct {
 	SharedMemory        bool
 	SharedKG            bool
 	SharedSessions      bool
+	SharedContext       bool
 	RestrictToWorkspace bool
 
 	// Tool configuration
 	BuiltinToolSettings map[string][]byte
+	Channel             string
 	ChannelType         string
+	ChannelContextScope ChannelContextScope
 	SubagentsCfg        *config.SubagentsConfig
 	ParentModel         string
 	ParentProvider      string
 	MemoryCfg           *config.MemoryConfig
 	SandboxCfg          *sandbox.Config
+	WaitToolCfg         *config.WaitToolPolicy
 	ShellDenyGroups     map[string]bool
 
 	// Workspace
@@ -52,7 +58,7 @@ type RunContext struct {
 	TeamID             string
 	WorkspaceChannel   string
 	WorkspaceChatID    string
-	TeamIsolated       bool   // true when team.workspace_scope != "shared" — drives chat_id filtering in vault search
+	TeamIsolated       bool // true when team.workspace_scope != "shared" — drives chat_id filtering in vault search
 	TeamTaskID         string
 	DelegationID       string   // delegation identifier for vault auto-linking (empty when not in delegation)
 	LeaderAgentID      string   // leader's agent UUID for member memory read fallback

@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
-	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -30,9 +29,22 @@ func (h *TeamAttachmentsHandler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *TeamAttachmentsHandler) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Attachments are delivered as scoped files. Require an authenticated
-		// request so the same download URL cannot be reused across users.
+		// Priority 1: HMAC-signed file token (?ft=) — no gateway token exposure.
+		if ft := r.URL.Query().Get("ft"); ft != "" {
+			path := r.URL.Path // full path for HMAC binding
+			if VerifyFileToken(ft, path, FileSigningKey()) {
+				next(w, r)
+				return
+			}
+			http.Error(w, "invalid or expired file token", http.StatusUnauthorized)
+			return
+		}
+		// Priority 2: Bearer header (API clients).
 		provided := extractBearerToken(r)
+		if provided == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		authedReq, ok := requireAuthBearer("", provided, w, r)
 		if !ok {
 			return
@@ -71,40 +83,6 @@ func (h *TeamAttachmentsHandler) handleDownload(w http.ResponseWriter, r *http.R
 	if att.TeamID != teamID {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "attachment does not belong to this team"})
 		return
-	}
-
-	task, err := h.teamStore.GetTask(r.Context(), att.TaskID)
-	if err != nil || task == nil || task.TeamID != teamID {
-		http.NotFound(w, r)
-		return
-	}
-
-	ft := r.URL.Query().Get("ft")
-	if ft == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing file token"})
-		return
-	}
-	claims, ok := VerifyScopedFileToken(ft, r.URL.Path, FileSigningKey())
-	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid or expired file token"})
-		return
-	}
-	if claims.TeamID != teamID.String() || claims.TaskID != task.ID.String() || claims.TenantID != task.TenantID.String() {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "file token scope mismatch"})
-		return
-	}
-
-	userID := store.UserIDFromContext(r.Context())
-	role := permissions.Role(store.RoleFromContext(r.Context()))
-	if claims.UserID != "" && claims.UserID != userID && !permissions.HasMinRole(role, permissions.RoleAdmin) {
-		writeJSON(w, http.StatusForbidden, map[string]string{"error": "attachment is not available to this user"})
-		return
-	}
-	if task.UserID != "" && task.UserID != userID && !permissions.HasMinRole(role, permissions.RoleAdmin) {
-		if hasAccess, err := h.teamStore.HasTeamAccess(r.Context(), teamID, userID); err != nil || !hasAccess {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "attachment is not available to this user"})
-			return
-		}
 	}
 
 	// Resolve disk path. Absolute paths (new) are used directly;

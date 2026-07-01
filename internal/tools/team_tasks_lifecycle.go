@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
@@ -47,35 +46,6 @@ func (t *TeamTasksTool) executeComplete(ctx context.Context, args map[string]any
 	result, _ := args["result"].(string)
 	if result == "" {
 		return ErrorResult("result is required for complete action")
-	}
-
-	task, err := t.manager.Store().GetTask(ctx, taskID)
-	if err != nil {
-		return ErrorResult("task not found: " + err.Error())
-	}
-	if task.TeamID != team.ID {
-		return ErrorResult("task does not belong to your team")
-	}
-	if isHumanResourcesTeam(team) {
-		lower := strings.ToLower(result)
-		switch task.OwnerAgentKey {
-		case "hr-review":
-			if !(strings.Contains(lower, "通过") || strings.Contains(lower, "失败") || strings.Contains(lower, "rejected") || strings.Contains(lower, "approved")) {
-				return ErrorResult("HR V2.0 requires review results to state pass/fail and remaining risks before completion.")
-			}
-		case "hr-knowledge":
-			for _, word := range []string{"反馈", "根因", "判定"} {
-				if !strings.Contains(result, word) {
-					return ErrorResult("HR V2.0 requires knowledge results to include feedback record, root-cause analysis, and occasional/systemic determination.")
-				}
-			}
-		default:
-			for _, word := range []string{"输出", "路径", "数据", "来源", "自检"} {
-				if !strings.Contains(result, word) {
-					return ErrorResult("HR V2.0 requires task result to include output path, data source, self-check conclusion, and unresolved items.")
-				}
-			}
-		}
 	}
 
 	// Auto-claim if the task is still pending (saves an extra tool call).

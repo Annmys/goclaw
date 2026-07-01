@@ -13,17 +13,22 @@ type Stores struct {
 	Agents                AgentStore
 	Providers             ProviderStore
 	Tracing               TracingStore
+	RunTimeline           RunTimelineStore
 	MCP                   MCPServerStore
+	MCPOAuthTokens        MCPOAuthTokenStore
 	ChannelInstances      ChannelInstanceStore
 	ConfigSecrets         ConfigSecretsStore
 	AgentLinks            AgentLinkStore
 	Teams                 TeamStore
 	BuiltinTools          BuiltinToolStore
 	PendingMessages       PendingMessageStore
+	ChannelMemory         ChannelMemoryExtractionStore
 	KnowledgeGraph        KnowledgeGraphStore
 	Contacts              ContactStore
 	Activity              ActivityStore
 	Snapshots             SnapshotStore
+	UsageEvents           UsageEventStore
+	BrowserCookies        BrowserCookieStore
 	SecureCLI             SecureCLIStore
 	SecureCLIGrants       SecureCLIAgentGrantStore
 	APIKeys               APIKeyStore
@@ -32,15 +37,28 @@ type Stores struct {
 	Tenants               TenantStore
 	BuiltinToolTenantCfgs BuiltinToolTenantConfigStore
 	SkillTenantCfgs       SkillTenantConfigStore
+	SkillEvolution        SkillEvolutionStore
 	SystemConfigs         SystemConfigStore
 	SubagentTasks         SubagentTaskStore
 	Vault                 VaultStore
 	Episodic              EpisodicStore
 	EvolutionMetrics      EvolutionMetricsStore
 	EvolutionSuggestions  EvolutionSuggestionStore
-	LocalKnowledgeSources LocalKnowledgeSourceStore
+	BitrixPortals         BitrixPortalStore
 	// Hooks is hooks.HookStore — typed as any to avoid import cycle
 	// (hooks package imports store for context helpers).
 	// Callers: type-assert to hooks.HookStore before use.
 	Hooks any
+
+	Webhooks     WebhookStore
+	WebhookCalls WebhookCallStore
+
+	// Workstations — Standard edition only (gated at router registration).
+	Workstations           WorkstationStore
+	WorkstationLinks       AgentWorkstationLinkStore
+	WorkstationPermissions WorkstationPermissionStore
+	WorkstationActivity    WorkstationActivityStore
+
+	// UsageCaps is Standard/PostgreSQL only in the first budget-control rollout.
+	UsageCaps UsageCapStore
 }

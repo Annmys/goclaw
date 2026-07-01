@@ -102,24 +102,10 @@ func (m *TeamsMethods) handleDelete(ctx context.Context, client *gateway.Client,
 		return
 	}
 
-	slog.Info("teams.delete requested",
-		"team_id", teamID,
-		"user_id", client.UserID(),
-		"role", client.Role(),
-		"tenant_id", client.TenantID())
-
 	// Non-admin callers must have team access to delete.
 	if !permissions.HasMinRole(client.Role(), permissions.RoleAdmin) {
 		callerID := store.UserIDFromContext(ctx)
-		ok, accessErr := m.teamStore.HasTeamAccess(ctx, teamID, callerID)
-		if accessErr != nil || !ok {
-			slog.Warn("teams.delete denied",
-				"team_id", teamID,
-				"user_id", callerID,
-				"role", client.Role(),
-				"tenant_id", client.TenantID(),
-				"has_access", ok,
-				"error", accessErr)
+		if ok, err := m.teamStore.HasTeamAccess(ctx, teamID, callerID); err != nil || !ok {
 			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrNotFound, i18n.T(locale, i18n.MsgNotFound, "team", params.TeamID)))
 			return
 		}
@@ -130,21 +116,9 @@ func (m *TeamsMethods) handleDelete(ctx context.Context, client *gateway.Client,
 	members, _ := m.teamStore.ListMembers(ctx, teamID)
 
 	if err := m.teamStore.DeleteTeam(ctx, teamID); err != nil {
-		slog.Error("teams.delete failed",
-			"team_id", teamID,
-			"user_id", client.UserID(),
-			"role", client.Role(),
-			"tenant_id", client.TenantID(),
-			"error", err)
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, i18n.T(locale, i18n.MsgFailedToDelete, "team", err.Error())))
 		return
 	}
-
-	slog.Info("teams.delete completed",
-		"team_id", teamID,
-		"user_id", client.UserID(),
-		"role", client.Role(),
-		"tenant_id", client.TenantID())
 
 	// Invalidate agent caches
 	if m.agentRouter != nil {
@@ -338,7 +312,7 @@ func (m *TeamsMethods) handleUpdate(ctx context.Context, client *gateway.Client,
 		EscalationActions     []string `json:"escalation_actions,omitempty"`
 		WorkspaceScope        string   `json:"workspace_scope,omitempty"`
 		WorkspaceQuotaMB      *int     `json:"workspace_quota_mb,omitempty"`
-		Notifications         *struct {
+		Notifications *struct {
 			Dispatched *bool  `json:"dispatched,omitempty"`
 			Progress   *bool  `json:"progress,omitempty"`
 			Failed     *bool  `json:"failed,omitempty"`

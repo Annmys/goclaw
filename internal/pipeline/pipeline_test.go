@@ -80,6 +80,69 @@ func TestPipeline_SetupRunsOnce(t *testing.T) {
 	}
 }
 
+func TestNewDefaultPipeline_PrunesBeforeThink(t *testing.T) {
+	t.Parallel()
+
+	history := []providers.Message{
+		{Role: "user", Content: "old 1"},
+		{Role: "assistant", Content: "old 2"},
+		{Role: "user", Content: "old 3"},
+		{Role: "assistant", Content: "old 4"},
+		{Role: "user", Content: "old 5"},
+		{Role: "assistant", Content: "old 6"},
+		{Role: "user", Content: "old 7"},
+		{Role: "assistant", Content: "old 8"},
+		{Role: "user", Content: "old 9"},
+		{Role: "assistant", Content: "old 10"},
+	}
+	compacted := []providers.Message{{Role: "assistant", Content: "compacted history"}}
+	var compactCalled bool
+	var llmMessages []providers.Message
+
+	deps := PipelineDeps{
+		Config: PipelineConfig{
+			MaxIterations: 1,
+			ContextWindow: 1000,
+			MaxTokens:     100,
+		},
+		TokenCounter: &mockTokenCounter{countPerMessage: 100},
+		LoadSessionHistory: func(_ context.Context, _ string) ([]providers.Message, string) {
+			return history, ""
+		},
+		BuildMessages: func(_ context.Context, _ *RunInput, loaded []providers.Message, _ string) ([]providers.Message, error) {
+			msgs := []providers.Message{{Role: "system", Content: "system"}}
+			msgs = append(msgs, loaded...)
+			return msgs, nil
+		},
+		PruneMessages: func(msgs []providers.Message, _ int) ([]providers.Message, PruneStats) {
+			return msgs, PruneStats{}
+		},
+		CompactMessages: func(_ context.Context, _ []providers.Message, _ string) ([]providers.Message, error) {
+			compactCalled = true
+			return compacted, nil
+		},
+		CallLLM: func(_ context.Context, _ *RunState, req providers.ChatRequest) (*providers.ChatResponse, error) {
+			llmMessages = append([]providers.Message(nil), req.Messages...)
+			return &providers.ChatResponse{Content: "ok", FinishReason: "stop"}, nil
+		},
+	}
+
+	p := NewDefaultPipeline(deps)
+	_, err := p.Run(context.Background(), buildMinimalRunState())
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if !compactCalled {
+		t.Fatal("CompactMessages was not called")
+	}
+	if len(llmMessages) != 2 {
+		t.Fatalf("CallLLM received %d messages, want system + compacted history: %#v", len(llmMessages), llmMessages)
+	}
+	if llmMessages[1].Content != "compacted history" {
+		t.Fatalf("CallLLM second message = %#v, want compacted history", llmMessages[1])
+	}
+}
+
 func TestPipeline_FinalizeRunsOnce(t *testing.T) {
 	t.Parallel()
 	finalize := newMockStageNoResult("finalize")
@@ -128,6 +191,60 @@ func TestPipeline_BreakLoopExitsIteration(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("result is nil")
+	}
+}
+
+func TestPipeline_LateInjectionAfterFinalForcesAnotherIteration(t *testing.T) {
+	t.Parallel()
+	var callCount int
+	var secondMessages []providers.Message
+	deps := PipelineDeps{
+		Config: PipelineConfig{MaxIterations: 3, MaxTokens: 1000},
+		CallLLM: func(_ context.Context, _ *RunState, req providers.ChatRequest) (*providers.ChatResponse, error) {
+			callCount++
+			if callCount == 1 {
+				return &providers.ChatResponse{Content: "answer A", FinishReason: "stop"}, nil
+			}
+			secondMessages = append([]providers.Message(nil), req.Messages...)
+			return &providers.ChatResponse{Content: "answer A and B", FinishReason: "stop"}, nil
+		},
+	}
+	injected := true
+	deps.DrainInjectCh = func() []providers.Message {
+		if injected {
+			injected = false
+			return []providers.Message{{Role: "user", Content: "request B"}}
+		}
+		return nil
+	}
+
+	p := NewPipeline(
+		nil,
+		[]Stage{NewThinkStage(&deps), NewObserveStage(&deps)},
+		nil,
+		deps,
+	)
+
+	result, err := p.Run(context.Background(), buildMinimalRunState())
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if callCount != 2 {
+		t.Fatalf("CallLLM count = %d, want 2", callCount)
+	}
+	if result.Content != "answer A and B" {
+		t.Fatalf("result content = %q, want final answer after follow-up", result.Content)
+	}
+	if len(secondMessages) < 3 {
+		t.Fatalf("second call messages = %#v, want system + assistant A + user B", secondMessages)
+	}
+	if secondMessages[len(secondMessages)-2].Role != "assistant" ||
+		secondMessages[len(secondMessages)-2].Content != "answer A" ||
+		!secondMessages[len(secondMessages)-2].Transient {
+		t.Fatalf("second call penultimate message = %#v, want assistant answer A", secondMessages[len(secondMessages)-2])
+	}
+	if secondMessages[len(secondMessages)-1].Role != "user" || secondMessages[len(secondMessages)-1].Content != "request B" {
+		t.Fatalf("second call final message = %#v, want user request B", secondMessages[len(secondMessages)-1])
 	}
 }
 

@@ -108,12 +108,7 @@ func (m *TeamsMethods) handleTaskGet(ctx context.Context, client *gateway.Client
 	// Sign download URLs at delivery time (same pattern as chat file URLs).
 	for i := range attachments {
 		dlPath := fmt.Sprintf("/v1/teams/%s/attachments/%s/download", teamID, attachments[i].ID)
-		ft := httpapi.SignScopedFileToken(dlPath, httpapi.FileSigningKey(), httpapi.FileTokenTTL, httpapi.ScopedFileTokenClaims{
-			UserID:   client.UserID(),
-			TenantID: task.TenantID.String(),
-			TeamID:   teamID.String(),
-			TaskID:   taskID.String(),
-		})
+		ft := httpapi.SignFileToken(dlPath, httpapi.FileSigningKey(), httpapi.FileTokenTTL)
 		attachments[i].DownloadURL = dlPath + "?ft=" + ft
 	}
 
@@ -462,3 +457,4 @@ type taskCreateParams struct {
 	Channel     string `json:"channel"`  // optional scope — defaults to "dashboard"
 	ChatID      string `json:"chatId"`   // optional scope — defaults to teamID
 }
+

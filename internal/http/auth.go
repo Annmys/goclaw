@@ -79,6 +79,7 @@ func extractAgentID(r *http.Request, model string) string {
 // --- Package-level API key cache for shared auth ---
 
 var pkgGatewayToken string
+var pkgNoAuthFallbackAllowed = true
 var pkgAPIKeyCache *apiKeyCache
 var pkgPairingStore store.PairingStore
 var pkgTenantCache *tenantCache
@@ -88,6 +89,12 @@ var pkgOwnerIDs []string
 // Must be called once during server startup before handling requests.
 func InitGatewayToken(token string) {
 	pkgGatewayToken = token
+}
+
+// InitGatewayNoAuthFallbackAllowed controls the legacy empty-token local/dev
+// fallback after startup config validation.
+func InitGatewayNoAuthFallbackAllowed(allowed bool) {
+	pkgNoAuthFallbackAllowed = allowed
 }
 
 // InitAPIKeyCache initializes the shared API key cache with TTL and pubsub invalidation.
@@ -212,17 +219,33 @@ func resolveAuthWithBearer(r *http.Request, bearer string) authResult {
 		}
 		return res
 	}
-	// Browser pairing → operator (via X-GoClaw-Sender-Id header)
+	// Browser pairing → role derived from tenant_users.role (via
+	// X-GoClaw-Sender-Id header). Falls back to RoleOperator when the user
+	// has no membership row, preserving pre-3.11 behaviour.
 	if senderID := r.Header.Get("X-GoClaw-Sender-Id"); senderID != "" && pkgPairingStore != nil {
 		paired, err := pkgPairingStore.IsPaired(r.Context(), senderID, "browser")
 		if err == nil && paired {
 			userID := extractUserID(r)
-			tenantID, allowed := resolveTenantHint(r.Context(), r.Header.Get("X-GoClaw-Tenant-Id"), userID)
+			hint := r.Header.Get("X-GoClaw-Tenant-Id")
+			tenantID, allowed := resolveTenantHint(r.Context(), hint, userID)
 			if !allowed {
 				return authResult{}
 			}
+			// No hint and resolution fell back to master: infer the user's
+			// working tenant when they have exactly one membership.
+			if hint == "" && tenantID == store.MasterTenantID && pkgTenantCache != nil && userID != "" {
+				if memberships, err := pkgTenantCache.store.ListUserTenants(r.Context(), userID); err == nil && len(memberships) == 1 {
+					tenantID = memberships[0].TenantID
+				}
+			}
+			role := permissions.RoleOperator
+			if pkgTenantCache != nil && userID != "" {
+				if tRole, err := pkgTenantCache.store.GetUserRole(r.Context(), tenantID, userID); err == nil && tRole != "" {
+					role = permissions.RoleFromTenantRole(tRole)
+				}
+			}
 			return authResult{
-				Role:          httpRoleForTenantUser(r.Context(), tenantID, userID),
+				Role:          role,
 				Authenticated: true,
 				TenantID:      tenantID,
 				TenantSlug:    resolveTenantSlug(r.Context(), tenantID),
@@ -234,8 +257,8 @@ func resolveAuthWithBearer(r *http.Request, bearer string) authResult {
 			slog.Warn("security.http_pairing_auth_failed", "sender_id", senderID, "ip", r.RemoteAddr)
 		}
 	}
-	// No auth configured → admin (no token = dev/single-user mode, full access)
-	if pkgGatewayToken == "" {
+	// No auth configured → admin only when startup allowed local/dev fallback.
+	if pkgGatewayToken == "" && pkgNoAuthFallbackAllowed {
 		return authResult{Role: permissions.RoleAdmin, Authenticated: true, TenantID: store.MasterTenantID}
 	}
 	return authResult{}
@@ -270,13 +293,6 @@ func resolveTenantHint(ctx context.Context, hint, userID string) (uuid.UUID, boo
 	if hint == "" || pkgTenantCache == nil {
 		return store.MasterTenantID, true
 	}
-	if isHTTPOwnerID(userID, pkgOwnerIDs) {
-		tid := resolveScopedTenant(ctx, hint)
-		if tid == uuid.Nil {
-			return store.MasterTenantID, true
-		}
-		return tid, true
-	}
 	tid := resolveScopedTenant(ctx, hint)
 	if tid == uuid.Nil {
 		return store.MasterTenantID, true
@@ -306,39 +322,6 @@ func resolveTenantHint(ctx context.Context, hint, userID string) (uuid.UUID, boo
 		return uuid.Nil, false
 	}
 	return tid, true
-}
-
-func httpRoleForTenantUser(ctx context.Context, tenantID uuid.UUID, userID string) permissions.Role {
-	if isHTTPOwnerID(userID, pkgOwnerIDs) {
-		return permissions.RoleOwner
-	}
-	if pkgTenantCache == nil || userID == "" || tenantID == uuid.Nil {
-		return permissions.RoleOperator
-	}
-	role, err := pkgTenantCache.store.GetUserRole(ctx, tenantID, userID)
-	if err != nil || role == "" {
-		slog.Warn("security.http_browser_pairing_role_fallback",
-			"user", userID,
-			"tenant_id", tenantID,
-			"error", err,
-		)
-		return permissions.RoleOperator
-	}
-	switch role {
-	case store.TenantRoleOwner, store.TenantRoleAdmin:
-		return permissions.RoleAdmin
-	case store.TenantRoleOperator, store.TenantRoleMember:
-		return permissions.RoleOperator
-	case store.TenantRoleViewer:
-		return permissions.RoleViewer
-	default:
-		slog.Warn("security.http_browser_pairing_unknown_tenant_role",
-			"user", userID,
-			"tenant_id", tenantID,
-			"role", role,
-		)
-		return permissions.RoleOperator
-	}
 }
 
 // httpMinRole returns the minimum role required for an HTTP endpoint based on HTTP method.

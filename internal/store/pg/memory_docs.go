@@ -423,7 +423,7 @@ func (s *PGMemoryStore) BackfillEmbeddings(ctx context.Context) (int, error) {
 		return 0, fmt.Errorf("no embedding provider configured")
 	}
 
-	batchSize := embeddingBackfillBatchSize(s.provider)
+	const batchSize = 50
 	total := 0
 
 	for {

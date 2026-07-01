@@ -434,6 +434,75 @@ func (p *Pool) Evict(tenantID uuid.UUID, serverName string) {
 	slog.Info("mcp.pool.evicted_on_rotation", "key", key)
 }
 
+// EvictAllUsers closes and removes all per-user pool connections.
+// Called when MCP grants or server settings change so next AcquireUser picks
+// up fresh credentials/headers. Shared (non-user) connections are unaffected.
+func (p *Pool) EvictAllUsers() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for key, entry := range p.userServers {
+		if entry.state.cancel != nil {
+			entry.state.cancel()
+		}
+		if client := entry.state.clientPtr.Load(); client != nil {
+			_ = client.Close()
+		}
+		delete(p.userServers, key)
+	}
+	// Reset per-server semaphores so slot counts don't leak.
+	p.userSlots = make(map[string]chan struct{})
+	slog.Info("mcp.pool.all_user_connections_evicted")
+}
+
+// EvictServer evicts both the shared pool entry and all per-user pool entries
+// for a given server. Call this when server settings or grants change so that
+// the next AcquireUser/Acquire picks up fresh credentials and configuration.
+func (p *Pool) EvictServer(tenantID uuid.UUID, serverName string) {
+	sharedKey := poolKey(tenantID, serverName)
+	prefix := tenantID.String() + "/" + serverName + "/user:"
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	// Evict shared connection.
+	if entry, ok := p.servers[sharedKey]; ok {
+		if entry.state.cancel != nil {
+			entry.state.cancel()
+		}
+		if client := entry.state.clientPtr.Load(); client != nil {
+			_ = client.Close()
+		}
+		delete(p.servers, sharedKey)
+		select {
+		case <-p.slot:
+		default:
+		}
+	}
+
+	// Evict all per-user connections for this server.
+	slotKey := userSlotKey(tenantID, serverName)
+	sem := p.userSlots[slotKey]
+	for key, entry := range p.userServers {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if entry.state.cancel != nil {
+			entry.state.cancel()
+		}
+		if client := entry.state.clientPtr.Load(); client != nil {
+			_ = client.Close()
+		}
+		delete(p.userServers, key)
+		if sem != nil {
+			select {
+			case <-sem:
+			default:
+			}
+		}
+	}
+	slog.Info("mcp.pool.server_evicted", "tenant", tenantID, "server", serverName)
+}
+
 // evictLoop runs periodically to close idle connections over MaxIdle count.
 func (p *Pool) evictLoop() {
 	ticker := time.NewTicker(60 * time.Second)
@@ -598,6 +667,15 @@ func (e *poolEntry) Connected() *atomic.Bool { return &e.state.connected }
 // MCPTools returns the discovered MCP tool definitions for this pool entry.
 func (e *poolEntry) MCPTools() []mcpgo.Tool { return e.tools }
 
+// RequestForceReconnect triggers an out-of-band Initialize when a BridgeTool
+// detects the server-side session was reset (see isSessionUninitializedErr).
+// Returns a closure to keep BridgeTool decoupled from *serverState.
+// Concurrent invocations dedupe via the underlying CAS guard.
+func (e *poolEntry) RequestForceReconnect() func(reason string) {
+	ss := e.state
+	return func(reason string) { ss.requestForceReconnect(reason) }
+}
+
 // poolHealthLoop is a standalone health loop for pool-managed connections.
 // After consecutive ping failures, it attempts a full reconnect by creating
 // a fresh client, mirroring the Manager.tryReconnect slow path.
@@ -610,6 +688,14 @@ func poolHealthLoop(ctx context.Context, ss *serverState) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Skip ping while a force-reconnect is in flight (see
+			// requestForceReconnect). Pinging here races the recovery
+			// goroutine and would clobber connected=true on servers that
+			// answer `ping` even in the post-reset "initializing" state.
+			if ss.reconnPending.Load() {
+				slog.Debug("mcp.pool.health_skip", "server", ss.name, "reason", "reconnect_pending")
+				continue
+			}
 			if err := ss.client.Ping(ctx); err != nil {
 				if isMethodNotFound(err) {
 					ss.connected.Store(true)

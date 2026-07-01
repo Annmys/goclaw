@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/cache"
+	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
@@ -233,7 +234,7 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 	}
 
 	// Path 2: No token configured → operator (backward compat)
-	if configToken == "" {
+	if configToken == "" && config.GatewayNoAuthFallbackAllowed(r.server.cfg.Gateway) {
 		client.role = permissions.RoleOperator
 		client.authenticated = true
 		client.userID = params.UserID
@@ -247,20 +248,7 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 
 	// Path 3a: Reconnecting with a previously-paired sender_id
 	if ps != nil && params.SenderID != "" {
-		hint := params.TenantID
-		if hint == "" {
-			hint = params.TenantHint
-		}
-		if hint == "" {
-			hint = params.TenantScope
-		}
-		tid, errCode := r.resolveTenantHint(ctx, hint, params.UserID)
-		if errCode != "" {
-			client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
-			return
-		}
-		pairingCtx := store.WithTenantID(ctx, tid)
-		paired, pairErr := ps.IsPaired(pairingCtx, params.SenderID, "browser")
+		paired, pairErr := ps.IsPaired(ctx, params.SenderID, "browser")
 		if pairErr != nil {
 			slog.Warn("security.pairing_check_failed",
 				"sender_id", params.SenderID, "error", pairErr)
@@ -271,13 +259,44 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 			return
 		}
 		if paired {
-			client.role = r.roleForTenantUser(ctx, tid, params.UserID)
 			client.authenticated = true
 			client.userID = params.UserID
 			client.pairedSenderID = params.SenderID
 			client.pairedChannel = "browser"
+			tid, errCode := r.resolveTenantHint(ctx, params.TenantHint, params.UserID)
+			if errCode != "" {
+				client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
+				return
+			}
+			// When the caller didn't pass a tenant hint and resolution fell
+			// back to master, try to infer a working tenant from the user's
+			// memberships. A single membership is unambiguous; with multiple,
+			// require an explicit hint and stay on master.
+			hint := params.TenantHint
+			if hint == "" {
+				hint = params.TenantID
+			}
+			if hint == "" && tid == store.MasterTenantID && r.tenantStore != nil && params.UserID != "" {
+				if memberships, err := r.tenantStore.ListUserTenants(ctx, params.UserID); err == nil && len(memberships) == 1 {
+					tid = memberships[0].TenantID
+				}
+			}
 			client.tenantID = tid
-			slog.Info("browser pairing authenticated", "sender_id", params.SenderID, "client", client.id, "tenant_id", client.tenantID)
+			// Derive the gateway role from the user's tenant_users.role for
+			// the resolved tenant. Falling back to RoleOperator preserves the
+			// pre-3.11 behaviour for users without a tenant membership row.
+			client.role = permissions.RoleOperator
+			if r.tenantStore != nil && params.UserID != "" {
+				if tRole, _ := r.getUserTenantRole(ctx, tid, params.UserID); tRole != "" {
+					client.role = permissions.RoleFromTenantRole(tRole)
+				}
+			}
+			slog.Info("browser pairing authenticated",
+				"sender_id", params.SenderID,
+				"client", client.id,
+				"tenant_id", client.tenantID,
+				"role", string(client.role),
+			)
 			r.sendConnectResponse(ctx, client, req.ID)
 			return
 		}
@@ -285,30 +304,7 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 
 	// Path 3b: No token, no valid pairing → initiate browser pairing (if service available)
 	if ps != nil && params.Token == "" {
-		hint := params.TenantID
-		if hint == "" {
-			hint = params.TenantHint
-		}
-		if hint == "" {
-			hint = params.TenantScope
-		}
-		tid, errCode := r.resolveTenantHint(ctx, hint, params.UserID)
-		if errCode != "" {
-			client.SendResponse(protocol.NewErrorResponse(req.ID, errCode, "tenant access revoked"))
-			return
-		}
-		meta := map[string]string{}
-		if params.UserID != "" {
-			meta["user_id"] = params.UserID
-		}
-		if hint != "" {
-			meta["tenant_slug"] = hint
-		}
-		if tid != uuid.Nil {
-			meta["tenant_id"] = tid.String()
-		}
-		pairingCtx := store.WithTenantID(ctx, tid)
-		code, err := ps.RequestPairing(pairingCtx, client.id, "browser", "", "default", meta)
+		code, err := ps.RequestPairing(ctx, client.id, "browser", "", "default", nil)
 		if err != nil {
 			slog.Warn("browser pairing request failed", "error", err, "client", client.id)
 			// Fall through to viewer role
@@ -349,6 +345,25 @@ func (r *MethodRouter) handleConnect(ctx context.Context, client *Client, req *p
 }
 
 func (r *MethodRouter) sendConnectResponse(ctx context.Context, client *Client, reqID string) {
+	// Now that the client is authenticated, promote the upgrade-request URL
+	// into the gateway-wide PublicURLSnapshot. RPC methods that advertise URLs
+	// back to external systems (e.g. bitrix.portals.create) read from this
+	// snapshot. Gating on authentication is what blocks the
+	// `Host: evil.com /health` poisoning vector — unauthenticated probes
+	// never make it this far.
+	//
+	// SetIfPublic additionally skips loopback/private hosts so a developer
+	// connecting via an SSH tunnel (Host=localhost:NNNN) doesn't pollute the
+	// snapshot for other admins on the public URL.
+	if r.server.publicURLSnapshot != nil {
+		if url := client.UpgradeURL(); url != "" {
+			if !r.server.publicURLSnapshot.SetIfPublic(url) {
+				slog.Debug("public_url snapshot skipped: non-public upgrade host",
+					"url", url, "user_id", client.UserID())
+			}
+		}
+	}
+
 	// Build scoped ctx that store.IsMasterScope expects: role + tenant.
 	// Owner role short-circuits regardless of tenant; non-owner relies on
 	// tenant_id == MasterTenantID. See store.IsMasterScope at context.go:346.
@@ -446,31 +461,6 @@ func (r *MethodRouter) getUserTenantRole(ctx context.Context, tenantID uuid.UUID
 		r.permCache.SetTenantRole(ctx, tenantID, userID, role)
 	}
 	return role, nil
-}
-
-func (r *MethodRouter) roleForTenantUser(ctx context.Context, tenantID uuid.UUID, userID string) permissions.Role {
-	if isOwnerID(userID, r.server.cfg.Gateway.OwnerIDs) {
-		return permissions.RoleOwner
-	}
-	if r.tenantStore == nil || userID == "" || tenantID == uuid.Nil {
-		return permissions.RoleOperator
-	}
-	role, err := r.getUserTenantRole(ctx, tenantID, userID)
-	if err != nil || role == "" {
-		slog.Warn("security.browser_pairing_role_fallback", "user", userID, "tenant_id", tenantID, "error", err)
-		return permissions.RoleOperator
-	}
-	switch role {
-	case store.TenantRoleOwner, store.TenantRoleAdmin:
-		return permissions.RoleAdmin
-	case store.TenantRoleOperator, store.TenantRoleMember:
-		return permissions.RoleOperator
-	case store.TenantRoleViewer:
-		return permissions.RoleViewer
-	default:
-		slog.Warn("security.browser_pairing_unknown_tenant_role", "user", userID, "tenant_id", tenantID, "role", role)
-		return permissions.RoleOperator
-	}
 }
 
 // applyTenantScope narrows an owner client's data scope to a specific tenant.

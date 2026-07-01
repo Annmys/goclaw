@@ -108,8 +108,7 @@ func (s *SQLiteAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, use
 	var role string
 	if store.IsCrossTenant(ctx) {
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = ? AND user_id IN (?, ?) ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END LIMIT 1",
-			agentID, userID, store.TenantWideUserID, userID,
+			"SELECT role FROM agent_shares WHERE agent_id = ? AND user_id = ?", agentID, userID,
 		).Scan(&role)
 	} else {
 		tid := store.TenantIDFromContext(ctx)
@@ -117,8 +116,8 @@ func (s *SQLiteAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, use
 			return false, "", nil
 		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = ? AND user_id IN (?, ?) AND tenant_id = ? ORDER BY CASE WHEN user_id = ? THEN 0 ELSE 1 END LIMIT 1",
-			agentID, userID, store.TenantWideUserID, tid, userID,
+			"SELECT role FROM agent_shares WHERE agent_id = ? AND user_id = ? AND tenant_id = ?",
+			agentID, userID, tid,
 		).Scan(&role)
 	}
 	if err != nil {
@@ -135,7 +134,7 @@ func (s *SQLiteAgentStore) ListAccessible(ctx context.Context, userID string) ([
 			 WHERE deleted_at IS NULL AND (
 			     owner_id = ?
 			     OR is_default = 1
-			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN (?, ?))
+			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = ?)
 			     OR (agent_type = 'predefined' AND id IN (
 			         SELECT agent_id FROM channel_instances ci
 			         WHERE ci.enabled = 1
@@ -145,7 +144,7 @@ func (s *SQLiteAgentStore) ListAccessible(ctx context.Context, userID string) ([
 			         )
 			     ))
 			 )
-			 ORDER BY created_at DESC`, userID, userID, store.TenantWideUserID, userID)
+			 ORDER BY created_at DESC`, userID, userID, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -162,7 +161,7 @@ func (s *SQLiteAgentStore) ListAccessible(ctx context.Context, userID string) ([
 		 WHERE deleted_at IS NULL AND tenant_id = ? AND (
 		     owner_id = ?
 		     OR is_default = 1
-		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN (?, ?) AND tenant_id = ?)
+		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = ? AND tenant_id = ?)
 		     OR (agent_type = 'predefined' AND id IN (
 		         SELECT agent_id FROM channel_instances ci
 		         WHERE ci.enabled = 1 AND ci.tenant_id = ?
@@ -172,7 +171,7 @@ func (s *SQLiteAgentStore) ListAccessible(ctx context.Context, userID string) ([
 		         )
 		     ))
 		 )
-		 ORDER BY created_at DESC`, tid, userID, userID, store.TenantWideUserID, tid, tid, userID)
+		 ORDER BY created_at DESC`, tid, userID, userID, tid, tid, userID)
 	if err != nil {
 		return nil, err
 	}

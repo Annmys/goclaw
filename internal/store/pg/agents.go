@@ -3,6 +3,7 @@ package pg
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -93,8 +94,14 @@ const agentSelectCols = `id, agent_key, display_name, frontmatter, owner_id, pro
 		 emoji, agent_description, thinking_level, max_tokens,
 		 self_evolve, skill_evolve, skill_nudge_interval,
 		 reasoning_config, workspace_sharing, chatgpt_oauth_routing,
-		 shell_deny_groups, kg_dedup_config,
+		 model_fallback, shell_deny_groups, kg_dedup_config,
 		 agent_type, is_default, status, budget_monthly_cents, created_at, updated_at, tenant_id`
+
+// sqlExecer is satisfied by both *sql.DB and *sql.Tx, allowing helper
+// functions to be called within or outside a transaction.
+type sqlExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
 
 func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error {
 	if agent.ID == uuid.Nil {
@@ -107,7 +114,14 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 	if tenantID == uuid.Nil {
 		tenantID = store.MasterTenantID
 	}
-	_, err := s.db.ExecContext(ctx,
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	_, err = tx.ExecContext(ctx,
 		`INSERT INTO agents (id, agent_key, display_name, frontmatter, owner_id, provider, model,
 		 context_window, max_tool_iterations, workspace, restrict_to_workspace,
 		 tools_config, sandbox_config, subagents_config, memory_config,
@@ -115,10 +129,10 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 		 emoji, agent_description, thinking_level, max_tokens,
 		 self_evolve, skill_evolve, skill_nudge_interval,
 		 reasoning_config, workspace_sharing, chatgpt_oauth_routing,
-		 shell_deny_groups, kg_dedup_config,
+		 model_fallback, shell_deny_groups, kg_dedup_config,
 		 agent_type, is_default, status, budget_monthly_cents, created_at, updated_at, tenant_id)
 		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
-		         $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37)`,
+		         $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)`,
 		agent.ID, agent.AgentKey, agent.DisplayName, sql.NullString{String: agent.Frontmatter, Valid: agent.Frontmatter != ""}, agent.OwnerID, agent.Provider, agent.Model,
 		agent.ContextWindow, agent.MaxToolIterations, agent.Workspace, agent.RestrictToWorkspace,
 		jsonOrEmpty(agent.ToolsConfig), jsonOrNull(agent.SandboxConfig), jsonOrNull(agent.SubagentsConfig), jsonOrNull(agent.MemoryConfig),
@@ -126,14 +140,22 @@ func (s *PGAgentStore) Create(ctx context.Context, agent *store.AgentData) error
 		agent.Emoji, agent.AgentDescription, agent.ThinkingLevel, agent.MaxTokens,
 		agent.SelfEvolve, agent.SkillEvolve, agent.SkillNudgeInterval,
 		jsonOrEmpty(agent.ReasoningConfig), jsonOrEmpty(agent.WorkspaceSharing), jsonOrEmpty(agent.ChatGPTOAuthRouting),
-		jsonOrEmpty(agent.ShellDenyGroups), jsonOrEmpty(agent.KGDedupConfig),
+		jsonOrEmpty(agent.ModelFallback), jsonOrEmpty(agent.ShellDenyGroups), jsonOrEmpty(agent.KGDedupConfig),
 		agent.AgentType, agent.IsDefault, agent.Status, agent.BudgetMonthlyCents, now, now, tenantID,
 	)
 	if err != nil {
-		return err
+		return fmt.Errorf("insert agent: %w", err)
+	}
+	if agent.BudgetMonthlyCents != nil {
+		if err := syncAgentBudgetUsageCap(ctx, tx, tenantID, agent.ID, agent.BudgetMonthlyCents); err != nil {
+			return fmt.Errorf("sync budget usage cap: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit agent create: %w", err)
 	}
 
-	// Generate embedding for new agent with frontmatter
+	// Generate embedding for new agent with frontmatter (best-effort, outside tx)
 	if agent.Frontmatter != "" && s.embProvider != nil {
 		go s.generateAgentEmbedding(context.Background(), agent.ID, agent.DisplayName, agent.Frontmatter)
 	}
@@ -188,6 +210,22 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 	if len(updates) == 0 {
 		return nil
 	}
+	var err error
+	var budgetCents *int
+	rawBudget, syncBudget := updates["budget_monthly_cents"]
+	if syncBudget {
+		budgetCents, err = budgetCentsFromUpdate(rawBudget)
+		if err != nil {
+			return err
+		}
+	}
+	var budgetTenantID uuid.UUID
+	if syncBudget {
+		budgetTenantID, err = s.agentTenantID(ctx, id)
+		if err != nil {
+			return err
+		}
+	}
 
 	// Coerce NOT NULL columns: null → default to prevent constraint violations.
 	// Promoted TEXT columns (migration 000037): null → empty string.
@@ -207,8 +245,8 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 		}
 	}
 	// NOT NULL JSONB columns: null → empty object.
-	for _, col := range []string{"other_config", "tools_config", "chatgpt_oauth_routing", "reasoning_config", "workspace_sharing", "shell_deny_groups", "kg_dedup_config"} {
-		if v, ok := updates[col]; ok && v == nil {
+	for _, col := range []string{"other_config", "tools_config", "chatgpt_oauth_routing", "model_fallback", "reasoning_config", "workspace_sharing", "shell_deny_groups", "kg_dedup_config"} {
+		if v, ok := updates[col]; ok && isEmptyOrNullJSONUpdate(v) {
 			updates[col] = []byte("{}")
 		}
 	}
@@ -247,6 +285,11 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 			return err
 		}
 	}
+	if syncBudget {
+		if err := syncAgentBudgetUsageCap(ctx, s.db, budgetTenantID, id, budgetCents); err != nil {
+			return err
+		}
+	}
 
 	// Regenerate embedding when frontmatter changes
 	if _, hasFrontmatter := updates["frontmatter"]; hasFrontmatter && s.embProvider != nil {
@@ -259,6 +302,93 @@ func (s *PGAgentStore) Update(ctx context.Context, id uuid.UUID, updates map[str
 		}()
 	}
 	return nil
+}
+
+func (s *PGAgentStore) agentTenantID(ctx context.Context, id uuid.UUID) (uuid.UUID, error) {
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid != uuid.Nil {
+			return tid, nil
+		}
+	}
+	var tenantID uuid.UUID
+	if err := s.db.QueryRowContext(ctx, "SELECT tenant_id FROM agents WHERE id = $1 AND deleted_at IS NULL", id).Scan(&tenantID); err != nil {
+		return uuid.Nil, fmt.Errorf("agent not found: %s", id)
+	}
+	return tenantID, nil
+}
+
+func budgetCentsFromUpdate(v any) (*int, error) {
+	if v == nil {
+		return nil, nil
+	}
+	var cents int
+	switch n := v.(type) {
+	case int:
+		cents = n
+	case int32:
+		cents = int(n)
+	case int64:
+		cents = int(n)
+	case float64:
+		if n != float64(int(n)) {
+			return nil, fmt.Errorf("budget_monthly_cents must be an integer")
+		}
+		cents = int(n)
+	default:
+		return nil, fmt.Errorf("budget_monthly_cents must be an integer")
+	}
+	if cents < 0 {
+		return nil, fmt.Errorf("budget_monthly_cents must be non-negative")
+	}
+	return &cents, nil
+}
+
+// syncAgentBudgetUsageCap upserts or deletes the agent's monthly budget cap
+// in usage_cap_policies. It accepts a sqlExecer so it can be called inside a
+// transaction (during Create) or directly against the pool (during Update).
+func syncAgentBudgetUsageCap(ctx context.Context, db sqlExecer, tenantID, agentID uuid.UUID, budgetCents *int) error {
+	if budgetCents == nil || *budgetCents <= 0 {
+		_, err := db.ExecContext(ctx,
+			`DELETE FROM usage_cap_policies
+			 WHERE tenant_id=$1 AND agent_id=$2 AND source=$3`,
+			tenantID, agentID, store.UsageCapSourceAgentBudget)
+		return err
+	}
+	costMicros := int64(*budgetCents) * 10000
+	_, err := db.ExecContext(ctx, `
+INSERT INTO usage_cap_policies (
+	tenant_id, agent_id, window_key, max_cost_micros, enabled, priority, source
+) VALUES ($1,$2,'month',$3,true,90,$4)
+ON CONFLICT (tenant_id, agent_id) WHERE source = 'agent_budget_monthly_cents'
+DO UPDATE SET
+	window_key='month',
+	provider_id=NULL,
+	provider_type=NULL,
+	model_id=NULL,
+	max_tokens=NULL,
+	max_cost_micros=EXCLUDED.max_cost_micros,
+	enabled=true,
+	priority=EXCLUDED.priority,
+	updated_at=now()`,
+		tenantID, agentID, costMicros, store.UsageCapSourceAgentBudget)
+	return err
+}
+
+func isEmptyOrNullJSONUpdate(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch data := v.(type) {
+	case json.RawMessage:
+		return len(data) == 0 || strings.TrimSpace(string(data)) == "null"
+	case []byte:
+		return len(data) == 0 || strings.TrimSpace(string(data)) == "null"
+	case string:
+		return strings.TrimSpace(data) == "" || strings.TrimSpace(data) == "null"
+	default:
+		return false
+	}
 }
 
 func (s *PGAgentStore) Delete(ctx context.Context, id uuid.UUID) error {
@@ -409,8 +539,7 @@ func (s *PGAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, userID 
 	var role string
 	if store.IsCrossTenant(ctx) {
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id IN ($2, $3) ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END LIMIT 1",
-			agentID, userID, store.TenantWideUserID,
+			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id = $2", agentID, userID,
 		).Scan(&role)
 	} else {
 		tid := store.TenantIDFromContext(ctx)
@@ -418,8 +547,7 @@ func (s *PGAgentStore) CanAccess(ctx context.Context, agentID uuid.UUID, userID 
 			return false, "", nil
 		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id IN ($2, $3) AND tenant_id = $4 ORDER BY CASE WHEN user_id = $2 THEN 0 ELSE 1 END LIMIT 1",
-			agentID, userID, store.TenantWideUserID, tid,
+			"SELECT role FROM agent_shares WHERE agent_id = $1 AND user_id = $2 AND tenant_id = $3", agentID, userID, tid,
 		).Scan(&role)
 	}
 	if err != nil {
@@ -436,7 +564,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 			 WHERE deleted_at IS NULL AND (
 			     owner_id = $1
 			     OR is_default = true
-			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN ($1, $2))
+			     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = $1)
 			     OR (
 			         agent_type = 'predefined'
 			         AND id IN (
@@ -449,7 +577,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 			         )
 			     )
 			 )
-			 ORDER BY created_at DESC`, userID, store.TenantWideUserID)
+			 ORDER BY created_at DESC`, userID)
 		if err != nil {
 			return nil, err
 		}
@@ -466,7 +594,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 		 WHERE deleted_at IS NULL AND tenant_id = $2 AND (
 		     owner_id = $1
 		     OR is_default = true
-		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id IN ($1, $3) AND tenant_id = $2)
+		     OR id IN (SELECT agent_id FROM agent_shares WHERE user_id = $1 AND tenant_id = $2)
 		     OR (
 		         agent_type = 'predefined'
 		         AND id IN (
@@ -479,7 +607,7 @@ func (s *PGAgentStore) ListAccessible(ctx context.Context, userID string) ([]sto
 		         )
 		     )
 		 )
-		 ORDER BY created_at DESC`, userID, tid, store.TenantWideUserID)
+		 ORDER BY created_at DESC`, userID, tid)
 	if err != nil {
 		return nil, err
 	}
@@ -498,13 +626,13 @@ func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	var frontmatter sql.NullString
 	// pgx: scan nullable JSONB into *[]byte (NOT *json.RawMessage — pgx can't scan NULL into defined types)
 	var toolsCfg, sandboxCfg, subagentsCfg, memoryCfg, compactionCfg, pruningCfg, otherCfg *[]byte
-	var reasoningCfg, wsCfg, oauthCfg, shellCfg, kgCfg *[]byte
+	var reasoningCfg, wsCfg, oauthCfg, fallbackCfg, shellCfg, kgCfg *[]byte
 	err := row.Scan(&d.ID, &d.AgentKey, &d.DisplayName, &frontmatter, &d.OwnerID, &d.Provider, &d.Model,
 		&d.ContextWindow, &d.MaxToolIterations, &d.Workspace, &d.RestrictToWorkspace,
 		&toolsCfg, &sandboxCfg, &subagentsCfg, &memoryCfg, &compactionCfg, &pruningCfg, &otherCfg,
 		&d.Emoji, &d.AgentDescription, &d.ThinkingLevel, &d.MaxTokens,
 		&d.SelfEvolve, &d.SkillEvolve, &d.SkillNudgeInterval,
-		&reasoningCfg, &wsCfg, &oauthCfg, &shellCfg, &kgCfg,
+		&reasoningCfg, &wsCfg, &oauthCfg, &fallbackCfg, &shellCfg, &kgCfg,
 		&d.AgentType, &d.IsDefault, &d.Status, &d.BudgetMonthlyCents, &d.CreatedAt, &d.UpdatedAt, &d.TenantID)
 	if err != nil {
 		return nil, err
@@ -542,6 +670,9 @@ func scanAgentRow(row agentRowScanner) (*store.AgentData, error) {
 	}
 	if oauthCfg != nil {
 		d.ChatGPTOAuthRouting = *oauthCfg
+	}
+	if fallbackCfg != nil {
+		d.ModelFallback = *fallbackCfg
 	}
 	if shellCfg != nil {
 		d.ShellDenyGroups = *shellCfg
@@ -614,19 +745,8 @@ func joinStrings(s []string, sep string) string {
 // ResetStuckSummoning flips rows with status='summoning' to 'summon_failed'.
 // Called at startup to recover from crashes where summon goroutines died mid-flight.
 func (s *PGAgentStore) ResetStuckSummoning(ctx context.Context) (int64, error) {
-	query := `UPDATE agents
-		SET status = $1, updated_at = NOW()
-		WHERE status = $2 AND deleted_at IS NULL`
-	args := []any{store.AgentStatusSummonFailed, store.AgentStatusSummoning}
-	if !store.IsCrossTenant(ctx) {
-		tid := store.TenantIDFromContext(ctx)
-		if tid == uuid.Nil {
-			return 0, nil
-		}
-		query += ` AND tenant_id = $3`
-		args = append(args, tid)
-	}
-	res, err := s.db.ExecContext(ctx, query, args...)
+	const q = `UPDATE agents SET status = $1 WHERE status = $2`
+	res, err := s.db.ExecContext(ctx, q, store.AgentStatusSummonFailed, store.AgentStatusSummoning)
 	if err != nil {
 		return 0, err
 	}

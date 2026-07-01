@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/google/uuid"
 
@@ -68,7 +67,7 @@ func (t *SkillSearchTool) ensureIndex(ctx context.Context) {
 func (t *SkillSearchTool) Name() string { return "skill_search" }
 
 func (t *SkillSearchTool) Description() string {
-	return "Search for available skills by Chinese display name, English slug, or domain keywords. Returns matching skills with slug, display name, description, and SKILL.md location for reading with read_file."
+	return "Search for available skills by keyword. Returns matching skills with name, description, and SKILL.md location for reading with read_file."
 }
 
 func (t *SkillSearchTool) Parameters() map[string]any {
@@ -77,7 +76,7 @@ func (t *SkillSearchTool) Parameters() map[string]any {
 		"properties": map[string]any{
 			"query": map[string]any{
 				"type":        "string",
-				"description": "Search keywords to find relevant skills. Chinese display names, English slugs, and domain keywords are supported.",
+				"description": "Search keywords to find relevant skills (use English keywords)",
 			},
 			"max_results": map[string]any{
 				"type":        "integer",
@@ -108,11 +107,11 @@ func (t *SkillSearchTool) Execute(ctx context.Context, args map[string]any) *Res
 	// If embedding searcher is available, run hybrid search
 	var results []skills.SkillSearchResult
 	if t.embSearcher != nil && t.embProvider != nil {
-		results = t.hybridSearch(ctx, query, bm25Results, maxResults*2)
+		results = t.hybridSearch(ctx, query, bm25Results, maxResults)
 	} else {
 		// BM25-only: truncate to maxResults
-		if len(bm25Results) > maxResults*2 {
-			bm25Results = bm25Results[:maxResults*2]
+		if len(bm25Results) > maxResults {
+			bm25Results = bm25Results[:maxResults]
 		}
 		results = bm25Results
 	}
@@ -120,10 +119,6 @@ func (t *SkillSearchTool) Execute(ctx context.Context, args map[string]any) *Res
 	// Per-agent filtering: if SkillAccessStore is set, restrict results
 	// to skills accessible to the calling agent.
 	results = t.filterByAccess(ctx, results)
-	results = collapseSameFamilyResults(results)
-	if len(results) > maxResults {
-		results = results[:maxResults]
-	}
 
 	slog.Info("skill_search executed", "query", query, "results", len(results),
 		"hybrid", t.embSearcher != nil)
@@ -139,57 +134,11 @@ func (t *SkillSearchTool) Execute(ctx context.Context, args map[string]any) *Res
 
 	// Include explicit next-step instruction in the result so the model follows through.
 	instruction := fmt.Sprintf(
-		"\n\nACTION REQUIRED: Call use_skill with name \"%s\" (display name: \"%s\"). If another skill has the same family, do not create or use a parallel skill; patch the canonical skill instead. Then read_file with path \"%s\" to read the skill instructions, then follow them.",
-		results[0].Slug, results[0].Name, results[0].Location,
+		"\n\nACTION REQUIRED: Call use_skill with name \"%s\", then read_file with path \"%s\" to read the skill instructions, then follow them.",
+		results[0].Name, results[0].Location,
 	)
 
 	return NewResult(string(data) + instruction)
-}
-
-func collapseSameFamilyResults(results []skills.SkillSearchResult) []skills.SkillSearchResult {
-	if len(results) == 0 {
-		return results
-	}
-	out := make([]skills.SkillSearchResult, 0, len(results))
-	best := make(map[string]int)
-	for _, r := range results {
-		key := familyKey(r)
-		if key == "" {
-			key = r.Slug
-		}
-		if idx, ok := best[key]; ok {
-			if isPreferredSkill(r, out[idx]) {
-				out[idx] = r
-			}
-			continue
-		}
-		best[key] = len(out)
-		out = append(out, r)
-	}
-	return out
-}
-
-func familyKey(r skills.SkillSearchResult) string {
-	if strings.TrimSpace(r.Family) != "" {
-		return skills.Slugify(r.Family)
-	}
-	if strings.TrimSpace(r.DisplayName) != "" {
-		return skills.Slugify(r.DisplayName)
-	}
-	if strings.TrimSpace(r.Slug) != "" {
-		return skills.Slugify(r.Slug)
-	}
-	return ""
-}
-
-func isPreferredSkill(a, b skills.SkillSearchResult) bool {
-	if a.Canonical != b.Canonical {
-		return a.Canonical
-	}
-	if a.Score != b.Score {
-		return a.Score > b.Score
-	}
-	return len(a.Description) < len(b.Description)
 }
 
 // filterByAccess filters search results to only include skills accessible to the calling agent.
@@ -277,30 +226,25 @@ func (t *SkillSearchTool) hybridSearch(ctx context.Context, query string, bm25Re
 		if maxBM25 > 0 {
 			normalizedScore = r.Score / maxBM25
 		}
-		key := resultKey(r)
-		if existing, ok := seen[key]; ok {
+		if existing, ok := seen[r.Name]; ok {
 			existing.score += normalizedScore * textW
 		} else {
-			seen[key] = &merged{result: r, score: normalizedScore * textW}
+			seen[r.Name] = &merged{result: r, score: normalizedScore * textW}
 		}
 	}
 
 	for _, r := range vecResults {
-		key := resultKeyFromStore(r)
-		if existing, ok := seen[key]; ok {
+		if existing, ok := seen[r.Name]; ok {
 			existing.score += r.Score * vecW
 		} else {
-			seen[key] = &merged{
+			seen[r.Name] = &merged{
 				result: skills.SkillSearchResult{
 					Name:        r.Name,
 					Slug:        r.Slug,
-					DisplayName: r.DisplayName,
 					Description: r.Description,
 					Location:    r.Path,
 					Source:      "managed",
 					Score:       0,
-					Family:      r.Family,
-					Canonical:   r.Canonical,
 				},
 				score: r.Score * vecW,
 			}
@@ -327,30 +271,4 @@ func (t *SkillSearchTool) hybridSearch(ctx context.Context, query string, bm25Re
 		results = results[:maxResults]
 	}
 	return results
-}
-
-func resultKey(r skills.SkillSearchResult) string {
-	if strings.TrimSpace(r.Family) != "" {
-		return skills.Slugify(r.Family)
-	}
-	if strings.TrimSpace(r.DisplayName) != "" {
-		return skills.Slugify(r.DisplayName)
-	}
-	if strings.TrimSpace(r.Slug) != "" {
-		return skills.Slugify(r.Slug)
-	}
-	return skills.Slugify(r.Name)
-}
-
-func resultKeyFromStore(r store.SkillSearchResult) string {
-	if strings.TrimSpace(r.Family) != "" {
-		return skills.Slugify(r.Family)
-	}
-	if strings.TrimSpace(r.DisplayName) != "" {
-		return skills.Slugify(r.DisplayName)
-	}
-	if strings.TrimSpace(r.Slug) != "" {
-		return skills.Slugify(r.Slug)
-	}
-	return skills.Slugify(r.Name)
 }

@@ -116,6 +116,10 @@ type ToolInfo struct {
 // DiscoverTools connects temporarily to an MCP server, lists its tools, and disconnects.
 // Used for on-demand discovery when no persistent Manager connection exists (DB-backed servers).
 func DiscoverTools(ctx context.Context, transportType, command string, args []string, env map[string]string, url string, headers map[string]string) ([]ToolInfo, error) {
+	if err := ValidateServerConfig(transportType, command, args, url); err != nil {
+		return nil, fmt.Errorf("invalid MCP server config: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -148,61 +152,4 @@ func DiscoverTools(ctx context.Context, transportType, command string, args []st
 		result = append(result, ToolInfo{Name: t.Name, Description: t.Description})
 	}
 	return result, nil
-}
-
-// filterTools removes tools from the registry that don't match the allow/deny lists.
-func (m *Manager) filterTools(serverName string, allow, deny []string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	// Get the tool names list (pool-backed or standalone)
-	var toolNames []string
-	_, isPool := m.poolServers[serverName]
-	if isPool {
-		toolNames = m.poolToolNames[serverName]
-	} else if ss, ok := m.servers[serverName]; ok {
-		toolNames = ss.toolNames
-	} else {
-		return
-	}
-
-	allowSet := toSet(allow)
-	denySet := toSet(deny)
-
-	var kept []string
-	for _, toolName := range toolNames {
-		bt, ok := m.registry.Get(toolName)
-		if !ok {
-			continue
-		}
-		bridge, ok := bt.(*BridgeTool)
-		if !ok {
-			kept = append(kept, toolName)
-			continue
-		}
-		origName := bridge.OriginalName()
-
-		// Deny takes priority
-		if _, denied := denySet[origName]; denied {
-			m.registry.Unregister(toolName)
-			continue
-		}
-
-		// If allow list is set, only keep tools in the allow list
-		if len(allowSet) > 0 {
-			if _, allowed := allowSet[origName]; !allowed {
-				m.registry.Unregister(toolName)
-				continue
-			}
-		}
-
-		kept = append(kept, toolName)
-	}
-
-	// Update the correct tool names list
-	if isPool {
-		m.poolToolNames[serverName] = kept
-	} else {
-		m.servers[serverName].toolNames = kept
-	}
 }

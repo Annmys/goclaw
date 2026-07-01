@@ -34,6 +34,10 @@ const (
 	ctxRunKind     toolContextKey = "tool_run_kind"    // "notification", "announce", "delegation"
 )
 
+// ctxRateLimitOverride carries a per-agent tool rate limit (calls/hour) that
+// overrides the global tools.rate_limit_per_hour. 0 means "use the global".
+const ctxRateLimitOverride toolContextKey = "tool_rate_limit_override"
+
 // Well-known channel names used for routing and access control.
 const (
 	ChannelSystem    = "system"
@@ -157,6 +161,18 @@ func WithToolSessionKey(ctx context.Context, key string) context.Context {
 
 func ToolSessionKeyFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(ctxSessionKey).(string)
+	return v
+}
+
+// WithToolRateLimitOverride sets a per-agent tool rate limit (calls/hour) that
+// overrides the global tools.rate_limit_per_hour for tools executed under ctx.
+func WithToolRateLimitOverride(ctx context.Context, perHour int) context.Context {
+	return context.WithValue(ctx, ctxRateLimitOverride, perHour)
+}
+
+// ToolRateLimitOverrideFromCtx returns the per-agent override, or 0 if unset.
+func ToolRateLimitOverrideFromCtx(ctx context.Context) int {
+	v, _ := ctx.Value(ctxRateLimitOverride).(int)
 	return v
 }
 
@@ -354,6 +370,24 @@ func MemoryConfigFromCtx(ctx context.Context) *config.MemoryConfig {
 	}
 	if rc := store.RunContextFromCtx(ctx); rc != nil {
 		return rc.MemoryCfg
+	}
+	return nil
+}
+
+// --- Per-agent wait tool config override ---
+
+const ctxWaitToolCfg toolContextKey = "tool_wait_config"
+
+func WithWaitToolConfig(ctx context.Context, cfg *config.WaitToolPolicy) context.Context {
+	return context.WithValue(ctx, ctxWaitToolCfg, cfg)
+}
+
+func WaitToolConfigFromCtx(ctx context.Context) *config.WaitToolPolicy {
+	if v, _ := ctx.Value(ctxWaitToolCfg).(*config.WaitToolPolicy); v != nil {
+		return v
+	}
+	if rc := store.RunContextFromCtx(ctx); rc != nil {
+		return rc.WaitToolCfg
 	}
 	return nil
 }
@@ -618,6 +652,22 @@ func InjectTeamDispatch(ctx context.Context, postTurn PostTurnProcessor) (contex
 		}
 	}
 	return ctx, drain
+}
+
+// --- Workstation ID (for tool execution context) ---
+
+const ctxWorkstationID toolContextKey = "tool_workstation_id"
+
+// WithWorkstationID injects the active workstation UUID string into context.
+// Used by workstation execution tools (Phase 5) to identify the target backend.
+func WithWorkstationID(ctx context.Context, id string) context.Context {
+	return context.WithValue(ctx, ctxWorkstationID, id)
+}
+
+// WorkstationIDFromCtx returns the workstation ID from context, or empty string.
+func WorkstationIDFromCtx(ctx context.Context) string {
+	v, _ := ctx.Value(ctxWorkstationID).(string)
+	return v
 }
 
 // --- Delivered media tracker (write_file → message self-send dedup) ---

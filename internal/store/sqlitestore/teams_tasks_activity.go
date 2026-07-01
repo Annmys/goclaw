@@ -356,10 +356,7 @@ func (s *SQLiteTeamStore) RenewTaskLock(ctx context.Context, taskID, teamID uuid
 // SQLite uses json_extract instead of PG's ->> operator.
 const v2ActiveTeamJoin = `JOIN agent_teams tm ON tm.id = t.team_id
 		 AND tm.status = 'active'
-		 AND (
-		   COALESCE(CAST(json_extract(tm.settings, '$.version') AS INTEGER), 0) >= 2
-		   OR json_extract(tm.settings, '$.scope') = 'human-resources-center'
-		 )`
+		 AND COALESCE(CAST(json_extract(tm.settings, '$.version') AS INTEGER), 0) >= 2`
 
 func (s *SQLiteTeamStore) RecoverAllStaleTasks(ctx context.Context) ([]store.RecoveredTaskInfo, error) {
 	now := time.Now()
@@ -371,10 +368,7 @@ func (s *SQLiteTeamStore) RecoverAllStaleTasks(ctx context.Context) ([]store.Rec
 		 WHERE status = ? AND lock_expires_at IS NOT NULL AND lock_expires_at < ?
 		   AND team_id IN (
 		     SELECT id FROM agent_teams WHERE status = 'active'
-		       AND (
-		         COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
-		         OR json_extract(settings, '$.scope') = 'human-resources-center'
-		       )
+		       AND COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
 		   )`,
 		store.TeamTaskStatusPending, now, store.TeamTaskStatusInProgress, now,
 	)
@@ -393,10 +387,7 @@ func (s *SQLiteTeamStore) ForceRecoverAllTasks(ctx context.Context) ([]store.Rec
 		 WHERE status = ?
 		   AND team_id IN (
 		     SELECT id FROM agent_teams WHERE status = 'active'
-		       AND (
-		         COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
-		         OR json_extract(settings, '$.scope') = 'human-resources-center'
-		       )
+		       AND COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
 		   )`,
 		store.TeamTaskStatusPending, now, store.TeamTaskStatusInProgress,
 	)
@@ -435,10 +426,7 @@ func (s *SQLiteTeamStore) MarkAllStaleTasks(ctx context.Context, olderThan time.
 		 WHERE status = ? AND updated_at < ?
 		   AND team_id IN (
 		     SELECT id FROM agent_teams WHERE status = 'active'
-		       AND (
-		         COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
-		         OR json_extract(settings, '$.scope') = 'human-resources-center'
-		       )
+		       AND COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
 		   )`,
 		store.TeamTaskStatusStale, now, store.TeamTaskStatusPending, olderThan,
 	)
@@ -455,10 +443,7 @@ func (s *SQLiteTeamStore) MarkInReviewStaleTasks(ctx context.Context, olderThan 
 		 WHERE status = ? AND updated_at < ?
 		   AND team_id IN (
 		     SELECT id FROM agent_teams WHERE status = 'active'
-		       AND (
-		         COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
-		         OR json_extract(settings, '$.scope') = 'human-resources-center'
-		       )
+		       AND COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
 		   )`,
 		store.TeamTaskStatusStale, now, store.TeamTaskStatusInReview, olderThan,
 	)
@@ -477,10 +462,7 @@ func (s *SQLiteTeamStore) FixOrphanedBlockedTasks(ctx context.Context) ([]store.
 		        COALESCE(t.channel, ''), COALESCE(t.chat_id, '')
 		 FROM team_tasks t
 		 JOIN agent_teams tm ON tm.id = t.team_id AND tm.status = 'active'
-		   AND (
-		     COALESCE(CAST(json_extract(tm.settings, '$.version') AS INTEGER), 0) >= 2
-		     OR json_extract(tm.settings, '$.scope') = 'human-resources-center'
-		   )
+		   AND COALESCE(CAST(json_extract(tm.settings, '$.version') AS INTEGER), 0) >= 2
 		 WHERE t.status = 'blocked'
 		   AND t.blocked_by IS NOT NULL AND t.blocked_by != '[]'
 		   AND NOT EXISTS (
@@ -519,10 +501,7 @@ func (s *SQLiteTeamStore) queryRecoveredTasks(ctx context.Context, status string
 		   AND t.updated_at >= ?
 		   AND t.team_id IN (
 		     SELECT id FROM agent_teams WHERE status = 'active'
-		       AND (
-		         COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
-		         OR json_extract(settings, '$.scope') = 'human-resources-center'
-		       )
+		       AND COALESCE(CAST(json_extract(settings, '$.version') AS INTEGER), 0) >= 2
 		   )
 		 ORDER BY t.updated_at DESC
 		 LIMIT 200`,

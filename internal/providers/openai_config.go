@@ -14,13 +14,16 @@ type OpenAIProvider struct {
 	chatPath     string // defaults to "/chat/completions"
 	authPrefix   string // auth header prefix, defaults to "Bearer " if empty
 	defaultModel string
-	providerType string // DB provider_type (e.g. "gemini_native", "openai", "minimax_native")
-	siteURL      string // optional site URL for provider identification (e.g. OpenRouter HTTP-Referer)
-	siteTitle    string // optional site title for provider identification (e.g. OpenRouter X-Title)
+	providerType string            // DB provider_type (e.g. "gemini_native", "openai", "minimax_native")
+	siteURL      string            // optional site URL for provider identification (e.g. OpenRouter HTTP-Referer)
+	siteTitle    string            // optional site title for provider identification (e.g. OpenRouter X-Title)
+	extraHeaders map[string]string // static headers set on every outgoing request (e.g. fixed User-Agent for kimi_coding)
 	client       *http.Client
 	retryConfig  RetryConfig
 	middlewares  RequestMiddleware // composed middleware chain (nil = no-op)
-	registry     ModelRegistry    // model resolution registry (nil = skip)
+	registry     ModelRegistry     // model resolution registry (nil = skip)
+	noAuthHeader  bool              // when true, doRequest() skips setting Authorization (e.g. Vertex OAuth transport injects its own)
+	ollamaNumCtx  *int              // optional Ollama options.num_ctx override (nil = use queried or default value)
 }
 
 func NewOpenAIProvider(name, apiKey, apiBase, defaultModel string) *OpenAIProvider {
@@ -41,7 +44,7 @@ func NewOpenAIProvider(name, apiKey, apiBase, defaultModel string) *OpenAIProvid
 	}
 }
 
-// WithChatPath returns a copy with a custom chat completions path (e.g. "/text/chatcompletion_v2" for MiniMax native API).
+// WithChatPath returns a copy with a custom chat completions path.
 func (p *OpenAIProvider) WithChatPath(path string) *OpenAIProvider {
 	p.chatPath = path
 	return p
@@ -62,6 +65,36 @@ func (p *OpenAIProvider) WithSiteInfo(url, title string) *OpenAIProvider {
 	return p
 }
 
+// WithExtraHeaders sets static headers attached to every outgoing request.
+// Used by providers that require a fixed identity header (e.g. kimi_coding's
+// User-Agent: claude-code/0.1.0). Repeat calls merge — keys already present are
+// overwritten. Passing an empty map is a no-op.
+func (p *OpenAIProvider) WithExtraHeaders(h map[string]string) *OpenAIProvider {
+	if len(h) == 0 {
+		return p
+	}
+	if p.extraHeaders == nil {
+		p.extraHeaders = make(map[string]string, len(h))
+	}
+	for k, v := range h {
+		p.extraHeaders[k] = v
+	}
+	return p
+}
+
+// ExtraHeaders returns a copy of the static headers configured for this provider.
+// Used by adapter_openai.go to mirror the runtime request headers.
+func (p *OpenAIProvider) ExtraHeaders() map[string]string {
+	if len(p.extraHeaders) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(p.extraHeaders))
+	for k, v := range p.extraHeaders {
+		out[k] = v
+	}
+	return out
+}
+
 // WithRegistry sets the model registry for forward-compat resolution.
 func (p *OpenAIProvider) WithRegistry(r ModelRegistry) *OpenAIProvider {
 	p.registry = r
@@ -78,6 +111,36 @@ func (p *OpenAIProvider) WithMiddlewares(mws ...RequestMiddleware) *OpenAIProvid
 func (p *OpenAIProvider) WithProviderType(pt string) *OpenAIProvider {
 	p.providerType = pt
 	return p
+}
+
+// WithHTTPClient overrides the default HTTP client. Used by Vertex to inject an oauth2.Transport.
+func (p *OpenAIProvider) WithHTTPClient(c *http.Client) *OpenAIProvider {
+	if c != nil {
+		p.client = c
+	}
+	return p
+}
+
+// WithoutAuthHeader disables the Authorization header in doRequest(). Used by Vertex where
+// the oauth2.Transport injects Authorization itself.
+func (p *OpenAIProvider) WithoutAuthHeader() *OpenAIProvider {
+	p.noAuthHeader = true
+	return p
+}
+
+// WithOllamaNumCtx sets a static options.num_ctx value injected on every Ollama request.
+// When set, this takes precedence over the value queried from /api/show and the built-in
+// default of 131072. A non-positive value is ignored.
+func (p *OpenAIProvider) WithOllamaNumCtx(n int) *OpenAIProvider {
+	if n > 0 {
+		p.ollamaNumCtx = &n
+	}
+	return p
+}
+
+// OllamaNumCtx returns the configured num_ctx override, or nil if not set.
+func (p *OpenAIProvider) OllamaNumCtx() *int {
+	return p.ollamaNumCtx
 }
 
 func (p *OpenAIProvider) Name() string           { return p.name }

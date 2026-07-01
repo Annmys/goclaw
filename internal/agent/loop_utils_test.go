@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
-// uniquifyToolCallIDs
+// ─── uniquifyToolCallIDs ──────────────────────────────────────────────────
 
 func TestUniquifyToolCallIDs_Empty(t *testing.T) {
 	got := uniquifyToolCallIDs(nil, "run-1", 1)
@@ -86,7 +87,7 @@ func TestUniquifyToolCallIDs_DoesNotMutateInput(t *testing.T) {
 	}
 }
 
-// shouldShareKnowledgeGraph
+// ─── shouldShareKnowledgeGraph ───────────────────────────────────────────
 
 func TestShouldShareKnowledgeGraph_NilConfig(t *testing.T) {
 	l := &Loop{workspaceSharing: nil}
@@ -109,7 +110,7 @@ func TestShouldShareKnowledgeGraph_DisabledByDefault(t *testing.T) {
 	}
 }
 
-// shouldShareSessions
+// ─── shouldShareSessions ──────────────────────────────────────────────────────
 
 func TestShouldShareSessions_NilConfig(t *testing.T) {
 	l := &Loop{workspaceSharing: nil}
@@ -142,7 +143,7 @@ func TestShouldShareSessions_IndependentOfMemory(t *testing.T) {
 	}
 }
 
-// InvalidateUserWorkspace
+// ─── InvalidateUserWorkspace ──────────────────────────────────────────────
 
 func TestInvalidateUserWorkspace_RemovesCachedSetup(t *testing.T) {
 	l := &Loop{}
@@ -162,7 +163,7 @@ func TestInvalidateUserWorkspace_NonExistentKeyIsNoop(t *testing.T) {
 	l.InvalidateUserWorkspace("ghost-user") // must not panic
 }
 
-// ProviderName
+// ─── ProviderName ─────────────────────────────────────────────────────────
 
 func TestProviderName_NilProvider(t *testing.T) {
 	l := &Loop{}
@@ -178,12 +179,13 @@ func TestProviderName_WithProvider(t *testing.T) {
 	}
 }
 
-// expandWorkspace
+// ─── expandWorkspace ──────────────────────────────────────────────────────
 
 func TestExpandWorkspace_AbsolutePathUnchanged(t *testing.T) {
-	got := expandWorkspace("/absolute/path")
-	if got != "/absolute/path" {
-		t.Errorf("expandWorkspace = %q, want /absolute/path", got)
+	abs := filepath.Join(t.TempDir(), "absolute", "path")
+	got := expandWorkspace(abs)
+	if got != filepath.Clean(abs) {
+		t.Errorf("expandWorkspace = %q, want %q", got, filepath.Clean(abs))
 	}
 }
 
@@ -192,19 +194,19 @@ func TestExpandWorkspace_HomeExpanded(t *testing.T) {
 	if strings.HasPrefix(got, "~") {
 		t.Errorf("tilde not expanded: %q", got)
 	}
-	if !strings.HasPrefix(got, "/") {
+	if !filepath.IsAbs(got) {
 		t.Errorf("expected absolute path after ~ expansion, got %q", got)
 	}
 }
 
 func TestExpandWorkspace_RelativePathBecomesAbsolute(t *testing.T) {
 	got := expandWorkspace("relative/path")
-	if !strings.HasPrefix(got, "/") {
+	if !filepath.IsAbs(got) {
 		t.Errorf("relative path should become absolute, got %q", got)
 	}
 }
 
-// buildChannelMeta
+// ─── buildChannelMeta ─────────────────────────────────────────────────────
 
 func TestBuildChannelMeta_NilRequest(t *testing.T) {
 	l := &Loop{}
@@ -242,7 +244,7 @@ func TestBuildChannelMeta_WithChannelType(t *testing.T) {
 	}
 }
 
-// agentToolPolicyWithMCP
+// ─── agentToolPolicyWithMCP ───────────────────────────────────────────────
 
 func TestAgentToolPolicyWithMCP_NilPolicyNoMCP(t *testing.T) {
 	got := agentToolPolicyWithMCP(nil, false)
@@ -281,7 +283,7 @@ func TestAgentToolPolicyWithMCP_NoDuplicateMCPGroup(t *testing.T) {
 	}
 }
 
-// agentToolPolicyWithWorkspace
+// ─── agentToolPolicyWithWorkspace ─────────────────────────────────────────
 
 func TestAgentToolPolicyWithWorkspace_NoTeam(t *testing.T) {
 	got := agentToolPolicyWithWorkspace(nil, false)
@@ -323,7 +325,7 @@ func TestAgentToolPolicyWithWorkspace_NoDuplicates(t *testing.T) {
 	}
 }
 
-// buildTeamMD
+// ─── buildTeamMD ─────────────────────────────────────────────────────────
 
 func TestBuildTeamMD_LeadRole_ContainsWorkflow(t *testing.T) {
 	selfID := uuid.New()
@@ -376,16 +378,13 @@ func TestBuildTeamMD_ReviewerRole_ContainsApproveInstructions(t *testing.T) {
 	if !strings.Contains(md, "APPROVED") {
 		t.Error("expected APPROVED/REJECTED guidance for reviewer")
 	}
-	if !strings.Contains(md, "merged cells") {
-		t.Error("expected Excel format review guidance for reviewer")
-	}
 }
 
 func TestBuildTeamMD_EmptyMembers(t *testing.T) {
 	selfID := uuid.New()
 	team := &store.TeamData{Name: "solo"}
 	md := buildTeamMD(team, nil, selfID)
-	// selfID not in members defaults to member role.
+	// selfID not in members → defaults to member role
 	if !strings.Contains(md, "# Team: solo") {
 		t.Error("expected team name")
 	}
@@ -405,23 +404,5 @@ func TestBuildTeamMD_LeadSeesReviewersSection(t *testing.T) {
 	}
 	if !strings.Contains(md, "RevBot") {
 		t.Error("expected reviewer display name")
-	}
-}
-
-func TestBuildTeamMD_IncludesWorkflowInstructions(t *testing.T) {
-	selfID := uuid.New()
-	team := &store.TeamData{
-		Name:     "workflow-team",
-		Settings: []byte(`{"workflow_instructions":"必须先审核数据准确性、Excel格式规范性、合并单元格、边框线条、列宽、行高、标题、图片/Logo、对齐方式，确认输出文件可直接阅读和打印后再回传。"}`),
-	}
-	members := []store.TeamMemberData{
-		{AgentID: selfID, Role: store.TeamRoleLead, AgentKey: "lead"},
-	}
-	md := buildTeamMD(team, members, selfID)
-	if !strings.Contains(md, "Team-Specific Workflow") {
-		t.Error("expected team-specific workflow section")
-	}
-	if !strings.Contains(md, "合并单元格") {
-		t.Error("expected configured workflow instructions")
 	}
 }

@@ -108,6 +108,15 @@ func clientCanReceiveEvent(c *Client, event bus.Event) bool {
 		return false // non-admin clients don't receive these
 	}
 
+	// MCP OAuth completion: deliver to the user who initiated the flow.
+	// Admins already receive this via the admin check above.
+	if event.Name == protocol.EventMCPOAuthComplete {
+		if uid := extractMapField(event.Payload, "initiatingUserId"); uid != "" {
+			return uid == c.userID
+		}
+		return false
+	}
+
 	// Exec approval events: scoped to the requesting user.
 	if strings.HasPrefix(event.Name, "exec.approval.") {
 		if uid := extractMapField(event.Payload, "userId"); uid != "" {
@@ -128,6 +137,13 @@ func clientCanReceiveEvent(c *Client, event bus.Event) bool {
 
 	// Skill dep events → broadcast (non-sensitive, skill names only).
 	if strings.HasPrefix(event.Name, "skill.") {
+		return true
+	}
+
+	// Package update events → only Owner clients (TenantID=Nil filter above).
+	// red-team B1/C5: explicit branch provides defense-in-depth even though the
+	// Admin/Owner path at line 46 already covers uuid.Nil events for owners.
+	if strings.HasPrefix(event.Name, "package.update.") {
 		return true
 	}
 

@@ -72,42 +72,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_users_user ON tenant_users(user_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_users_tenant ON tenant_users(tenant_id);
 
 -- ============================================================
--- Table: local_knowledge_sources
--- ============================================================
-
-CREATE TABLE IF NOT EXISTS local_knowledge_sources (
-    id              TEXT NOT NULL PRIMARY KEY,
-    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    source_key      VARCHAR(100) NOT NULL,
-    name            VARCHAR(255) NOT NULL,
-    description     TEXT NOT NULL DEFAULT '',
-    path_windows    TEXT NOT NULL DEFAULT '',
-    path_container  TEXT NOT NULL DEFAULT '',
-    tenant_scope    VARCHAR(20) NOT NULL DEFAULT 'tenant'
-                    CHECK (tenant_scope IN ('system', 'tenant', 'shared')),
-    sync_mode       VARCHAR(20) NOT NULL DEFAULT 'manual'
-                    CHECK (sync_mode IN ('manual', 'scheduled', 'watch')),
-    index_target    VARCHAR(20) NOT NULL DEFAULT 'registry'
-                    CHECK (index_target IN ('registry', 'vault', 'memory', 'knowledge_graph', 'tool_cache')),
-    enabled         BOOLEAN NOT NULL DEFAULT 1,
-    last_sync_at    TEXT,
-    last_success_at TEXT,
-    last_error      TEXT,
-    file_count      INTEGER NOT NULL DEFAULT 0,
-    record_count    INTEGER NOT NULL DEFAULT 0,
-    content_hash    VARCHAR(128) NOT NULL DEFAULT '',
-    metadata        TEXT NOT NULL DEFAULT '{}',
-    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE(tenant_id, source_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_tenant
-    ON local_knowledge_sources(tenant_id, enabled);
-CREATE INDEX IF NOT EXISTS idx_local_knowledge_sources_target
-    ON local_knowledge_sources(tenant_id, index_target);
-
--- ============================================================
 -- Table: llm_providers
 -- ============================================================
 
@@ -162,6 +126,7 @@ CREATE TABLE IF NOT EXISTS agents (
     reasoning_config      TEXT NOT NULL DEFAULT '{}',
     workspace_sharing     TEXT NOT NULL DEFAULT '{}',
     chatgpt_oauth_routing TEXT NOT NULL DEFAULT '{}',
+    model_fallback        TEXT NOT NULL DEFAULT '{}',
     shell_deny_groups     TEXT NOT NULL DEFAULT '{}',
     kg_dedup_config       TEXT NOT NULL DEFAULT '{}',
     is_default            BOOLEAN NOT NULL DEFAULT 0,
@@ -443,6 +408,7 @@ CREATE TABLE IF NOT EXISTS skill_agent_grants (
     agent_id       TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
     pinned_version INT NOT NULL,
     granted_by     VARCHAR(255) NOT NULL,
+    can_manage     INTEGER NOT NULL DEFAULT 0,
     tenant_id      TEXT NOT NULL REFERENCES tenants(id),
     created_at     TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     UNIQUE(skill_id, agent_id)
@@ -462,7 +428,7 @@ CREATE TABLE IF NOT EXISTS skill_user_grants (
     granted_by VARCHAR(255) NOT NULL,
     tenant_id  TEXT NOT NULL REFERENCES tenants(id),
     created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    UNIQUE(skill_id, user_id)
+    UNIQUE(skill_id, user_id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_skill_user_grants_user ON skill_user_grants(user_id);
@@ -504,6 +470,8 @@ CREATE TABLE IF NOT EXISTS cron_jobs (
     deliver_channel  TEXT NOT NULL DEFAULT '',
     deliver_to       TEXT NOT NULL DEFAULT '',
     wake_heartbeat   INTEGER NOT NULL DEFAULT 0,
+    provider_id      TEXT REFERENCES llm_providers(id) ON DELETE SET NULL,
+    model            VARCHAR(200),
     next_run_at      TEXT,
     last_run_at      TEXT,
     last_status      VARCHAR(20),
@@ -624,6 +592,42 @@ CREATE INDEX IF NOT EXISTS idx_traces_start_root ON traces(start_time DESC) WHER
 CREATE INDEX IF NOT EXISTS idx_traces_team ON traces(team_id, created_at DESC) WHERE team_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_traces_tenant ON traces(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_traces_tenant_time ON traces(tenant_id, created_at DESC);
+
+-- ============================================================
+-- Table: run_timeline_items
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS run_timeline_items (
+    id           TEXT NOT NULL PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id       TEXT NOT NULL,
+    session_key  TEXT NOT NULL,
+    agent_id     TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    user_id      TEXT,
+    channel      TEXT,
+    chat_id      TEXT,
+    seq          INTEGER NOT NULL,
+    item_type    TEXT NOT NULL,
+    status       TEXT,
+    title        TEXT,
+    preview      TEXT,
+    content      TEXT NOT NULL DEFAULT '',
+    tool_name    TEXT,
+    tool_call_id TEXT,
+    trace_id     TEXT REFERENCES traces(id) ON DELETE SET NULL,
+    span_id      TEXT REFERENCES spans(id) ON DELETE SET NULL,
+    metadata     TEXT NOT NULL DEFAULT '{}',
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, run_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_run_timeline_run_seq
+    ON run_timeline_items (tenant_id, run_id, seq);
+CREATE INDEX IF NOT EXISTS idx_run_timeline_session_time
+    ON run_timeline_items (tenant_id, session_key, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_run_timeline_trace
+    ON run_timeline_items (tenant_id, trace_id)
+    WHERE trace_id IS NOT NULL;
 
 -- ============================================================
 -- Table: spans
@@ -808,6 +812,91 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_instances_tenant_name ON channel_i
 CREATE INDEX IF NOT EXISTS idx_channel_instances_type ON channel_instances(channel_type);
 CREATE INDEX IF NOT EXISTS idx_channel_instances_agent ON channel_instances(agent_id);
 CREATE INDEX IF NOT EXISTS idx_channel_instances_tenant ON channel_instances(tenant_id);
+
+-- ============================================================
+-- Tables: channel-context MCP and Secure CLI capabilities
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS mcp_context_grants (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    server_id           TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    enabled             BOOLEAN NOT NULL DEFAULT 1,
+    tool_allow          TEXT,
+    tool_deny           TEXT,
+    config_overrides    TEXT,
+    granted_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, server_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_context_grants_scope ON mcp_context_grants(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_grants_server ON mcp_context_grants(server_id);
+
+CREATE TABLE IF NOT EXISTS mcp_context_credentials (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    server_id           TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    api_key             TEXT,
+    headers             BLOB,
+    env                 BLOB,
+    created_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, server_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_context_credentials_scope ON mcp_context_credentials(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_mcp_context_credentials_server ON mcp_context_credentials(server_id);
+
+CREATE TABLE IF NOT EXISTS secure_cli_context_grants (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    binary_id           TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
+    deny_args           TEXT,
+    deny_verbose        TEXT,
+    timeout_seconds     INTEGER,
+    tips                TEXT,
+    encrypted_env       BLOB,
+    enabled             BOOLEAN NOT NULL DEFAULT 1,
+    granted_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, binary_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_grants_scope ON secure_cli_context_grants(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_grants_binary ON secure_cli_context_grants(binary_id);
+
+CREATE TABLE IF NOT EXISTS secure_cli_context_credentials (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    scope_type          VARCHAR(32) NOT NULL,
+    scope_key           VARCHAR(255) NOT NULL DEFAULT '',
+    binary_id           TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
+    encrypted_env       BLOB NOT NULL,
+    metadata            TEXT NOT NULL DEFAULT '{}',
+    credential_type     TEXT,
+    host_scope          TEXT,
+    created_by          VARCHAR(255) NOT NULL,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(tenant_id, channel_instance_id, scope_type, scope_key, binary_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_credentials_scope ON secure_cli_context_credentials(tenant_id, channel_instance_id, scope_type, scope_key);
+CREATE INDEX IF NOT EXISTS idx_secure_cli_context_credentials_binary ON secure_cli_context_credentials(binary_id);
 
 -- ============================================================
 -- Table: config_secrets
@@ -1091,6 +1180,77 @@ CREATE INDEX IF NOT EXISTS idx_channel_pending_messages_lookup ON channel_pendin
 CREATE INDEX IF NOT EXISTS idx_channel_pending_messages_tenant ON channel_pending_messages(tenant_id);
 
 -- ============================================================
+-- Table: channel_memory_extraction_runs
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS channel_memory_extraction_runs (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    channel_name        VARCHAR(255) NOT NULL,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    user_id             VARCHAR(255) NOT NULL DEFAULT '',
+    history_key         VARCHAR(255) NOT NULL,
+    trigger             VARCHAR(32) NOT NULL DEFAULT 'scheduled',
+    status              VARCHAR(32) NOT NULL DEFAULT 'pending',
+    source_start_id     VARCHAR(255) NOT NULL DEFAULT '',
+    source_end_id       VARCHAR(255) NOT NULL DEFAULT '',
+    source_start_at     TEXT,
+    source_end_at       TEXT,
+    message_count       INTEGER NOT NULL DEFAULT 0,
+    redaction_count     INTEGER NOT NULL DEFAULT 0,
+    redaction_types     TEXT NOT NULL DEFAULT '[]',
+    item_count          INTEGER NOT NULL DEFAULT 0,
+    error_message       TEXT NOT NULL DEFAULT '',
+    started_at          TEXT,
+    completed_at        TEXT,
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, channel_instance_id, history_key, source_start_id, source_end_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_memory_runs_channel
+    ON channel_memory_extraction_runs(tenant_id, channel_instance_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_runs_status
+    ON channel_memory_extraction_runs(tenant_id, status, created_at DESC);
+
+-- ============================================================
+-- Table: channel_memory_extraction_items
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS channel_memory_extraction_items (
+    id                  TEXT NOT NULL PRIMARY KEY,
+    tenant_id           TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id              TEXT NOT NULL REFERENCES channel_memory_extraction_runs(id) ON DELETE CASCADE,
+    channel_instance_id TEXT NOT NULL REFERENCES channel_instances(id) ON DELETE CASCADE,
+    agent_id            TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    user_id             VARCHAR(255) NOT NULL DEFAULT '',
+    item_hash           VARCHAR(128) NOT NULL,
+    item_type           VARCHAR(64) NOT NULL,
+    summary             TEXT NOT NULL,
+    topics              TEXT NOT NULL DEFAULT '[]',
+    entities            TEXT NOT NULL DEFAULT '[]',
+    confidence          REAL NOT NULL DEFAULT 0,
+    source_id           VARCHAR(255) NOT NULL DEFAULT '',
+    status              VARCHAR(32) NOT NULL DEFAULT 'pending_review',
+    approved_by         VARCHAR(255) NOT NULL DEFAULT '',
+    approved_at         TEXT,
+    rejected_by         VARCHAR(255) NOT NULL DEFAULT '',
+    rejected_at         TEXT,
+    deleted_at          TEXT,
+    written_at          TEXT,
+    episodic_id         VARCHAR(64) NOT NULL DEFAULT '',
+    created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (tenant_id, run_id, item_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_channel_memory_items_channel_status
+    ON channel_memory_extraction_items(tenant_id, channel_instance_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_channel_memory_items_run
+    ON channel_memory_extraction_items(tenant_id, run_id);
+
+-- ============================================================
 -- Table: channel_contacts
 -- ============================================================
 
@@ -1191,6 +1351,102 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_snapshots_unique ON usage_snapshots(
 CREATE INDEX IF NOT EXISTS idx_usage_snapshots_tenant ON usage_snapshots(tenant_id);
 
 -- ============================================================
+-- Table: usage_events
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS usage_events (
+    id            TEXT NOT NULL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL REFERENCES tenants(id),
+    event_time    TEXT NOT NULL,
+    bucket_hour   TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    resource_id   TEXT NOT NULL DEFAULT '',
+    source        TEXT NOT NULL DEFAULT '',
+    agent_id      TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    team_id       TEXT,
+    trace_id      TEXT REFERENCES traces(id) ON DELETE SET NULL,
+    span_id       TEXT REFERENCES spans(id) ON DELETE SET NULL,
+    run_id        TEXT NOT NULL DEFAULT '',
+    session_key   TEXT NOT NULL DEFAULT '',
+    channel       TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    input_tokens  BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens  BIGINT NOT NULL DEFAULT 0,
+    cost_usd      NUMERIC(12,6) NOT NULL DEFAULT 0,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    call_count    INTEGER NOT NULL DEFAULT 1,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    metadata      TEXT,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_time
+    ON usage_events(tenant_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_resource_time
+    ON usage_events(tenant_id, resource_type, resource_name, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_type_time
+    ON usage_events(tenant_id, event_type, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_agent_time
+    ON usage_events(tenant_id, agent_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_events_tenant_channel_time
+    ON usage_events(tenant_id, channel, event_time DESC) WHERE channel != '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_events_trace_span_type_source
+    ON usage_events(trace_id, span_id, event_type, source)
+    WHERE trace_id IS NOT NULL AND span_id IS NOT NULL;
+
+-- ============================================================
+-- Table: usage_event_rollups
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS usage_event_rollups (
+    id            TEXT NOT NULL PRIMARY KEY,
+    tenant_id     TEXT NOT NULL REFERENCES tenants(id),
+    bucket_hour   TEXT NOT NULL,
+    event_type    TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_name TEXT NOT NULL,
+    source        TEXT NOT NULL DEFAULT '',
+    agent_id      TEXT REFERENCES agents(id) ON DELETE SET NULL,
+    channel       TEXT NOT NULL DEFAULT '',
+    provider      TEXT NOT NULL DEFAULT '',
+    model         TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT '',
+    input_tokens  BIGINT NOT NULL DEFAULT 0,
+    output_tokens BIGINT NOT NULL DEFAULT 0,
+    total_tokens  BIGINT NOT NULL DEFAULT 0,
+    cost_usd      NUMERIC(12,6) NOT NULL DEFAULT 0,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    call_count    INTEGER NOT NULL DEFAULT 0,
+    error_count   INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_event_rollups_unique
+    ON usage_event_rollups(
+        tenant_id,
+        bucket_hour,
+        event_type,
+        resource_type,
+        resource_name,
+        source,
+        COALESCE(agent_id, '00000000-0000-0000-0000-000000000000'),
+        channel,
+        provider,
+        model,
+        status
+    );
+CREATE INDEX IF NOT EXISTS idx_usage_event_rollups_tenant_hour
+    ON usage_event_rollups(tenant_id, bucket_hour DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_event_rollups_resource_hour
+    ON usage_event_rollups(tenant_id, resource_type, resource_name, bucket_hour DESC);
+
+-- ============================================================
 -- Table: builtin_tools
 -- ============================================================
 
@@ -1242,6 +1498,7 @@ CREATE TABLE IF NOT EXISTS secure_cli_binaries (
     enabled         BOOLEAN NOT NULL DEFAULT 1,
     created_by      TEXT NOT NULL DEFAULT '',
     tenant_id       TEXT NOT NULL REFERENCES tenants(id),
+    adapter_name    TEXT,
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -1262,6 +1519,7 @@ CREATE TABLE IF NOT EXISTS secure_cli_agent_grants (
     deny_verbose    TEXT,
     timeout_seconds INTEGER,
     tips            TEXT,
+    encrypted_env   BLOB,
     enabled         BOOLEAN NOT NULL DEFAULT 1,
     tenant_id       TEXT NOT NULL REFERENCES tenants(id),
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
@@ -1534,19 +1792,51 @@ CREATE INDEX IF NOT EXISTS idx_kg_dedup_agent ON kg_dedup_candidates(agent_id, s
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS secure_cli_user_credentials (
-    id            TEXT NOT NULL PRIMARY KEY,
-    binary_id     TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
-    user_id       VARCHAR(255) NOT NULL,
-    encrypted_env BLOB NOT NULL,
-    metadata      TEXT NOT NULL DEFAULT '{}',
-    tenant_id     TEXT NOT NULL REFERENCES tenants(id),
-    created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    id              TEXT NOT NULL PRIMARY KEY,
+    binary_id       TEXT NOT NULL REFERENCES secure_cli_binaries(id) ON DELETE CASCADE,
+    user_id         VARCHAR(255) NOT NULL,
+    encrypted_env   BLOB NOT NULL,
+    metadata        TEXT NOT NULL DEFAULT '{}',
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id),
+    credential_type TEXT,
+    host_scope      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     UNIQUE(binary_id, user_id, tenant_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_scuc_tenant ON secure_cli_user_credentials(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_scuc_binary ON secure_cli_user_credentials(binary_id);
+
+-- ============================================================
+-- Table: secure_cli_agent_credentials (per-agent encrypted env)
+-- ============================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_secure_cli_binaries_id_tenant
+    ON secure_cli_binaries(id, tenant_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_id_tenant
+    ON agents(id, tenant_id);
+
+CREATE TABLE IF NOT EXISTS secure_cli_agent_credentials (
+    id              TEXT NOT NULL PRIMARY KEY,
+    binary_id       TEXT NOT NULL,
+    agent_id        TEXT NOT NULL,
+    encrypted_env   BLOB NOT NULL,
+    metadata        TEXT NOT NULL DEFAULT '{}',
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id),
+    credential_type TEXT,
+    host_scope      TEXT,
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(binary_id, agent_id, tenant_id),
+    FOREIGN KEY (binary_id, tenant_id) REFERENCES secure_cli_binaries(id, tenant_id) ON DELETE CASCADE,
+    FOREIGN KEY (agent_id, tenant_id) REFERENCES agents(id, tenant_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_scac_tenant ON secure_cli_agent_credentials(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_scac_binary ON secure_cli_agent_credentials(binary_id);
+CREATE INDEX IF NOT EXISTS idx_scac_agent ON secure_cli_agent_credentials(agent_id);
 
 -- ============================================================
 -- Table: vault_documents (V3 Knowledge Vault registry)
@@ -1699,3 +1989,332 @@ CREATE TABLE IF NOT EXISTS tenant_hook_budget (
     metadata       TEXT NOT NULL DEFAULT '{}',
     updated_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+-- ============================================================
+-- Table: bitrix_portals (migration 000068)
+-- Stores per-tenant OAuth credentials + refresh state for a Bitrix24 portal.
+-- credentials + state are AES-256-GCM ciphertext (internal/crypto/aes.go).
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS bitrix_portals (
+    id           TEXT NOT NULL PRIMARY KEY,
+    tenant_id    TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name         VARCHAR(100) NOT NULL,
+    domain       VARCHAR(255) NOT NULL,
+    credentials  BLOB,
+    state        BLOB,
+    created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bitrix_portals_tenant_name
+    ON bitrix_portals (tenant_id, name);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bitrix_portals_domain
+    ON bitrix_portals (LOWER(TRIM(domain)));
+
+-- ============================================================
+-- Table: webhooks  (registry, migrations 000059 + 000061)
+-- secret_hash stores SHA-256 hex; used only for bearer-token lookup.
+-- encrypted_secret stores AES-256-GCM(raw_secret, GOCLAW_ENCRYPTION_KEY); decrypted at HMAC sign time.
+-- scopes + ip_allowlist stored as JSON arrays (TEXT) — no native array type.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS webhooks (
+    id                  TEXT        PRIMARY KEY,
+    tenant_id           TEXT        NOT NULL,
+    agent_id            TEXT        REFERENCES agents(id) ON DELETE SET NULL,
+    name                TEXT        NOT NULL,
+    kind                TEXT        NOT NULL CHECK (kind IN ('llm', 'message')),
+    secret_prefix       TEXT,
+    secret_hash         TEXT        NOT NULL,
+    encrypted_secret    TEXT        NOT NULL DEFAULT '',
+    scopes              TEXT        NOT NULL DEFAULT '[]',
+    channel_id          TEXT,
+    rate_limit_per_min  INTEGER     NOT NULL DEFAULT 60,
+    ip_allowlist        TEXT        NOT NULL DEFAULT '[]',
+    require_hmac        INTEGER     NOT NULL DEFAULT 0,
+    localhost_only      INTEGER     NOT NULL DEFAULT 0,
+    revoked             INTEGER     NOT NULL DEFAULT 0,
+    created_by          TEXT,
+    created_at          TEXT        NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at          TEXT        NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    last_used_at        TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhooks_tenant
+    ON webhooks (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_webhooks_tenant_agent
+    ON webhooks (tenant_id, agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_webhooks_secret
+    ON webhooks (secret_hash)
+    WHERE revoked = 0;
+
+-- ============================================================
+-- Table: webhook_calls  (audit + async state, migrations 000059 + 000060)
+-- request_payload stored as TEXT (canonical JSON: {"body_hash":"...","meta":{...}}).
+-- response stored as TEXT (JSON). BLOB would silently accept non-JSON; TEXT enforces
+-- that callers write valid JSON, matching PG's jsonb column behaviour.
+-- delivery_id: stable UUID across outbound retries; emitted as X-Webhook-Delivery-Id.
+-- lease_token: random UUID set by ClaimNext; guards UpdateStatusCAS for exactly-once delivery.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS webhook_calls (
+    id               TEXT     PRIMARY KEY,
+    tenant_id        TEXT     NOT NULL,
+    webhook_id       TEXT     NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+    agent_id         TEXT,
+    idempotency_key  TEXT,
+    mode             TEXT     NOT NULL CHECK (mode IN ('sync', 'async')),
+    callback_url     TEXT,
+    status           TEXT     NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'failed', 'dead')),
+    attempts         INTEGER  NOT NULL DEFAULT 0,
+    delivery_id      TEXT     NOT NULL,
+    next_attempt_at  TEXT,
+    started_at       TEXT,
+    last_heartbeat_at TEXT,
+    lease_token      TEXT,
+    request_payload  TEXT,
+    response         TEXT,
+    last_error       TEXT,
+    created_at       TEXT     NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    completed_at     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_webhook_calls_tenant_created
+    ON webhook_calls (tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_webhook_calls_status_attempt
+    ON webhook_calls (status, next_attempt_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_webhook_calls_idempotency
+    ON webhook_calls (webhook_id, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+
+-- ============================================================
+-- Table: workstations (migration 000062)
+-- metadata and default_env stored as BLOB (AES-256-GCM encrypted).
+-- backend_type constrained to 'ssh' | 'docker'.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS workstations (
+    id              TEXT PRIMARY KEY,
+    workstation_key VARCHAR(100) NOT NULL,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name            VARCHAR(255) NOT NULL,
+    backend_type    VARCHAR(20) NOT NULL CHECK (backend_type IN ('ssh','docker')),
+    metadata        BLOB NOT NULL,
+    default_cwd     VARCHAR(500) NOT NULL DEFAULT '',
+    default_env     BLOB NOT NULL,
+    active          INTEGER NOT NULL DEFAULT 1,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    UNIQUE (tenant_id, workstation_key)
+);
+CREATE INDEX IF NOT EXISTS idx_workstations_tenant_active
+    ON workstations(tenant_id, active) WHERE active = 1;
+
+CREATE TABLE IF NOT EXISTS agent_workstation_links (
+    agent_id        TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    is_default      INTEGER NOT NULL DEFAULT 0,
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (agent_id, workstation_id)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_workstation_default
+    ON agent_workstation_links(agent_id) WHERE is_default = 1;
+CREATE INDEX IF NOT EXISTS idx_agent_workstation_tenant ON agent_workstation_links(tenant_id);
+
+-- ============================================================
+-- Table: workstation_permissions (migration 000063)
+-- Per-workstation binary allowlist. Default-deny: no matching
+-- enabled pattern → exec rejected. Pattern matches argv[0] only.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS workstation_permissions (
+    id              TEXT PRIMARY KEY,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    pattern         VARCHAR(500) NOT NULL,
+    enabled         INTEGER NOT NULL DEFAULT 1,
+    created_by      VARCHAR(255) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (workstation_id, pattern)
+);
+CREATE INDEX IF NOT EXISTS idx_workstation_perms_ws ON workstation_permissions(workstation_id) WHERE enabled = 1;
+CREATE INDEX IF NOT EXISTS idx_workstation_perms_tenant ON workstation_permissions(tenant_id);
+
+-- ============================================================
+-- Table: workstation_activity (migration 000064)
+-- Rolling audit log for exec and deny events. Append-only;
+-- pruned nightly (rows older than 30 days) via Prune().
+-- cmd_preview: first 200 chars, secrets redacted.
+-- cmd_hash: sha256 hex for forensic cross-reference.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS workstation_activity (
+    id              TEXT PRIMARY KEY,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    workstation_id  TEXT NOT NULL REFERENCES workstations(id) ON DELETE CASCADE,
+    agent_id        VARCHAR(255) NOT NULL DEFAULT '',
+    action          VARCHAR(20)  NOT NULL,
+    cmd_hash        VARCHAR(64)  NOT NULL DEFAULT '',
+    cmd_preview     VARCHAR(200) NOT NULL DEFAULT '',
+    exit_code       INTEGER,
+    duration_ms     INTEGER,
+    deny_reason     VARCHAR(200) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_ws_time     ON workstation_activity(workstation_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_tenant_time ON workstation_activity(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ws_activity_retention   ON workstation_activity(created_at);
+
+-- ============================================================
+-- Table: browser_cookies (migration 000069)
+-- User-selected cookies for server-side browser contexts.
+-- Values are AES-256-GCM ciphertext. Scope is tenant + user + agent.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS browser_cookies (
+    id              TEXT NOT NULL PRIMARY KEY,
+    tenant_id       TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id         VARCHAR(255) NOT NULL,
+    agent_id        VARCHAR(255) NOT NULL,
+    domain          TEXT NOT NULL,
+    name            TEXT NOT NULL,
+    path            TEXT NOT NULL DEFAULT '/',
+    encrypted_value TEXT NOT NULL,
+    secure          INTEGER NOT NULL DEFAULT 0,
+    http_only       INTEGER NOT NULL DEFAULT 0,
+    same_site       VARCHAR(32) NOT NULL DEFAULT '',
+    expires_at      TEXT,
+    source          VARCHAR(64) NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (TRIM(domain) <> ''),
+    CHECK (TRIM(name) <> ''),
+    CHECK (TRIM(path) <> '')
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_cookies_scope_unique
+    ON browser_cookies (tenant_id, user_id, agent_id, domain, path, name);
+CREATE INDEX IF NOT EXISTS idx_browser_cookies_scope_domain
+    ON browser_cookies (tenant_id, user_id, agent_id, domain);
+CREATE INDEX IF NOT EXISTS idx_browser_cookies_expires_at
+    ON browser_cookies (expires_at);
+
+-- ============================================================
+-- Skill self-evolution (migration 000079 / SQLite schema 48)
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS skill_evolution_settings (
+    tenant_id        TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id         TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    enabled          INTEGER NOT NULL DEFAULT 0,
+    mode             VARCHAR(32) NOT NULL DEFAULT 'suggest_only',
+    last_analyzed_at TEXT,
+    created_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (tenant_id, skill_id),
+    CHECK (mode IN ('suggest_only', 'auto_analyze'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_evolution_settings_skill ON skill_evolution_settings(skill_id);
+
+CREATE TABLE IF NOT EXISTS skill_usage_metrics (
+    id                TEXT PRIMARY KEY,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id          TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    skill_slug        VARCHAR(255) NOT NULL,
+    skill_version     INTEGER NOT NULL DEFAULT 1,
+    agent_id          TEXT,
+    user_id           VARCHAR(255),
+    session_key       TEXT,
+    trace_id          TEXT,
+    invocation_id     TEXT,
+    invocation_source VARCHAR(32) NOT NULL DEFAULT 'runtime',
+    status            VARCHAR(32) NOT NULL DEFAULT 'started',
+    failure_reason    TEXT,
+    tool_calls_count  INTEGER NOT NULL DEFAULT 0,
+    duration_ms       INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (status IN ('started', 'succeeded', 'failed', 'abandoned'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_skill_created ON skill_usage_metrics(skill_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_tenant_created ON skill_usage_metrics(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_status ON skill_usage_metrics(skill_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_usage_metrics_invocation ON skill_usage_metrics(invocation_id);
+
+CREATE TABLE IF NOT EXISTS skill_improvement_suggestions (
+    id                     TEXT PRIMARY KEY,
+    tenant_id              TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id               TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    skill_slug             VARCHAR(255) NOT NULL,
+    suggestion_type        VARCHAR(64) NOT NULL,
+    status                 VARCHAR(32) NOT NULL DEFAULT 'pending',
+    reason                 TEXT NOT NULL DEFAULT '',
+    evidence               TEXT NOT NULL DEFAULT '{}',
+    draft_patch            TEXT NOT NULL DEFAULT '{}',
+    target_file            TEXT NOT NULL DEFAULT '',
+    created_by_actor_type  VARCHAR(32) NOT NULL DEFAULT '',
+    created_by_actor_id    VARCHAR(255) NOT NULL DEFAULT '',
+    reviewed_by_actor_type VARCHAR(32) NOT NULL DEFAULT '',
+    reviewed_by_actor_id   VARCHAR(255) NOT NULL DEFAULT '',
+    reviewed_at            TEXT,
+    applied_version        INTEGER,
+    created_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at             TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (status IN ('pending', 'approved', 'rejected', 'applied'))
+);
+CREATE INDEX IF NOT EXISTS idx_skill_suggestions_skill_status_created ON skill_improvement_suggestions(skill_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_skill_suggestions_tenant_created ON skill_improvement_suggestions(tenant_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS skill_versions (
+    id                         TEXT PRIMARY KEY,
+    tenant_id                  TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    skill_id                   TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+    version                    INTEGER NOT NULL,
+    content_hash               VARCHAR(64) NOT NULL DEFAULT '',
+    changed_files              TEXT NOT NULL DEFAULT '[]',
+    created_by_actor_type      VARCHAR(32) NOT NULL DEFAULT '',
+    created_by_actor_id        VARCHAR(255) NOT NULL DEFAULT '',
+    created_from_suggestion_id TEXT REFERENCES skill_improvement_suggestions(id) ON DELETE SET NULL,
+    created_at                 TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE(skill_id, version)
+);
+CREATE INDEX IF NOT EXISTS idx_skill_versions_tenant_skill ON skill_versions(tenant_id, skill_id, version DESC);
+
+-- ============================================================
+-- Table: mcp_oauth_tokens (migration 000084)
+-- OAuth tokens for MCP servers. user_id NULL = global/tenant-level.
+-- access_token, refresh_token, dcr_client_secret are AES-256-GCM encrypted.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS mcp_oauth_tokens (
+    id                TEXT NOT NULL PRIMARY KEY,
+    server_id         TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+    tenant_id         TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_id           TEXT,
+
+    access_token      TEXT NOT NULL,
+    refresh_token     TEXT,
+    token_type        TEXT NOT NULL DEFAULT 'Bearer',
+    scopes            TEXT,
+    expires_at        TEXT,
+    issued_at         TEXT,
+
+    dcr_client_id     TEXT NOT NULL DEFAULT '',
+    dcr_client_secret TEXT,
+    dcr_issuer        TEXT NOT NULL DEFAULT '',
+
+    token_endpoint    TEXT NOT NULL DEFAULT '',
+    resource_uri      TEXT,
+
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+-- SQLite also treats NULLs as distinct in UNIQUE constraints. Use partial unique
+-- indexes so the NULL case (global token) is correctly deduplicated.
+CREATE UNIQUE INDEX IF NOT EXISTS mcp_oauth_tokens_global_uq
+    ON mcp_oauth_tokens (server_id, tenant_id) WHERE user_id IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS mcp_oauth_tokens_user_uq
+    ON mcp_oauth_tokens (server_id, tenant_id, user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_mcp_oauth_tokens_server_tenant ON mcp_oauth_tokens (server_id, tenant_id);
