@@ -8,14 +8,14 @@ import (
 )
 
 // BackfillKGEmbeddings generates embeddings for all KG entities that don't have one yet.
-// Processes in batches of 50. Returns total number of entities updated.
+// Processes in batches of 10 (dashscope text-embedding-v4 limit). Returns total number of entities updated.
 // On batch-level embedding failure, skips the batch and continues (up to 3 consecutive failures).
 func (s *PGKnowledgeGraphStore) BackfillKGEmbeddings(ctx context.Context) (int, error) {
 	if s.embProvider == nil {
 		return 0, nil
 	}
 
-	const batchSize = 50
+	const batchSize = 10
 	const maxConsecutiveErrors = 3
 	total := 0
 	consecutiveErrors := 0
