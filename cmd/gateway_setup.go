@@ -260,6 +260,8 @@ func setupToolRegistry(
 	if rf, ok := toolsReg.Get("read_file"); ok {
 		if t, ok := rf.(*tools.ReadFileTool); ok {
 			t.DenyPaths(readFileDenyPaths...)
+			// Allow reading skills-store (agents need to read SKILL.md for execution)
+			t.AllowPaths(filepath.Join(dataDir, "skills-store") + "/")
 		}
 	}
 	if wf, ok := toolsReg.Get("write_file"); ok {
