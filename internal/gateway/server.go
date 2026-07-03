@@ -570,6 +570,9 @@ func (s *Server) SetTenantsHandler(h *httpapi.TenantsHandler) {
 // SetAPIKeyStore sets the API key store for token-based auth lookup.
 func (s *Server) SetAPIKeyStore(st store.APIKeyStore) { s.apiKeyStore = st }
 
+// SetWorkflowHandler sets the workflow engine HTTP handler (definitions CRUD, generate, templates).
+func (s *Server) SetWorkflowHandler(h *httpapi.WorkflowHandler) { s.handlers = append(s.handlers, h) }
+
 // SetFilesHandler sets the workspace file serving handler.
 func (s *Server) SetFilesHandler(h *httpapi.FilesHandler) { s.handlers = append(s.handlers, h) }
 

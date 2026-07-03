@@ -9,6 +9,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/audio"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/edition"
+	"github.com/nextlevelbuilder/goclaw/internal/workflow"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway/methods"
 	httpapi "github.com/nextlevelbuilder/goclaw/internal/http"
 	mcpbridge "github.com/nextlevelbuilder/goclaw/internal/mcp"
@@ -310,6 +311,13 @@ func (d *gatewayDeps) wireHTTPHandlersOnServer(
 	// V3: Per-agent v3 feature flags API
 	if d.pgStores != nil && d.pgStores.Agents != nil {
 		d.server.SetV3FlagsHandler(httpapi.NewV3FlagsHandler(d.pgStores.Agents))
+	}
+
+	// Workflow engine API — sim-style graph definitions CRUD, AI generation, templates.
+	if d.pgStores != nil && d.pgStores.DB != nil {
+		wfEngine := workflow.NewEngineWithDB(workflow.NewDefaultRegistry(), d.pgStores.DB)
+		wfEngine.SetNodeRunner(d.buildWorkflowNodeRunner())
+		d.server.SetWorkflowHandler(httpapi.NewWorkflowHandler(wfEngine))
 	}
 
 	// Workspace file serving endpoint — serves files by absolute path, auth-token protected.
