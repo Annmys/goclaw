@@ -29,6 +29,8 @@ const (
 	SharedMemoryKey contextKey = "goclaw_shared_memory"
 	// SharedKGKey indicates KG should be shared across all users of the agent (no per-user scoping).
 	SharedKGKey contextKey = "goclaw_shared_kg"
+	// TeamKGAgentIDsKey carries the team member agent UUIDs for cross-agent KG sharing within a team.
+	TeamKGAgentIDsKey contextKey = "goclaw_team_kg_agent_ids"
 	// SharedSessionsKey indicates sessions should be shared across all users (no per-group scoping).
 	SharedSessionsKey contextKey = "goclaw_shared_sessions"
 	// SharedContextKey indicates context files should be read/written at agent scope.
@@ -344,6 +346,20 @@ func IsSharedKG(ctx context.Context) bool {
 		return rc.SharedKG
 	}
 	return false
+}
+
+// WithTeamKGAgentIDs attaches the set of team-member agent UUIDs to the context.
+// When present, KG queries include entities from all listed agents (team-level sharing).
+func WithTeamKGAgentIDs(ctx context.Context, ids []uuid.UUID) context.Context {
+	return context.WithValue(ctx, TeamKGAgentIDsKey, ids)
+}
+
+// TeamKGAgentIDs returns the team member agent IDs from context, or nil if unset.
+func TeamKGAgentIDs(ctx context.Context) []uuid.UUID {
+	if v, ok := ctx.Value(TeamKGAgentIDsKey).([]uuid.UUID); ok && len(v) > 0 {
+		return v
+	}
+	return nil
 }
 
 // WithSharedSessions returns a context flagged for shared sessions (skip per-group scoping).

@@ -154,9 +154,9 @@ func (s *PGKnowledgeGraphStore) ListEntities(ctx context.Context, agentID, userI
 
 	// Build dynamic WHERE clause: always filter by agent_id, optionally by user_id and entity_type.
 	// Default to current facts only (valid_until IS NULL) — expired entities excluded.
-	where := "agent_id = $1 AND valid_until IS NULL"
-	args := []any{aid}
-	idx := 2
+	// When team KG sharing is active, include entities from all team members.
+	where, args, idx := buildKGAgentFilter(ctx, aid)
+	where += " AND valid_until IS NULL"
 	if !store.IsSharedKG(ctx) && userID != "" {
 		where += fmt.Sprintf(" AND user_id = $%d", idx)
 		args = append(args, userID)
@@ -254,9 +254,10 @@ type scoredEntity struct {
 }
 
 func (s *PGKnowledgeGraphStore) ftsSearchEntities(ctx context.Context, agentID uuid.UUID, userID, query string, limit int, shared bool) ([]scoredEntity, error) {
-	where := "agent_id = $1 AND valid_until IS NULL AND tsv @@ plainto_tsquery('simple', $2)"
-	args := []any{agentID, query}
-	idx := 3
+	agentFilter, args, idx := buildKGAgentFilter(ctx, agentID)
+	where := agentFilter + " AND valid_until IS NULL AND tsv @@ plainto_tsquery('simple', $" + fmt.Sprint(idx) + ")"
+	args = append(args, query)
+	idx++
 	if !shared && userID != "" {
 		where += fmt.Sprintf(" AND user_id = $%d", idx)
 		args = append(args, userID)
@@ -294,9 +295,8 @@ func (s *PGKnowledgeGraphStore) ftsSearchEntities(ctx context.Context, agentID u
 func (s *PGKnowledgeGraphStore) vectorSearchEntities(ctx context.Context, embedding []float32, agentID uuid.UUID, userID string, limit int, shared bool) ([]scoredEntity, error) {
 	vecStr := vectorToString(embedding)
 
-	where := "agent_id = $1 AND valid_until IS NULL AND embedding IS NOT NULL"
-	args := []any{agentID}
-	idx := 2
+	agentFilter, args, idx := buildKGAgentFilter(ctx, agentID)
+	where := agentFilter + " AND valid_until IS NULL AND embedding IS NOT NULL"
 	if !shared && userID != "" {
 		where += fmt.Sprintf(" AND user_id = $%d", idx)
 		args = append(args, userID)
@@ -366,4 +366,49 @@ func hybridMergeEntities(ilike, vec []scoredEntity, textWeight, vectorWeight flo
 	})
 
 	return results
+}
+
+// buildKGAgentFilter returns the WHERE fragment and args for agent_id filtering.
+// When team KG sharing is active (TeamKGAgentIDs in context), uses IN (...) to
+// include entities from all team members. Otherwise falls back to single agent_id = $1.
+func buildKGAgentFilter(ctx context.Context, agentID uuid.UUID) (where string, args []any, nextIdx int) {
+	teamIDs := store.TeamKGAgentIDs(ctx)
+	if len(teamIDs) > 0 {
+		// Deduplicate and ensure the current agent is included.
+		seen := make(map[uuid.UUID]bool, len(teamIDs)+1)
+		seen[agentID] = true
+		ids := []uuid.UUID{agentID}
+		for _, id := range teamIDs {
+			if !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		// Build agent_id = ANY($1::uuid[])
+		where = "agent_id = ANY($1::uuid[])"
+		args = []any{uuidSliceToPGArray(ids)}
+		nextIdx = 2
+		return
+	}
+	where = "agent_id = $1"
+	args = []any{agentID}
+	nextIdx = 2
+	return
+}
+
+// uuidSliceToPGArray formats a UUID slice as a Postgres array literal: {uuid1,uuid2,...}
+func uuidSliceToPGArray(ids []uuid.UUID) string {
+	if len(ids) == 0 {
+		return "{}"
+	}
+	buf := make([]byte, 0, len(ids)*37+2)
+	buf = append(buf, '{')
+	for i, id := range ids {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = append(buf, id.String()...)
+	}
+	buf = append(buf, '}')
+	return string(buf)
 }

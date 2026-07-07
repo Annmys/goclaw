@@ -239,6 +239,16 @@ func (l *Loop) injectContext(ctx context.Context, req *RunRequest) (contextSetup
 	if req.TeamWorkspace == "" && l.teamStore != nil && l.agentUUID != uuid.Nil {
 		if team, _ := l.teamStore.GetTeamForAgent(ctx, l.agentUUID); team != nil {
 			resolvedTeamSettings = team.Settings
+			// Inject team member agent IDs for cross-agent KG sharing.
+			if l.shouldShareKnowledgeGraph() {
+				if members, mErr := l.teamStore.ListMembers(ctx, team.ID); mErr == nil && len(members) > 1 {
+					ids := make([]uuid.UUID, 0, len(members))
+					for _, m := range members {
+						ids = append(ids, m.AgentID)
+					}
+					ctx = store.WithTeamKGAgentIDs(ctx, ids)
+				}
+			}
 			wsChat := req.ChatID
 			if wsChat == "" {
 				wsChat = req.UserID

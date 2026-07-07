@@ -96,6 +96,17 @@ func (t *CooldownTracker) RecordFailure(key string, reason FailoverReason) {
 		duration = 30 * time.Second
 	}
 
+	// Billing cooldown: extend until next midnight (local time) so that
+	// quota-exhausted providers stay in cooldown for the rest of the day
+	// and automatically recover at 00:00.
+	if reason == FailoverBilling {
+		midnight := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
+		untilMidnight := midnight.Sub(now)
+		if untilMidnight > duration {
+			duration = untilMidnight
+		}
+	}
+
 	// Overload escalation: flat 2x cooldown after cap consecutive overloaded failures.
 	// Intentionally flat (not exponential) to avoid overly long cooldowns.
 	if reason == FailoverOverloaded && entry.overloadStreak > overloadEscalationCap {
