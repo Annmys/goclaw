@@ -16,7 +16,6 @@ import { Events } from "@/api/protocol";
 import type { TeamTaskData, TeamTaskComment, TeamTaskEvent, TeamTaskAttachment } from "@/types/team";
 import type { TeamTaskEventPayload } from "@/types/team-events";
 import { taskStatusBadgeVariant, isTerminalStatus } from "./task-utils";
-import { formatTaskStatus } from "../board/board-utils";
 import { TaskDetailContent } from "./task-detail-content";
 import { TaskDetailAttachments } from "./task-detail-attachments";
 import { TaskDetailComments } from "./task-detail-comments";
@@ -128,7 +127,7 @@ export function TaskDetailDialog({
               <Badge variant="outline" className="font-mono text-xs">{task.identifier}</Badge>
             )}
             <Badge variant={taskStatusBadgeVariant(task.status)} className="text-xs">
-              {formatTaskStatus(task.status)}
+              {task.status.replace(/_/g, " ")}
             </Badge>
           </div>
           <DialogTitle className="text-base sm:text-lg">{task.subject}</DialogTitle>

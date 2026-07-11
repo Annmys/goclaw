@@ -15,7 +15,7 @@ export interface RuntimeStatus {
   ready: boolean;
 }
 
-export function useRuntimes(enabled = true) {
+export function useRuntimes() {
   const http = useHttp();
   const connected = useAuthStore((s) => s.connected);
 
@@ -23,7 +23,7 @@ export function useRuntimes(enabled = true) {
     queryKey: queryKeys.skills.runtimes,
     queryFn: () => http.get<RuntimeStatus>("/v1/skills/runtimes"),
     staleTime: 5 * 60_000,
-    enabled: connected && enabled,
+    enabled: connected,
   });
 
   const refresh = useCallback(() => { refetch(); }, [refetch]);

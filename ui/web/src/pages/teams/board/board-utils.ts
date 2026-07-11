@@ -22,21 +22,6 @@ export const STATUS_COLORS: Record<string, string> = {
   cancelled: "bg-gray-400",
 };
 
-export const STATUS_LABELS_ZH: Record<string, string> = {
-  pending: "待处理",
-  blocked: "已阻塞",
-  in_progress: "进行中",
-  completed: "已完成",
-  failed: "失败",
-  cancelled: "已取消",
-  in_review: "待审核",
-  pending_approval: "待批准",
-};
-
-export function formatTaskStatus(status: string): string {
-  return STATUS_LABELS_ZH[status] ?? status.replace(/_/g, " ");
-}
-
 /** Group tasks by a field for kanban columns */
 export function groupTasksBy(
   tasks: TeamTaskData[],

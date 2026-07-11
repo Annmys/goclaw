@@ -1,13 +1,13 @@
-﻿{
+{
   "groups": {
     "core": "核心",
-    "workflow": "工作流",
     "conversations": "会话",
     "connectivity": "连接",
     "capabilities": "能力",
     "data": "数据",
     "monitoring": "监控",
-    "system": "系统"
+    "system": "系统",
+    "workflow": "工作流"
   },
   "nav": {
     "agentTeams": "Agent Link & Team",
@@ -18,11 +18,6 @@
     "channels": "Channel",
     "contacts": "联系人",
     "chat": "对话",
-    "workflow": "Workflow",
-    "workflowAI": "流程管理",
-    "workflowBuilder": "流程画布",
-    "workflowDefinitions": "流程库",
-    "workflowRuns": "运行记录",
     "config": "配置",
     "cron": "定时任务",
     "hooks": "Hooks",
@@ -31,7 +26,6 @@
     "mcpServers": "MCP 服务器",
     "memory": "记忆",
     "knowledgeGraph": "Knowledge Graph",
-    "localKnowledge": "本地知识源",
     "nodes": "Nodes",
     "overview": "概览",
     "pendingMessages": "待处理消息",
@@ -50,7 +44,9 @@
     "packages": "软件包",
     "tenants": "租户",
     "backupRestore": "备份与恢复",
-    "evolutionCenter": "智能进化中心"
+    "workstations": "工作站",
+    "workflowAI": "AI 建流程",
+    "workflowDefinitions": "流程库",
+    "workflowBuilder": "流程画布"
   }
 }
-

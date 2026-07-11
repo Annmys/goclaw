@@ -46,7 +46,6 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             .then((res) => {
               const tenants = res?.tenants ?? [];
               store.setAvailableTenants(tenants);
-              store.setTenantsLoaded(true);
 
               // Auto-select tenant if applicable
               const savedScope = localStorage.getItem(LOCAL_STORAGE_KEYS.TENANT_ID);
@@ -75,7 +74,6 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             })
             .catch(() => {
               // Non-critical: silently ignore if not supported
-              store.setTenantsLoaded(true);
             });
         }
         if (state === "disconnected") {
@@ -83,13 +81,15 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           store.setTenant("", "", "", false);
           store.setConnectInfo({ isMasterScope: false, edition: "standard" });
           store.setAvailableTenants([]);
-          store.setTenantsLoaded(false);
           store.setTenantSelected(false);
         }
       },
     );
     wsRef.current.onAuthFailure = () => {
-      useAuthStore.getState().logout();
+      // Don't logout if authenticated via browser pairing (no token)
+      const state = useAuthStore.getState();
+      if (state.senderID && !state.token) return;
+      state.logout();
     };
   }
   const ws = wsRef.current;
@@ -102,7 +102,10 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       () => useAuthStore.getState().senderID,
     );
     client.onAuthFailure = () => {
-      useAuthStore.getState().logout();
+      // Don't logout if authenticated via browser pairing (no token)
+      const state = useAuthStore.getState();
+      if (state.senderID && !state.token) return;
+      state.logout();
     };
     return client;
   }, []);

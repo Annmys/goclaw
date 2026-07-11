@@ -63,21 +63,5 @@ export function useTenantsAdmin() {
     [ws, invalidate],
   );
 
-  const deleteTenant = useCallback(
-    async (tenantId: string) => {
-      try {
-        await ws.call(Methods.TENANTS_DELETE, { id: tenantId });
-        await invalidate();
-        queryClient.removeQueries({ queryKey: queryKeys.tenants.detail(tenantId) });
-        queryClient.removeQueries({ queryKey: queryKeys.tenants.users(tenantId) });
-        toast.success(i18next.t("tenants:deleteTenant"), tenantId);
-      } catch (err) {
-        toast.error(i18next.t("tenants:deleteTenant"), err instanceof Error ? err.message : "");
-        throw err;
-      }
-    },
-    [ws, invalidate, queryClient],
-  );
-
-  return { tenants, loading, refreshing, refresh: invalidate, createTenant, deleteTenant, isOwner };
+  return { tenants, loading, refreshing, refresh: invalidate, createTenant, isOwner };
 }

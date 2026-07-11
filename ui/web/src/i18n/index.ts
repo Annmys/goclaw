@@ -28,7 +28,6 @@ import enTts from "./locales/en/tts.json";
 import enSetup from "./locales/en/setup.json";
 import enMemory from "./locales/en/memory.json";
 import enVault from "./locales/en/vault.json";
-import enLocalKnowledge from "./locales/en/local-knowledge.json";
 import enStorage from "./locales/en/storage.json";
 import enPendingMessages from "./locales/en/pending-messages.json";
 import enContacts from "./locales/en/contacts.json";
@@ -42,6 +41,7 @@ import enImportExport from "./locales/en/import-export.json";
 import enV3Capabilities from "./locales/en/v3-capabilities.json";
 import enBackup from "./locales/en/backup.json";
 import enHooks from "./locales/en/hooks.json";
+import enWorkstations from "./locales/en/workstations.json";
 
 // --- VI namespaces ---
 import viCommon from "./locales/vi/common.json";
@@ -70,7 +70,6 @@ import viTts from "./locales/vi/tts.json";
 import viSetup from "./locales/vi/setup.json";
 import viMemory from "./locales/vi/memory.json";
 import viVault from "./locales/vi/vault.json";
-import viLocalKnowledge from "./locales/vi/local-knowledge.json";
 import viStorage from "./locales/vi/storage.json";
 import viPendingMessages from "./locales/vi/pending-messages.json";
 import viContacts from "./locales/vi/contacts.json";
@@ -84,6 +83,7 @@ import viImportExport from "./locales/vi/import-export.json";
 import viV3Capabilities from "./locales/vi/v3-capabilities.json";
 import viBackup from "./locales/vi/backup.json";
 import viHooks from "./locales/vi/hooks.json";
+import viWorkstations from "./locales/vi/workstations.json";
 
 // --- ZH namespaces ---
 import zhCommon from "./locales/zh/common.json";
@@ -112,7 +112,6 @@ import zhTts from "./locales/zh/tts.json";
 import zhSetup from "./locales/zh/setup.json";
 import zhMemory from "./locales/zh/memory.json";
 import zhVault from "./locales/zh/vault.json";
-import zhLocalKnowledge from "./locales/zh/local-knowledge.json";
 import zhStorage from "./locales/zh/storage.json";
 import zhPendingMessages from "./locales/zh/pending-messages.json";
 import zhContacts from "./locales/zh/contacts.json";
@@ -126,6 +125,7 @@ import zhImportExport from "./locales/zh/import-export.json";
 import zhV3Capabilities from "./locales/zh/v3-capabilities.json";
 import zhBackup from "./locales/zh/backup.json";
 import zhHooks from "./locales/zh/hooks.json";
+import zhWorkstations from "./locales/zh/workstations.json";
 
 const STORAGE_KEY = "goclaw:language";
 
@@ -143,11 +143,12 @@ const ns = [
   "agents", "teams", "sessions", "skills", "cron", "config",
   "channels", "providers", "traces", "events",
   "usage", "approvals", "nodes", "logs", "tools", "mcp", "tts",
-  "setup", "memory", "vault", "local-knowledge", "storage", "pending-messages", "contacts", "activity", "api-keys",
+  "setup", "memory", "vault", "storage", "pending-messages", "contacts", "activity", "api-keys",
   "cli-credentials", "packages", "tenants", "system-settings", "import-export",
   "v3-capabilities",
   "backup",
   "hooks",
+  "workstations",
 ] as const;
 
 i18n.use(initReactI18next).init({
@@ -159,7 +160,7 @@ i18n.use(initReactI18next).init({
       channels: enChannels, providers: enProviders, traces: enTraces,
       events: enEvents, usage: enUsage,
       approvals: enApprovals, nodes: enNodes, logs: enLogs, tools: enTools,
-      mcp: enMcp, tts: enTts, setup: enSetup, memory: enMemory, vault: enVault, "local-knowledge": enLocalKnowledge, storage: enStorage,
+      mcp: enMcp, tts: enTts, setup: enSetup, memory: enMemory, vault: enVault, storage: enStorage,
       "pending-messages": enPendingMessages,
       contacts: enContacts, activity: enActivity, "api-keys": enApiKeys,
       "cli-credentials": enCliCredentials,
@@ -170,6 +171,7 @@ i18n.use(initReactI18next).init({
       "v3-capabilities": enV3Capabilities,
       backup: enBackup,
       hooks: enHooks,
+      workstations: enWorkstations,
     },
     vi: {
       common: viCommon, sidebar: viSidebar, topbar: viTopbar, login: viLogin,
@@ -178,7 +180,7 @@ i18n.use(initReactI18next).init({
       channels: viChannels, providers: viProviders, traces: viTraces,
       events: viEvents, usage: viUsage,
       approvals: viApprovals, nodes: viNodes, logs: viLogs, tools: viTools,
-      mcp: viMcp, tts: viTts, setup: viSetup, memory: viMemory, vault: viVault, "local-knowledge": viLocalKnowledge, storage: viStorage,
+      mcp: viMcp, tts: viTts, setup: viSetup, memory: viMemory, vault: viVault, storage: viStorage,
       "pending-messages": viPendingMessages,
       contacts: viContacts, activity: viActivity, "api-keys": viApiKeys,
       "cli-credentials": viCliCredentials,
@@ -189,6 +191,7 @@ i18n.use(initReactI18next).init({
       "v3-capabilities": viV3Capabilities,
       backup: viBackup,
       hooks: viHooks,
+      workstations: viWorkstations,
     },
     zh: {
       common: zhCommon, sidebar: zhSidebar, topbar: zhTopbar, login: zhLogin,
@@ -197,7 +200,7 @@ i18n.use(initReactI18next).init({
       channels: zhChannels, providers: zhProviders, traces: zhTraces,
       events: zhEvents, usage: zhUsage,
       approvals: zhApprovals, nodes: zhNodes, logs: zhLogs, tools: zhTools,
-      mcp: zhMcp, tts: zhTts, setup: zhSetup, memory: zhMemory, vault: zhVault, "local-knowledge": zhLocalKnowledge, storage: zhStorage,
+      mcp: zhMcp, tts: zhTts, setup: zhSetup, memory: zhMemory, vault: zhVault, storage: zhStorage,
       "pending-messages": zhPendingMessages,
       contacts: zhContacts, activity: zhActivity, "api-keys": zhApiKeys,
       "cli-credentials": zhCliCredentials,
@@ -208,6 +211,7 @@ i18n.use(initReactI18next).init({
       "v3-capabilities": zhV3Capabilities,
       backup: zhBackup,
       hooks: zhHooks,
+      workstations: zhWorkstations,
     },
   },
   ns: [...ns],

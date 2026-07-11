@@ -40,13 +40,9 @@ export function SigmaGraphSearch({ sigma, graph, onNodeSelect, placeholder = "Se
       for (let i = 0; i < nodes.length && matches.length < 10; i++) {
         const node = nodes[i]!;
         const attrs = graph.getNodeAttributes(node);
-        const label = typeof attrs.label === "string" ? attrs.label : "";
+        const label = (attrs.label as string) || "";
         if (label.toLowerCase().includes(lower)) {
-          matches.push({
-            id: node,
-            label,
-            color: typeof attrs.color === "string" ? attrs.color : "#9ca3af",
-          });
+          matches.push({ id: node, label, color: attrs.color as string });
         }
       }
       setResults(matches);

@@ -10,7 +10,7 @@ import { usePagination } from "@/hooks/use-pagination";
 import type { TeamTaskData, TeamTaskComment, TeamTaskEvent, TeamTaskAttachment } from "@/types/team";
 import type { TeamMemberData } from "@/types/team";
 import { taskStatusBadgeVariant, isTerminalStatus } from "./task-utils";
-import { buildTaskLookup, buildMemberLookup, formatTaskStatus } from "../board/board-utils";
+import { buildTaskLookup, buildMemberLookup } from "../board/board-utils";
 
 const TaskDetailDialog = lazy(() =>
   import("./task-detail-dialog").then((m) => ({ default: m.TaskDetailDialog }))
@@ -232,7 +232,7 @@ export function TaskList({
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-1">
-                <Badge variant={taskStatusBadgeVariant(task.status)}>{formatTaskStatus(task.status)}</Badge>
+                <Badge variant={taskStatusBadgeVariant(task.status)}>{task.status.replace(/_/g, " ")}</Badge>
                 {isTeamV2 && task.followup_at && task.status === "in_progress" && (
                   <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-2xs text-amber-700 dark:text-amber-400">
                     {t("tasks.badges.awaitingReply")}

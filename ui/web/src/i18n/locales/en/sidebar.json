@@ -1,22 +1,17 @@
 {
   "groups": {
     "core": "Core",
-    "workflow": "Workflow",
     "conversations": "Conversations",
     "connectivity": "Connectivity",
     "capabilities": "Capabilities",
     "data": "Data",
     "monitoring": "Monitoring",
-    "system": "System"
+    "system": "System",
+    "workflow": "Workflow"
   },
   "nav": {
     "overview": "Overview",
     "chat": "Chat",
-    "workflow": "Workflow",
-    "workflowAI": "Manage",
-    "workflowBuilder": "Builder",
-    "workflowDefinitions": "Workflows",
-    "workflowRuns": "Runs",
     "agents": "Agents",
     "agentTeams": "Agent Link & Team",
     "sessions": "Sessions",
@@ -32,7 +27,6 @@
     "memory": "Memory",
     "vault": "Vault",
     "knowledgeGraph": "Knowledge Graph",
-    "localKnowledge": "Local Knowledge",
     "traces": "Traces",
     "realtimeEvents": "Realtime Events",
     "usage": "Usage",
@@ -49,8 +43,11 @@
     "apiKeys": "API Keys",
     "apiDocs": "API Docs",
     "packages": "Packages",
-    "evolutionCenter": "Evolution Center",
     "tenants": "Tenants",
-    "backupRestore": "Backup & Restore"
+    "backupRestore": "Backup & Restore",
+    "workstations": "Workstations",
+    "workflowAI": "AI Builder",
+    "workflowDefinitions": "Workflows",
+    "workflowBuilder": "Canvas"
   }
 }

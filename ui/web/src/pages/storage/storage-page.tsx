@@ -22,7 +22,6 @@ import { buildTree, mergeSubtree, setNodeLoading, formatSize, isTextFile } from 
 import { FileBrowser } from "@/components/shared/file-browser";
 import { useStorage, useStorageSize } from "./hooks/use-storage";
 import { useHttp } from "@/hooks/use-ws";
-import { useAuthStore } from "@/stores/use-auth-store";
 
 const FileUploadDialog = lazy(() =>
   import("@/components/shared/file-upload-dialog").then((m) => ({ default: m.FileUploadDialog }))
@@ -31,8 +30,6 @@ const FileUploadDialog = lazy(() =>
 export function StoragePage() {
   const { t } = useTranslation("storage");
   const http = useHttp();
-  const role = useAuthStore((s) => s.role);
-  const canManageStorage = role === "admin" || role === "owner";
   const { files, baseDir, loading, listFiles, loadSubtree, readFile, deleteFile, fetchRawBlob } = useStorage();
   const { totalSize, loading: sizeLoading, refreshSize } = useStorageSize();
 
@@ -203,12 +200,10 @@ export function StoragePage() {
         }
         actions={
           <div className="flex items-center gap-2">
-            {canManageStorage && (
-              <Button variant="outline" size="sm" onClick={() => { setUploadFolder(activeFolder); setUploadOpen(true); }}>
-                <Upload className="h-4 w-4 mr-1.5" />
-                {t("common:uploadLabel", "Upload")}
-              </Button>
-            )}
+            <Button variant="outline" size="sm" onClick={() => { setUploadFolder(activeFolder); setUploadOpen(true); }}>
+              <Upload className="h-4 w-4 mr-1.5" />
+              {t("common:uploadLabel", "Upload")}
+            </Button>
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-1.5 ${loading ? "animate-spin" : ""}`} />
               {t("common:refresh", "Refresh")}
@@ -225,26 +220,24 @@ export function StoragePage() {
           onSelect={handleSelect}
           contentLoading={contentLoading}
           fileContent={fileContent}
-          onDelete={canManageStorage ? handleDeleteRequest : undefined}
+          onDelete={handleDeleteRequest}
           onLoadMore={handleLoadMore}
-          onMove={canManageStorage ? handleMove : undefined}
+          onMove={handleMove}
           onDownload={handleDownload}
           fetchBlob={handleFetchBlob}
           showSize
         />
       </div>
 
-      {canManageStorage && (
-        <Suspense fallback={null}>
-          <FileUploadDialog
-            open={uploadOpen}
-            onOpenChange={handleUploadClose}
-            onUpload={handleUploadFile}
-            title={t("upload.title")}
-            description={uploadFolder ? `${t("upload.description")} → ${uploadFolder}/` : t("upload.description")}
-          />
-        </Suspense>
-      )}
+      <Suspense fallback={null}>
+        <FileUploadDialog
+          open={uploadOpen}
+          onOpenChange={handleUploadClose}
+          onUpload={handleUploadFile}
+          title={t("upload.title")}
+          description={uploadFolder ? `${t("upload.description")} → ${uploadFolder}/` : t("upload.description")}
+        />
+      </Suspense>
 
       {/* Delete confirmation dialog */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>

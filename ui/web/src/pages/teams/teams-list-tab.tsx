@@ -14,7 +14,6 @@ import { TeamCard } from "./team-card";
 import { TeamListRow } from "./team-list-row";
 import { TeamCreateDialog } from "./team-create-dialog";
 import { usePagination } from "@/hooks/use-pagination";
-import { useAuthStore } from "@/stores/use-auth-store";
 
 interface TeamsListTabProps {
   onSelectTeam: (teamId: string) => void;
@@ -24,8 +23,6 @@ export function TeamsListTab({ onSelectTeam }: TeamsListTabProps) {
   const { t } = useTranslation("teams");
   const { t: tc } = useTranslation("common");
   const { teams, loading, load, createTeam, deleteTeam } = useTeams();
-  const role = useAuthStore((s) => s.role);
-  const canManageTeams = role === "admin" || role === "owner";
   const showSkeleton = useDeferredLoading(loading && teams.length === 0);
 
   const [search, setSearch] = useState("");
@@ -47,11 +44,9 @@ export function TeamsListTab({ onSelectTeam }: TeamsListTabProps) {
       {/* Toolbar: search + create + view toggle */}
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <SearchInput value={search} onChange={setSearch} placeholder={t("searchPlaceholder")} className="max-w-sm" />
-        {canManageTeams && (
-          <Button onClick={() => setCreateOpen(true)} className="gap-1 ml-auto sm:ml-0">
-            <Plus className="h-4 w-4" /> {t("createTeam")}
-          </Button>
-        )}
+        <Button onClick={() => setCreateOpen(true)} className="gap-1 ml-auto sm:ml-0">
+          <Plus className="h-4 w-4" /> {t("createTeam")}
+        </Button>
         <TooltipProvider>
           <div className="sm:ml-auto flex items-center gap-0.5 rounded-md border p-0.5">
             <Tooltip>
@@ -92,13 +87,13 @@ export function TeamsListTab({ onSelectTeam }: TeamsListTabProps) {
               {viewMode === "card" ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {pageItems.map((team) => (
-                    <TeamCard key={team.id} team={team} onClick={() => onSelectTeam(team.id)} onDelete={canManageTeams ? () => setDeleteTarget({ id: team.id, name: team.name }) : undefined} />
+                    <TeamCard key={team.id} team={team} onClick={() => onSelectTeam(team.id)} onDelete={() => setDeleteTarget({ id: team.id, name: team.name })} />
                   ))}
                 </div>
               ) : (
                 <div className="flex flex-col gap-2">
                   {pageItems.map((team) => (
-                    <TeamListRow key={team.id} team={team} onClick={() => onSelectTeam(team.id)} onDelete={canManageTeams ? () => setDeleteTarget({ id: team.id, name: team.name }) : undefined} />
+                    <TeamListRow key={team.id} team={team} onClick={() => onSelectTeam(team.id)} onDelete={() => setDeleteTarget({ id: team.id, name: team.name })} />
                   ))}
                 </div>
               )}
@@ -110,9 +105,7 @@ export function TeamsListTab({ onSelectTeam }: TeamsListTabProps) {
         )}
       </div>
 
-      {canManageTeams && (
-        <TeamCreateDialog open={createOpen} onOpenChange={setCreateOpen} onCreate={async (data) => { await createTeam(data); }} />
-      )}
+      <TeamCreateDialog open={createOpen} onOpenChange={setCreateOpen} onCreate={async (data) => { await createTeam(data); }} />
 
       <ConfirmDialog
         open={!!deleteTarget}

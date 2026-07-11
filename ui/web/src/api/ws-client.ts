@@ -229,12 +229,6 @@ export class WsClient {
 
       // Browser pairing: server requires approval
       if (res?.status === "pending_pairing" && res.pairing_code && res.sender_id) {
-        if (this.getSenderID() && !this.getToken()) {
-          this.intentionalClose = true;
-          this.ws?.close();
-          this.onAuthFailure?.();
-          return;
-        }
         if (!this.pairingInProgress) {
           this.pairingInProgress = true;
           this.onPairingRequired?.(res.pairing_code, res.sender_id);

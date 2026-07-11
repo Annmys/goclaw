@@ -27,36 +27,6 @@ export const VAULT_TYPE_COLORS_DARK: Record<string, string> = {
 const DEFAULT_COLOR_LIGHT = "#475569"; // slate-600
 const DEFAULT_COLOR_DARK = "#94a3b8";  // slate-400
 
-function safeString(value: unknown, fallback = ""): string {
-  return typeof value === "string" && value.trim() ? value : fallback;
-}
-
-function vaultNodeLabel(node: VaultGraphNode): string {
-  const title = safeString(node.t);
-  const path = safeString(node.p);
-  const id = safeString(node.id, "unknown");
-  const fileName = path ? path.split("/").filter(Boolean).pop() : "";
-  return title || fileName || id.slice(0, 8);
-}
-
-function safeEdgeKey(graph: Graph, preferred: string, from: string, to: string): string {
-  const base = preferred || `${from}->${to}`;
-  let key = base;
-  let i = 1;
-  while (graph.hasEdge(key)) {
-    key = `${base}#${i++}`;
-  }
-  return key;
-}
-
-function hasDirectedEdge(graph: Graph, from: string, to: string): boolean {
-  try {
-    return graph.hasDirectedEdge(from, to);
-  } catch {
-    return false;
-  }
-}
-
 /** Get node color based on doc type and theme */
 export function getVaultNodeColor(docType: string, isDark: boolean): string {
   const colors = isDark ? VAULT_TYPE_COLORS_DARK : VAULT_TYPE_COLORS_LIGHT;
@@ -83,31 +53,25 @@ export function limitVaultDocsByDegree(
 /** Build graph from lightweight DTOs (degree pre-computed, no client loop). */
 export function buildVaultGraphFromDTO(nodes: VaultGraphNode[], edges: VaultGraphEdge[]): Graph {
   const graph = new Graph({ multi: false, type: "directed" });
-  const nodeIds = new Set<string>();
+  const nodeIds = new Set(nodes.map((n) => n.id));
 
   for (const n of nodes) {
-    const id = safeString(n.id);
-    if (!id || graph.hasNode(id)) continue;
-    nodeIds.add(id);
-    const docType = safeString(n.dt, "document");
-    graph.addNode(id, {
-      label: truncateMiddle(vaultNodeLabel(n), 28),
+    graph.addNode(n.id, {
+      label: truncateMiddle(n.t || n.p.split("/").pop() || n.id.slice(0, 8), 28),
       x: 0, y: 0,
-      size: getNodeSize(Number.isFinite(n.deg) ? n.deg : 0, nodes.length),
-      color: VAULT_TYPE_COLORS_LIGHT[docType] ?? DEFAULT_COLOR_LIGHT,
-      docType,
+      size: getNodeSize(n.deg, nodes.length),
+      color: VAULT_TYPE_COLORS_LIGHT[n.dt] ?? DEFAULT_COLOR_LIGHT,
+      docType: n.dt,
     });
   }
 
   for (const e of edges) {
-    const from = safeString(e.from);
-    const to = safeString(e.to);
-    if (!from || !to || from === to || !nodeIds.has(from) || !nodeIds.has(to) || hasDirectedEdge(graph, from, to)) continue;
-    const edgeId = safeString(e.id, `${from}->${to}`);
-    graph.addEdgeWithKey(safeEdgeKey(graph, edgeId, from, to), from, to, {
-      label: safeString(e.type, "link"), type: "curvedArrow",
-      color: "#a1a1aa", size: 0.4,
-    });
+    if (nodeIds.has(e.from) && nodeIds.has(e.to) && !graph.hasEdge(e.from, e.to)) {
+      graph.addEdgeWithKey(e.id, e.from, e.to, {
+        label: e.type, type: "curvedArrow",
+        color: "#a1a1aa", size: 0.4,
+      });
+    }
   }
 
   return graph;
@@ -147,10 +111,10 @@ export function buildVaultGraph(
 
   // Add edges (only where both endpoints exist)
   for (const link of links) {
-    if (link.from_doc_id !== link.to_doc_id && docIds.has(link.from_doc_id) && docIds.has(link.to_doc_id)) {
+    if (docIds.has(link.from_doc_id) && docIds.has(link.to_doc_id)) {
       // Avoid duplicate edges for same source→target
-      if (!hasDirectedEdge(graph, link.from_doc_id, link.to_doc_id)) {
-        graph.addEdgeWithKey(safeEdgeKey(graph, link.id, link.from_doc_id, link.to_doc_id), link.from_doc_id, link.to_doc_id, {
+      if (!graph.hasEdge(link.from_doc_id, link.to_doc_id)) {
+        graph.addEdgeWithKey(link.id, link.from_doc_id, link.to_doc_id, {
           label: link.link_type,
           type: "curvedArrow",
           color: "#a1a1aa", // zinc-400, lighter gray

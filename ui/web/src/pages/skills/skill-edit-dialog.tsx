@@ -20,59 +20,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SKILL_ACCESS_MODE_ORDER } from "./lib/skill-access-mode";
 import type { SkillInfo } from "@/types/skill";
-import { formatSkillLabel } from "./skill-label";
 
 interface SkillEditDialogProps {
   skill: SkillInfo;
   onClose: () => void;
   onSave: (id: string, updates: Record<string, unknown>) => Promise<unknown>;
-  getSkillFileContent: (id: string, path: string, version?: number) => Promise<{ content: string; path: string; size: number }>;
 }
 
-export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }: SkillEditDialogProps) {
+export function SkillEditDialog({ skill, onClose, onSave }: SkillEditDialogProps) {
   const { t } = useTranslation("skills");
   const [name, setName] = useState(skill.name);
   const [description, setDescription] = useState(skill.description);
-  const [visibility, setVisibility] = useState(skill.visibility ?? "private");
+  const [accessMode, setAccessMode] = useState(skill.visibility ?? "private");
   const [tags, setTags] = useState<string[]>(skill.tags ?? []);
   const [tagInput, setTagInput] = useState("");
-  const [content, setContent] = useState("");
-  const [initialContent, setInitialContent] = useState("");
-  const [contentLoading, setContentLoading] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setName(skill.name);
     setDescription(skill.description);
-    setVisibility(skill.visibility ?? "private");
+    setAccessMode(skill.visibility ?? "private");
     setTags(skill.tags ?? []);
-    setContent("");
-    setInitialContent("");
   }, [skill]);
-
-  useEffect(() => {
-    if (!skill.id || skill.is_system) return;
-    let cancelled = false;
-    setContentLoading(true);
-    getSkillFileContent(skill.id, "SKILL.md", skill.version)
-      .then((res) => {
-        if (cancelled) return;
-        setContent(res.content);
-        setInitialContent(res.content);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setContent("");
-        setInitialContent("");
-      })
-      .finally(() => {
-        if (!cancelled) setContentLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [skill.id, skill.is_system, skill.version, getSkillFileContent]);
 
   const addTag = () => {
     const tag = tagInput.trim().toLowerCase();
@@ -90,11 +61,7 @@ export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }:
     if (!skill.id) return;
     setLoading(true);
     try {
-      const updates: Record<string, unknown> = { name, description, visibility, tags };
-      if (!skill.is_system && content !== initialContent) {
-        updates.content = content;
-      }
-      await onSave(skill.id, updates);
+      await onSave(skill.id, { name, description, visibility: accessMode, tags });
       onClose();
     } catch {
       // toast shown by hook — keep dialog open
@@ -105,25 +72,14 @@ export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }:
 
   return (
     <Dialog open onOpenChange={() => onClose()}>
-      <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("edit.title")}: {formatSkillLabel(skill)}</DialogTitle>
+          <DialogTitle>{t("edit.title")}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
           <div className="space-y-1.5">
-            <Label htmlFor="skill-slug">{t("edit.internalName")}</Label>
-            <Input
-              id="skill-slug"
-              value={skill.slug || ""}
-              readOnly
-              className="font-mono text-xs"
-            />
-            <p className="text-xs text-muted-foreground">{t("edit.internalNameHint")}</p>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="skill-name">{t("edit.displayName")}</Label>
+            <Label htmlFor="skill-name">{t("edit.name")}</Label>
             <Input
               id="skill-name"
               value={name}
@@ -142,15 +98,15 @@ export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }:
           </div>
 
           <div className="space-y-1.5">
-            <Label>{t("edit.visibility")}</Label>
-            <Select value={visibility} onValueChange={setVisibility}>
+            <Label>{t("edit.accessMode")}</Label>
+            <Select value={accessMode} onValueChange={setAccessMode}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="private">{t("edit.privateOption")}</SelectItem>
-                <SelectItem value="internal">{t("edit.internalOption")}</SelectItem>
-                <SelectItem value="public">{t("edit.publicOption")}</SelectItem>
+                {SKILL_ACCESS_MODE_ORDER.map((mode) => (
+                  <SelectItem key={mode} value={mode}>{t(`accessMode.${mode}`)}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -184,23 +140,6 @@ export function SkillEditDialog({ skill, onClose, onSave, getSkillFileContent }:
               </div>
             )}
           </div>
-
-          {!skill.is_system && (
-            <div className="space-y-1.5">
-              <Label htmlFor="skill-content">{t("edit.content")}</Label>
-              <Textarea
-                id="skill-content"
-                value={content}
-                onChange={(e) => setContent(e.target.value)}
-                rows={18}
-                spellCheck={false}
-                disabled={contentLoading}
-                className="font-mono text-xs leading-relaxed"
-                placeholder={contentLoading ? t("edit.contentLoading") : t("edit.contentPlaceholder")}
-              />
-              <p className="text-xs text-muted-foreground">{t("edit.contentHint")}</p>
-            </div>
-          )}
         </div>
 
         <DialogFooter>

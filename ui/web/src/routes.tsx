@@ -18,21 +18,6 @@ const OverviewPage = lazyWithRetry(() =>
 const ChatPage = lazyWithRetry(() =>
   import("@/pages/chat/chat-page").then((m) => ({ default: m.ChatPage })),
 );
-const WorkflowPage = lazyWithRetry(() =>
-  import("@/pages/workflow/workflow-page").then((m) => ({ default: m.WorkflowPage })),
-);
-const WorkflowBuilderPage = lazyWithRetry(() =>
-  import("@/pages/workflow-builder/workflow-builder-page").then((m) => ({ default: m.WorkflowBuilderPage })),
-);
-const WorkflowDefinitionsPage = lazyWithRetry(() =>
-  import("@/pages/workflow-builder/workflow-definitions-page").then((m) => ({ default: m.WorkflowDefinitionsPage })),
-);
-const WorkflowAIPage = lazyWithRetry(() =>
-  import("@/pages/workflow-builder/workflow-ai-page").then((m) => ({ default: m.WorkflowAIPage })),
-);
-const WorkflowChatRunPage = lazyWithRetry(() =>
-  import("@/pages/workflow-builder/workflow-chat-run-page").then((m) => ({ default: m.WorkflowChatRunPage })),
-);
 const AgentsPage = lazyWithRetry(() =>
   import("@/pages/agents/agents-page").then((m) => ({ default: m.AgentsPage })),
 );
@@ -84,9 +69,6 @@ const BuiltinToolsPage = lazyWithRetry(() =>
 const TtsPage = lazyWithRetry(() =>
   import("@/pages/tts/tts-page").then((m) => ({ default: m.TtsPage })),
 );
-const LocalKnowledgePage = lazyWithRetry(() =>
-  import("@/pages/local-knowledge/local-knowledge-page").then((m) => ({ default: m.LocalKnowledgePage })),
-);
 const EventsPage = lazyWithRetry(() =>
   import("@/pages/events/events-page").then((m) => ({ default: m.EventsPage })),
 );
@@ -114,9 +96,6 @@ const ContactsPage = lazyWithRetry(() =>
 const ActivityPage = lazyWithRetry(() =>
   import("@/pages/activity/activity-page").then((m) => ({ default: m.ActivityPage })),
 );
-const CliCredentialsPage = lazyWithRetry(() =>
-  import("@/pages/cli-credentials/cli-credentials-page").then((m) => ({ default: m.CliCredentialsPage })),
-);
 const ApiKeysPage = lazyWithRetry(() =>
   import("@/pages/api-keys/api-keys-page").then((m) => ({ default: m.ApiKeysPage })),
 );
@@ -135,8 +114,23 @@ const BackupRestorePage = lazyWithRetry(() =>
 const HooksPage = lazyWithRetry(() =>
   import("@/pages/hooks").then((m) => ({ default: m.HooksPage })),
 );
-const EvolutionCenterPage = lazyWithRetry(() =>
-  import("@/pages/evolution-center/evolution-center-page").then((m) => ({ default: m.EvolutionCenterPage })),
+const WorkstationsPage = lazyWithRetry(() =>
+  import("@/pages/workstations/workstations-page").then((m) => ({ default: m.WorkstationsPage })),
+);
+const WorkflowPage = lazyWithRetry(() =>
+  import("@/pages/workflow/workflow-page").then((m) => ({ default: m.WorkflowPage })),
+);
+const WorkflowBuilderPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-builder-page").then((m) => ({ default: m.WorkflowBuilderPage })),
+);
+const WorkflowDefinitionsPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-definitions-page").then((m) => ({ default: m.WorkflowDefinitionsPage })),
+);
+const WorkflowAIPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-ai-page").then((m) => ({ default: m.WorkflowAIPage })),
+);
+const WorkflowChatRunPage = lazyWithRetry(() =>
+  import("@/pages/workflow-builder/workflow-chat-run-page").then((m) => ({ default: m.WorkflowChatRunPage })),
 );
 const TenantSelectorPage = lazyWithRetry(() =>
   import("@/pages/login/tenant-selector").then((m) => ({ default: m.TenantSelectorPage })),
@@ -180,15 +174,9 @@ export function AppRoutes() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to={ROUTES.CHAT} replace />} />
+          <Route index element={<Navigate to={ROUTES.OVERVIEW} replace />} />
           <Route path={ROUTES.OVERVIEW} element={<OverviewPage />} />
           <Route path={ROUTES.CHAT_PATTERN} element={<ChatPage />} />
-          <Route path={ROUTES.WORKFLOW} element={<WorkflowPage />} />
-          <Route path={ROUTES.WORKFLOW_DEFINITIONS} element={<WorkflowDefinitionsPage />} />
-          <Route path={ROUTES.WORKFLOW_AI} element={<WorkflowAIPage />} />
-          <Route path={ROUTES.WORKFLOW_CHAT_RUN} element={<WorkflowChatRunPage />} />
-          <Route path={ROUTES.WORKFLOW_BUILDER} element={<WorkflowBuilderPage />} />
-          <Route path={ROUTES.WORKFLOW_BUILDER_EDIT} element={<WorkflowBuilderPage />} />
           <Route path={ROUTES.AGENTS} element={<AgentsPage key="list" />} />
           <Route path={ROUTES.IMPORT_EXPORT} element={<RequireAdmin><ImportExportPage /></RequireAdmin>} />
           <Route path={ROUTES.BACKUP_RESTORE} element={<RequireAdmin><BackupRestorePage /></RequireAdmin>} />
@@ -208,19 +196,18 @@ export function AppRoutes() {
           <Route path={ROUTES.CONFIG} element={<RequireCrossTenant><ConfigPage /></RequireCrossTenant>} />
           <Route path={ROUTES.PROVIDERS} element={<RequireAdmin><ProvidersPage key="list" /></RequireAdmin>} />
           <Route path={ROUTES.PROVIDER_DETAIL} element={<RequireAdmin><ProvidersPage key="detail" /></RequireAdmin>} />
-          <Route path={ROUTES.CLI_CREDENTIALS} element={<RequireAdmin><CliCredentialsPage /></RequireAdmin>} />
+          <Route path={ROUTES.CLI_CREDENTIALS} element={<Navigate to="/packages?tab=cli-credentials" replace />} />
           <Route path={ROUTES.API_KEYS} element={<RequireAdmin><ApiKeysPage /></RequireAdmin>} />
           <Route path={ROUTES.CHANNELS} element={<RequireAdmin><ChannelsPage key="list" /></RequireAdmin>} />
           <Route path={ROUTES.CHANNEL_DETAIL} element={<RequireAdmin><ChannelsPage key="detail" /></RequireAdmin>} />
           <Route path={ROUTES.NODES} element={<RequireAdmin><NodesPage /></RequireAdmin>} />
+          <Route path={ROUTES.WORKSTATIONS} element={<RequireAdmin><WorkstationsPage /></RequireAdmin>} />
           <Route path={ROUTES.LOGS} element={<RequireAdmin><LogsPage /></RequireAdmin>} />
           <Route path={ROUTES.BUILTIN_TOOLS} element={<RequireAdmin><BuiltinToolsPage /></RequireAdmin>} />
           <Route path={ROUTES.MCP} element={<RequireAdmin><MCPPage /></RequireAdmin>} />
           <Route path={ROUTES.TTS} element={<RequireCrossTenant><TtsPage /></RequireCrossTenant>} />
-          <Route path={ROUTES.LOCAL_KNOWLEDGE} element={<RequireAdmin><LocalKnowledgePage /></RequireAdmin>} />
-          <Route path={ROUTES.STORAGE} element={<StoragePage />} />
+          <Route path={ROUTES.STORAGE} element={<RequireAdmin><StoragePage /></RequireAdmin>} />
           <Route path={ROUTES.PACKAGES} element={<RequireAdmin><PackagesPage /></RequireAdmin>} />
-          <Route path={ROUTES.EVOLUTION_CENTER} element={<RequireAdmin><EvolutionCenterPage /></RequireAdmin>} />
           <Route path={ROUTES.TENANTS} element={<RequireCrossTenant><TenantsAdminPage /></RequireCrossTenant>} />
           <Route path={ROUTES.TENANT_DETAIL} element={<RequireCrossTenant><TenantDetailPage /></RequireCrossTenant>} />
 
@@ -228,7 +215,7 @@ export function AppRoutes() {
           <Route path={ROUTES.TRACES} element={<TracesPage key="list" />} />
           <Route path={ROUTES.TRACE_DETAIL} element={<TracesPage key="detail" />} />
           <Route path={ROUTES.EVENTS} element={<EventsPage />} />
-          <Route path={ROUTES.USAGE} element={<Navigate to={ROUTES.CHAT} replace />} />
+          <Route path={ROUTES.USAGE} element={<Navigate to={ROUTES.OVERVIEW} replace />} />
           <Route path={ROUTES.ACTIVITY} element={<ActivityPage />} />
           <Route path={ROUTES.CONTACTS} element={<ContactsPage />} />
           <Route path={ROUTES.APPROVALS} element={<ApprovalsPage />} />
@@ -236,10 +223,18 @@ export function AppRoutes() {
           <Route path={ROUTES.MEMORY} element={<MemoryPage />} />
           <Route path={ROUTES.VAULT} element={<VaultPage />} />
           <Route path={ROUTES.KNOWLEDGE_GRAPH} element={<KnowledgeGraphPage />} />
+
+          {/* Workflow routes */}
+          <Route path={ROUTES.WORKFLOW} element={<WorkflowPage />} />
+          <Route path={ROUTES.WORKFLOW_DEFINITIONS} element={<WorkflowDefinitionsPage />} />
+          <Route path={ROUTES.WORKFLOW_AI} element={<WorkflowAIPage />} />
+          <Route path={ROUTES.WORKFLOW_CHAT_RUN} element={<WorkflowChatRunPage />} />
+          <Route path={ROUTES.WORKFLOW_BUILDER} element={<WorkflowBuilderPage />} />
+          <Route path={ROUTES.WORKFLOW_BUILDER_EDIT} element={<WorkflowBuilderPage />} />
         </Route>
 
-        {/* Catch-all -> chat */}
-        <Route path="*" element={<Navigate to={ROUTES.CHAT} replace />} />
+        {/* Catch-all → overview */}
+        <Route path="*" element={<Navigate to={ROUTES.OVERVIEW} replace />} />
       </Routes>
     </Suspense>
     </ErrorBoundary>

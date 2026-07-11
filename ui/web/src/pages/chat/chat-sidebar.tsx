@@ -1,10 +1,9 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { PanelLeftClose, PanelLeftOpen, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AgentSelector } from "@/components/chat/agent-selector";
 import { SessionSwitcher } from "@/components/chat/session-switcher";
-import { cn } from "@/lib/utils";
 import type { SessionInfo } from "@/types/session";
 
 interface ChatSidebarProps {
@@ -16,8 +15,6 @@ interface ChatSidebarProps {
   onSessionSelect: (key: string) => void;
   onDeleteSession?: (key: string) => void;
   onNewChat: () => void;
-  sessionsCollapsed?: boolean;
-  onSessionsCollapsedChange?: (collapsed: boolean) => void;
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -29,53 +26,17 @@ export const ChatSidebar = memo(function ChatSidebar({
   onSessionSelect,
   onDeleteSession,
   onNewChat,
-  sessionsCollapsed = false,
-  onSessionsCollapsedChange,
 }: ChatSidebarProps) {
   const { t } = useTranslation("chat");
-  const ToggleIcon = sessionsCollapsed ? PanelLeftOpen : PanelLeftClose;
-
   return (
-    <div
-      className={cn(
-        "flex h-full flex-col border-r bg-background transition-[width] duration-200",
-        sessionsCollapsed ? "w-14 max-w-14" : "w-72 max-w-[85vw]",
-      )}
-    >
+    <div className="flex h-full w-72 max-w-[85vw] flex-col border-r bg-background">
       {/* Agent selector */}
-      <div className={cn("border-b", sessionsCollapsed ? "p-2" : "p-3")}>
-        {sessionsCollapsed ? (
-          <button
-            type="button"
-            onClick={() => onSessionsCollapsedChange?.(false)}
-            className="mx-auto flex cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            title={t("expandSessions")}
-            aria-label={t("expandSessions")}
-            aria-expanded={false}
-          >
-            <ToggleIcon className="h-4 w-4" />
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <div className="min-w-0 flex-1">
-              <AgentSelector value={agentId} onChange={onAgentChange} />
-            </div>
-            <button
-              type="button"
-              onClick={() => onSessionsCollapsedChange?.(true)}
-              className="cursor-pointer rounded-md p-2 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-              title={t("collapseSessions")}
-              aria-label={t("collapseSessions")}
-              aria-expanded
-            >
-              <ToggleIcon className="h-4 w-4" />
-            </button>
-          </div>
-        )}
+      <div className="border-b p-3">
+        <AgentSelector value={agentId} onChange={onAgentChange} />
       </div>
 
       {/* New chat button */}
-      <div className={cn("p-3", sessionsCollapsed && "hidden")}>
+      <div className="p-3">
         <Button
           variant="outline"
           className="w-full justify-start gap-2"
@@ -87,7 +48,7 @@ export const ChatSidebar = memo(function ChatSidebar({
       </div>
 
       {/* Session list */}
-      <div className={cn("flex-1 overflow-y-auto", sessionsCollapsed && "hidden")}>
+      <div className="flex-1 overflow-y-auto">
         <SessionSwitcher
           sessions={sessions}
           activeKey={activeSessionKey}

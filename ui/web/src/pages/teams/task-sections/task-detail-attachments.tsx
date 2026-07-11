@@ -3,7 +3,6 @@ import {
   Video, Music, Archive, File, Download,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useHttp } from "@/hooks/use-ws";
 import { useTranslation } from "react-i18next";
 import { formatFileSize } from "@/lib/format";
 import { CollapsibleSection } from "./task-detail-content";
@@ -40,21 +39,8 @@ interface TaskDetailAttachmentsProps {
 
 export function TaskDetailAttachments({ attachments }: TaskDetailAttachmentsProps) {
   const { t } = useTranslation("teams");
-  const http = useHttp();
 
   if (attachments.length === 0) return null;
-
-  const downloadAttachment = async (url: string, fileName: string) => {
-    const blob = await http.downloadBlob(url);
-    const objectUrl = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = objectUrl;
-    a.download = fileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(objectUrl);
-  };
 
   return (
     <CollapsibleSection icon={Paperclip} title={t("tasks.detail.attachments")} count={attachments.length} defaultOpen={false}>
@@ -74,17 +60,11 @@ export function TaskDetailAttachments({ attachments }: TaskDetailAttachmentsProp
                 )}
               </div>
               {a.download_url && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void downloadAttachment(a.download_url!, fileName);
-                  }}
-                >
-                  <Download className="mr-1.5 h-3.5 w-3.5" />
-                  {t("tasks.detail.download")}
+                <Button asChild variant="outline" size="sm" className="shrink-0">
+                  <a href={a.download_url} download onClick={(e) => e.stopPropagation()}>
+                    <Download className="mr-1.5 h-3.5 w-3.5" />
+                    {t("tasks.detail.download")}
+                  </a>
                 </Button>
               )}
             </div>

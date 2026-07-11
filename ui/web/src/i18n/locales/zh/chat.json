@@ -20,8 +20,6 @@
   "deleteChat": "删除对话",
   "deleteChatConfirm": "此操作将永久删除此对话及其所有消息。",
   "newChat": "新建对话",
-  "collapseSessions": "收起聊天记录",
-  "expandSessions": "展开聊天记录",
   "openSessions": "打开Session",
   "readOnly": "只读 — 此Session属于其他用户",
   "replyingTo": "回复",

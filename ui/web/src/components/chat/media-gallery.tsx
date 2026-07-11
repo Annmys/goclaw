@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Download, FileText, FileCode, Music, Film, File, Printer } from "lucide-react";
+import { Download, FileText, FileCode, Music, Film, File } from "lucide-react";
 import { MarkdownRenderer } from "@/components/shared/markdown-renderer";
 import { formatSize, toDownloadUrl } from "@/lib/file-helpers";
 import { useMediaUrl } from "@/hooks/use-media-url";
@@ -12,8 +12,14 @@ import {
 } from "@/components/ui/dialog";
 import type { MediaItem } from "@/types/chat";
 
+/** Hex/UUID filename pattern — matches assistant-generated image basenames
+ *  such as `a1b2c3d4e5f6.png` or `550e8400-e29b-41d4-a716-446655440000.png`. */
 const GENERATED_FILENAME_RE = /^[0-9a-f-]{8,}\.png$/i;
 
+/**
+ * Format a Date as YYYYMMDD-HHmmss for use in download filenames.
+ * Uses local time so filenames match the user's clock.
+ */
 function formatTimestamp(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return (
@@ -22,6 +28,11 @@ function formatTimestamp(d: Date): string {
   );
 }
 
+/**
+ * Returns the download filename for an image MediaItem.
+ * For assistant-generated PNGs (hex/UUID basename), uses a descriptive
+ * `generated-YYYYMMDD-HHmmss.png` name instead of the opaque server hash.
+ */
 function resolveImageDownloadName(item: MediaItem): string {
   const base = item.fileName ?? "image";
   if (item.mimeType === "image/png" && GENERATED_FILENAME_RE.test(base)) {
@@ -53,35 +64,7 @@ function isMediaKind(kind: string): "image" | "audio" | "video" | null {
   return null;
 }
 
-function isLabelPreview(item: MediaItem): boolean {
-  if (item.kind !== "image") return false;
-  const name = (item.fileName ?? item.path).toLowerCase();
-  const path = item.path.toLowerCase();
-  let decodedPath = path;
-  try {
-    decodedPath = decodeURIComponent(path);
-  } catch {
-    decodedPath = path;
-  }
-  return (
-    name === "preview.png" ||
-    name === "label_preview.png" ||
-    path.includes("/标签作业/") ||
-    path.includes("%e6%a0%87%e7%ad%be%e4%bd%9c%e4%b8%9a") ||
-    decodedPath.includes("/标签作业/")
-  );
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;",
-  }[ch] ?? ch));
-}
-
+/** Image with blob-cached src to prevent flickering on session switch. */
 function CachedImage({ src, alt, className, loading, onClick }: {
   src: string; alt: string; className?: string; loading?: "lazy" | "eager";
   onClick?: () => void;
@@ -99,8 +82,6 @@ export function MediaGallery({ items }: MediaGalleryProps) {
     mediaType?: "image" | "audio" | "video";
   } | null>(null);
   const [loading, setLoading] = useState(false);
-  const [printState, setPrintState] = useState<Record<string, "idle" | "printing" | "ok" | "error">>({});
-  const [printError, setPrintError] = useState<Record<string, string>>({});
 
   const handleFileClick = useCallback((item: MediaItem) => {
     const media = isMediaKind(item.kind);
@@ -108,6 +89,7 @@ export function MediaGallery({ items }: MediaGalleryProps) {
       setPreview({ name: item.fileName ?? "file", href: item.path, content: "", mediaType: media });
       return;
     }
+    // Text/code/document files: fetch content for preview
     setLoading(true);
     fetch(item.path)
       .then((res) => {
@@ -115,83 +97,8 @@ export function MediaGallery({ items }: MediaGalleryProps) {
         return res.text();
       })
       .then((text) => setPreview({ name: item.fileName ?? "file", href: item.path, content: text }))
-      .catch(() => { /* file preview can fail for unavailable binary assets */ })
+      .catch(() => { /* fetch failed — file may not exist yet, ignore */ })
       .finally(() => setLoading(false));
-  }, []);
-
-  const handlePrintLabel = useCallback((item: MediaItem) => {
-    setPrintState((prev) => ({ ...prev, [item.path]: "printing" }));
-    setPrintError((prev) => ({ ...prev, [item.path]: "" }));
-    try {
-      const imageUrl = toDownloadUrl(item.path);
-      const existing = document.getElementById("goclaw-label-print-root");
-      existing?.remove();
-
-      const root = document.createElement("div");
-      root.id = "goclaw-label-print-root";
-      root.setAttribute("aria-hidden", "true");
-      root.innerHTML = `
-        <style>
-          #goclaw-label-print-root { display: none; }
-          @media print {
-            @page { margin: 0; }
-            body * { visibility: hidden !important; }
-            #goclaw-label-print-root,
-            #goclaw-label-print-root * { visibility: visible !important; }
-            #goclaw-label-print-root {
-              display: block !important;
-              position: fixed;
-              left: 0;
-              top: 0;
-              width: 100%;
-              height: 100%;
-              margin: 0;
-              padding: 0;
-              background: #fff;
-            }
-            #goclaw-label-print-root img {
-              display: block;
-              max-width: 100%;
-              max-height: 100%;
-              margin: 0;
-              padding: 0;
-              border: 0;
-            }
-          }
-        </style>
-        <img alt="${escapeHtml(item.fileName || "label-preview.png")}" src="${escapeHtml(imageUrl)}" />
-      `;
-      document.body.appendChild(root);
-      const img = root.querySelector("img");
-      let fallbackTimer: number | undefined;
-      const cleanup = () => {
-        if (fallbackTimer) {
-          window.clearTimeout(fallbackTimer);
-        }
-        root.remove();
-        window.removeEventListener("afterprint", cleanup);
-      };
-      const printNow = () => {
-        window.addEventListener("afterprint", cleanup, { once: true });
-        window.print();
-        setPrintState((prev) => ({ ...prev, [item.path]: "ok" }));
-        fallbackTimer = window.setTimeout(cleanup, 60000);
-      };
-      if (img instanceof HTMLImageElement && !img.complete) {
-        img.onload = printNow;
-        img.onerror = () => {
-          root.remove();
-          setPrintState((prev) => ({ ...prev, [item.path]: "error" }));
-          setPrintError((prev) => ({ ...prev, [item.path]: "标签预览图加载失败" }));
-        };
-      } else {
-        window.setTimeout(printNow, 50);
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "打印失败";
-      setPrintState((prev) => ({ ...prev, [item.path]: "error" }));
-      setPrintError((prev) => ({ ...prev, [item.path]: message }));
-    }
   }, []);
 
   if (items.length === 0) return null;
@@ -243,27 +150,6 @@ export function MediaGallery({ items }: MediaGalleryProps) {
                   title={item.prompt}
                 >
                   {item.prompt}
-                </div>
-              )}
-              {isLabelPreview(item) && (
-                <div className="flex flex-col gap-1 border-t bg-muted/30 px-2 py-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePrintLabel(item)}
-                    disabled={printState[item.path] === "printing"}
-                    className="inline-flex items-center justify-center gap-1.5 rounded-md border bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                    {printState[item.path] === "printing" ? "正在打印..." : "打印"}
-                  </button>
-                  {printState[item.path] === "ok" && (
-                    <div className="text-xs text-green-600">已打开打印</div>
-                  )}
-                  {printState[item.path] === "error" && (
-                    <div className="text-xs text-destructive" title={printError[item.path]}>
-                      {printError[item.path] || "打印失败"}
-                    </div>
-                  )}
                 </div>
               )}
             </div>

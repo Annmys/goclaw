@@ -19,7 +19,7 @@ export function LoginPage() {
 
   const from =
     (location.state as { from?: { pathname: string } })?.from?.pathname ??
-    ROUTES.CHAT;
+    ROUTES.OVERVIEW;
 
   function handleTokenLogin(userId: string, token: string) {
     setCredentials(token, userId);

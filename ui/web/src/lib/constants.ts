@@ -13,8 +13,6 @@ export const LOCAL_STORAGE_KEYS = {
   SENDER_ID: "goclaw:senderID",
   TENANT_ID: "goclaw:tenant_id",
   TENANT_HINT: "goclaw:tenant_hint",
-  LAST_CHAT_SELECTION: "goclaw:last_chat_selection",
-  CHAT_SESSIONS_COLLAPSED: "goclaw:chat_sessions_collapsed",
   SETUP_SKIPPED: "goclaw:setup_skipped",
   THEME: "goclaw:theme",
   SIDEBAR_COLLAPSED: "goclaw:sidebarCollapsed",

@@ -96,7 +96,7 @@ export function SetupPage() {
   useEffect(() => {
     if (loading || initialized) return;
     if (currentStep === ("complete" as SetupStep)) {
-      navigate(ROUTES.CHAT, { replace: true });
+      navigate(ROUTES.OVERVIEW, { replace: true });
       return;
     }
     setStep(currentStep as 1 | 2 | 3 | 4);
@@ -186,7 +186,7 @@ export function SetupPage() {
             onClick={() => {
               if (window.confirm(t("skipSetupConfirm"))) {
                 markSetupSkipped({ userId, tenantId: currentTenantId, tenantSlug: currentTenantSlug });
-                navigate(ROUTES.CHAT, { replace: true });
+                navigate(ROUTES.OVERVIEW, { replace: true });
               }
             }}
           >
@@ -201,7 +201,7 @@ export function SetupPage() {
 
       <SetupCompleteModal
         open={showComplete}
-        onGoToDashboard={() => navigate(ROUTES.CHAT, { replace: true })}
+        onGoToDashboard={() => navigate(ROUTES.OVERVIEW, { replace: true })}
       />
     </SetupLayout>
   );

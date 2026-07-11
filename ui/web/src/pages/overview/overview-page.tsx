@@ -47,9 +47,6 @@ const MAX_OVERVIEW_CHANNEL_INSTANCES = 200;
 export function OverviewPage() {
   const { t } = useTranslation("overview");
   const connected = useAuthStore((s) => s.connected);
-  const role = useAuthStore((s) => s.role);
-  const isOwner = useAuthStore((s) => s.isOwner);
-  const canManageGateway = isOwner || role === "admin";
   const { call: fetchHealth, data: health } =
     useWsCall<HealthPayload>(Methods.HEALTH);
   const { call: fetchStatus, data: status } =
@@ -61,17 +58,16 @@ export function OverviewPage() {
     useWsCall<CronListPayload>(Methods.CRON_LIST);
   const { call: fetchChannels, data: channelStatusData } =
     useWsCall<ChannelStatusPayload>(Methods.CHANNELS_STATUS);
-  const { providers, loading: providersLoading } = useProviders(canManageGateway);
-  const { runtimes } = useRuntimes(canManageGateway);
+  const { providers, loading: providersLoading } = useProviders();
+  const { runtimes } = useRuntimes();
   const { traces } = useTraces({ limit: 8 });
   const { instances: channelInstances, total: channelInstanceTotal } = useChannelInstances({
     limit: MAX_OVERVIEW_CHANNEL_INSTANCES,
     offset: 0,
   });
 
-  const hasNoProviders = canManageGateway && !providersLoading && providers.length === 0;
+  const hasNoProviders = !providersLoading && providers.length === 0;
   const hasNoEnabledProviders =
-    canManageGateway &&
     !providersLoading &&
     providers.length > 0 &&
     !providers.some((p) => p.enabled);
@@ -183,14 +179,12 @@ export function OverviewPage() {
                 {hasNoProviders
                   ? t("providers.noProvidersDesc")
                   : t("providers.noEnabledDesc")}
-                {canManageGateway && (
-                  <Link
-                    to={ROUTES.PROVIDERS}
-                    className="font-medium underline underline-offset-4 hover:text-foreground"
-                  >
-                    {t("providers.goToSettings")}
-                  </Link>
-                )}
+                <Link
+                  to={ROUTES.PROVIDERS}
+                  className="font-medium underline underline-offset-4 hover:text-foreground"
+                >
+                  {t("providers.goToSettings")}
+                </Link>
               </AlertDescription>
             </Alert>
           )}

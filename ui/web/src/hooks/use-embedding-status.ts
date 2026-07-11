@@ -9,18 +9,13 @@ interface EmbeddingStatus {
   model?: string;
 }
 
-export function useEmbeddingStatus(enabled = true) {
+export function useEmbeddingStatus() {
   const http = useHttp();
   const tenantId = useAuthStore((s) => s.tenantId);
   const [status, setStatus] = useState<EmbeddingStatus | null>(null);
-  const [loading, setLoading] = useState(enabled);
+  const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
-    if (!enabled) {
-      setStatus(null);
-      setLoading(false);
-      return;
-    }
     try {
       const res = await http.get<EmbeddingStatus>("/v1/embedding/status");
       setStatus(res);
@@ -29,11 +24,10 @@ export function useEmbeddingStatus(enabled = true) {
     } finally {
       setLoading(false);
     }
-  }, [enabled, http]);
+  }, [http]);
 
-  useEffect(() => {
-    refresh();
-  }, [refresh, tenantId]);
+  // Re-fetch when tenant changes
+  useEffect(() => { refresh(); }, [refresh, tenantId]);
 
   return { status, loading, refresh };
 }

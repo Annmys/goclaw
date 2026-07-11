@@ -3,6 +3,9 @@ import type {
   ChatGPTOAuthRoutingConfig,
   CompactionConfig,
   ContextPruningConfig,
+  DeliveryBehaviorConfig,
+  InboundDebounceOverrideMode,
+  ModelFallbackConfig,
   ReasoningOverrideMode,
   SandboxConfig,
   WorkspaceSharingConfig,
@@ -29,8 +32,13 @@ export interface AdvancedDialogState {
   reasoningFallback: string;
   reasoningExpert: boolean;
   chatgptRouting: ChatGPTOAuthRoutingConfig;
+  modelFallback: ModelFallbackConfig;
   wsSharing: WorkspaceSharingConfig;
   comp: CompactionConfig;
+  deliveryBehaviorMode: "inherit" | "custom";
+  deliveryBehavior: DeliveryBehaviorConfig;
+  inboundDebounceMode: InboundDebounceOverrideMode;
+  inboundDebounceMs: number;
   pruneEnabled: boolean;
   prune: ContextPruningConfig;
   sbEnabled: boolean;
@@ -73,6 +81,15 @@ export function deriveState(
     agent.chatgpt_oauth_routing ?? agent.other_config,
   );
   const draftRouting = buildDraftRouting(routing);
+  const otherConfig = (agent.other_config ?? {}) as Record<string, unknown>;
+  const rawInboundDebounceMs = otherConfig.inbound_debounce_ms;
+  const rawDeliveryBehavior = isPlainObject(otherConfig.delivery_behavior)
+    ? otherConfig.delivery_behavior as DeliveryBehaviorConfig
+    : undefined;
+  const inboundDebounceMs =
+    typeof rawInboundDebounceMs === "number" && Number.isFinite(rawInboundDebounceMs)
+      ? Math.max(0, Math.trunc(rawInboundDebounceMs))
+      : undefined;
 
   return {
     reasoningMode,
@@ -90,6 +107,7 @@ export function deriveState(
         !SIMPLE_REASONING_LEVELS.has(reasoningEffort) ||
         reasoningFallback !== "downgrade"),
     chatgptRouting: draftRouting,
+    modelFallback: agent.model_fallback ?? { enabled: false, strategy: "priority_order", candidates: [] },
     // Read workspace_sharing from top-level, fallback to other_config for transition
     wsSharing: (
       agent.workspace_sharing ??
@@ -97,6 +115,14 @@ export function deriveState(
       {}
     ) as WorkspaceSharingConfig,
     comp: agent.compaction_config ?? {},
+    deliveryBehaviorMode: rawDeliveryBehavior ? "custom" : "inherit",
+    deliveryBehavior: rawDeliveryBehavior ?? {
+      enabled: true,
+      intermediate_replies: { enabled: false, mode: "sidecar_generated", timeout_ms: 2500, max_tokens: 60, max_chars: 180 },
+      quick_ack: { enabled: true, mode: "sidecar_generated", min_delay_ms: 1000, timeout_ms: 2500, max_tokens: 40, max_chars: 120 },
+    },
+    inboundDebounceMode: inboundDebounceMs === undefined ? "inherit" : "custom",
+    inboundDebounceMs: inboundDebounceMs ?? 0,
     pruneEnabled: agent.context_pruning?.mode === "cache-ttl",
     prune: agent.context_pruning ?? {},
     sbEnabled: agent.sandbox_config != null,
@@ -116,8 +142,13 @@ export interface BuildAdvancedUpdatePayloadParams {
   reasoningFallback: string;
   thinkingLevel: string;
   chatgptRouting: ChatGPTOAuthRoutingConfig;
+  modelFallback: ModelFallbackConfig;
   wsSharing: WorkspaceSharingConfig;
   comp: CompactionConfig;
+  deliveryBehaviorMode: "inherit" | "custom";
+  deliveryBehavior: DeliveryBehaviorConfig;
+  inboundDebounceMode: InboundDebounceOverrideMode;
+  inboundDebounceMs: number;
   pruneEnabled: boolean;
   prune: ContextPruningConfig;
   sbEnabled: boolean;
@@ -131,7 +162,8 @@ export function buildAdvancedUpdatePayload(
     agent, currentProvider, providersLoading, providerModelsLoading,
     expertReasoningAvailable, reasoningMode, reasoningEffort, reasoningExpert,
     reasoningFallback, thinkingLevel, chatgptRouting, wsSharing,
-    comp, pruneEnabled, prune, sbEnabled, sb,
+    modelFallback, comp, deliveryBehaviorMode, deliveryBehavior, inboundDebounceMode, inboundDebounceMs,
+    pruneEnabled, prune, sbEnabled, sb,
   } = params;
 
   const routingPayload = buildAgentOtherConfigWithChatGPTOAuthRouting(
@@ -149,8 +181,19 @@ export function buildAdvancedUpdatePayload(
       ? { mode: "cache-ttl", ...prune }
       : { mode: "off" },
     sandbox_config: sbEnabled ? sb : null,
+    model_fallback: normalizeModelFallbackForPayload(modelFallback),
     ...routingPayload,
   };
+  updates.other_config = buildOtherConfigWithInboundDebounce(
+    updates.other_config,
+    inboundDebounceMode,
+    inboundDebounceMs,
+  );
+  updates.other_config = buildOtherConfigWithDeliveryBehavior(
+    updates.other_config,
+    deliveryBehaviorMode,
+    deliveryBehavior,
+  );
 
   // Build reasoning_config and thinking_level as top-level fields
   if (reasoningMode === "inherit") {
@@ -185,4 +228,52 @@ export function buildAdvancedUpdatePayload(
   }
 
   return updates;
+}
+
+function buildOtherConfigWithDeliveryBehavior(
+  base: unknown,
+  mode: "inherit" | "custom",
+  value: DeliveryBehaviorConfig,
+): Record<string, unknown> | null {
+  const bag = isPlainObject(base) ? { ...base } : {};
+  if (mode === "inherit") {
+    delete bag.delivery_behavior;
+  } else {
+    bag.delivery_behavior = value;
+  }
+  return Object.keys(bag).length > 0 ? bag : null;
+}
+
+function buildOtherConfigWithInboundDebounce(
+  base: unknown,
+  mode: InboundDebounceOverrideMode,
+  debounceMs: number,
+): Record<string, unknown> | null {
+  const bag = isPlainObject(base) ? { ...base } : {};
+  if (mode === "inherit") {
+    delete bag.inbound_debounce_ms;
+  } else {
+    bag.inbound_debounce_ms = Math.max(0, Math.trunc(Number.isFinite(debounceMs) ? debounceMs : 0));
+  }
+  return Object.keys(bag).length > 0 ? bag : null;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeModelFallbackForPayload(config: ModelFallbackConfig): ModelFallbackConfig {
+  const candidates = (config.candidates ?? [])
+    .map((candidate) => ({
+      provider: candidate.provider?.trim() ?? "",
+      model: candidate.model?.trim() ?? "",
+    }))
+    .filter((candidate) => candidate.provider && candidate.model);
+  return {
+    enabled: Boolean(config.enabled && candidates.length > 0),
+    strategy: "priority_order",
+    candidates,
+    ...(config.max_attempts && config.max_attempts > 0 ? { max_attempts: config.max_attempts } : {}),
+    cooldown_enabled: config.cooldown_enabled ?? true,
+  };
 }

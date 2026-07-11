@@ -5,15 +5,11 @@
   "emptyDescription": "No paired devices or pending pairing requests.",
   "pendingRequests": "Pending Requests ({{count}})",
   "pairedDevices": "Paired Devices ({{count}})",
-  "requestUser": "User:",
   "sender": "Sender:",
-  "tenant": "Tenant:",
   "chat": "Chat:",
   "columns": {
     "channel": "Channel",
-    "user": "User",
     "senderId": "Sender ID",
-    "tenant": "Tenant",
     "paired": "Paired",
     "by": "By",
     "actions": "Actions"

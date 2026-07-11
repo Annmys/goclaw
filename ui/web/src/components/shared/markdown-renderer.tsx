@@ -33,7 +33,7 @@ interface MarkdownRendererProps {
 }
 
 /** Common file extensions for generated/local files */
-const LOCAL_FILE_EXT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp|mp3|wav|ogg|flac|aac|m4a|mp4|webm|mkv|avi|mov|pdf|doc|docx|xls|xlsx|csv|txt|md|html|json|zip)$/i;
+const LOCAL_FILE_EXT_RE = /\.(png|jpg|jpeg|gif|webp|svg|bmp|mp3|wav|ogg|flac|aac|m4a|mp4|webm|mkv|avi|mov|pdf|doc|docx|xls|xlsx|csv|txt|md|json|zip)$/i;
 
 /** Check if a URL points to a local file (via /v1/files/ or relative path) */
 function isFileLink(href: string | undefined): boolean {
@@ -47,9 +47,6 @@ function isFileLink(href: string | undefined): boolean {
 /** File type detection from name */
 function isMarkdownExt(name: string): boolean {
   return /\.(md|mdx|markdown)$/i.test(name);
-}
-function isHtmlExt(name: string): boolean {
-  return /\.html?$/i.test(name);
 }
 function isMediaFile(name: string): "image" | "audio" | "video" | null {
   if (/\.(jpg|jpeg|png|gif|webp|svg|bmp|ico)$/i.test(name)) return "image";
@@ -76,7 +73,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
       setLightbox({ src, alt });
     }
   }, [gallery]);
-  const [filePreview, setFilePreview] = useState<{ name: string; href: string; content: string; mediaType?: "image" | "audio" | "video" | "html" } | null>(null);
+  const [filePreview, setFilePreview] = useState<{ name: string; href: string; content: string; mediaType?: "image" | "audio" | "video" } | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -91,10 +88,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     const media = isMediaFile(name);
     if (media) {
       setFilePreview({ name, href, content: "", mediaType: media });
-      return;
-    }
-    if (isHtmlExt(name)) {
-      setFilePreview({ name, href, content: "", mediaType: "html" });
       return;
     }
     // Abort any in-flight fetch before starting a new one
@@ -235,7 +228,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
 
       <Dialog open={!!filePreview} onOpenChange={(open) => { if (!open) setFilePreview(null); }}>
         {filePreview && (
-          <DialogContent className="sm:max-w-6xl max-h-[90vh] min-h-[70vh] flex flex-col">
+          <DialogContent className="sm:max-w-4xl max-h-[85vh] flex flex-col">
             <DialogHeader className="flex-row items-center gap-2 pr-10">
               <DialogTitle className="truncate text-base flex-1">{filePreview.name}</DialogTitle>
               <a
@@ -254,13 +247,6 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
                 <audio controls src={filePreview.href} className="w-full" />
               ) : filePreview.mediaType === "video" ? (
                 <video controls src={filePreview.href} className="max-w-full rounded" />
-              ) : filePreview.mediaType === "html" ? (
-                <iframe
-                  src={filePreview.href}
-                  title={filePreview.name}
-                  className="h-[70vh] w-full rounded bg-background"
-                  sandbox="allow-downloads allow-forms allow-scripts"
-                />
               ) : isMarkdownExt(filePreview.name) ? (
                 <MarkdownRenderer content={filePreview.content} />
               ) : (

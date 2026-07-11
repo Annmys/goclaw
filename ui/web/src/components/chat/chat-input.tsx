@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useLayoutEffect, useEffect, type KeyboardEvent, type ClipboardEvent } from "react";
+import { useState, useRef, useCallback, useLayoutEffect, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, Send, Square, Paperclip, X, Mic } from "lucide-react";
+import { Send, Square, Paperclip, X, Mic } from "lucide-react";
 import { useVoiceRecorder } from "@/hooks/use-voice-recorder";
 
 export interface AttachedFile {
@@ -11,31 +11,12 @@ export interface AttachedFile {
 
 interface ChatInputProps {
   onSend: (message: string, files?: AttachedFile[]) => void;
-  onAbort?: () => void;
+  onAbort: () => void;
   /** True when main agent or team tasks are active — controls stop button, file attach */
   isBusy: boolean;
   disabled?: boolean;
   files: AttachedFile[];
   onFilesChange: (files: AttachedFile[]) => void;
-  onExport?: () => void;
-  canExport?: boolean;
-  placeholder?: string;
-  showVoice?: boolean;
-  showExport?: boolean;
-  showAbort?: boolean;
-}
-
-function ImageAttachmentPreview({ file }: { file: File }) {
-  const [url, setUrl] = useState("");
-
-  useEffect(() => {
-    const nextUrl = URL.createObjectURL(file);
-    setUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [file]);
-
-  if (!url) return null;
-  return <img src={url} alt="" className="h-8 w-8 rounded object-cover" />;
 }
 
 export function ChatInput({
@@ -45,12 +26,6 @@ export function ChatInput({
   disabled,
   files,
   onFilesChange,
-  onExport,
-  canExport = false,
-  placeholder,
-  showVoice = true,
-  showExport = true,
-  showAbort = true,
 }: ChatInputProps) {
   const { t } = useTranslation("common");
   const [value, setValue] = useState("");
@@ -125,31 +100,6 @@ export function ChatInput({
     e.target.value = "";
   }, [files, onFilesChange]);
 
-  const handlePaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
-    if (disabled || isBusy || voiceRecorder.isRecording) return;
-
-    const items = Array.from(e.clipboardData.items ?? []);
-    const pastedImages = items
-      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
-      .map((item) => item.getAsFile())
-      .filter((file): file is File => Boolean(file));
-
-    if (pastedImages.length === 0) return;
-
-    e.preventDefault();
-    const timestamp = Date.now();
-    const newFiles: AttachedFile[] = pastedImages.map((file, index) => {
-      if (file.name) return { file };
-      const ext = file.type.split("/")[1] || "png";
-      return {
-        file: new File([file], `pasted-image-${timestamp}-${index + 1}.${ext}`, {
-          type: file.type || "image/png",
-        }),
-      };
-    });
-    onFilesChange([...files, ...newFiles]);
-  }, [disabled, isBusy, voiceRecorder.isRecording, files, onFilesChange]);
-
   const removeFile = useCallback((index: number) => {
     onFilesChange(files.filter((_, i) => i !== index));
   }, [files, onFilesChange]);
@@ -169,7 +119,6 @@ export function ChatInput({
               key={i}
               className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-1 text-xs"
             >
-              {af.file.type.startsWith("image/") && <ImageAttachmentPreview file={af.file} />}
               <span className="max-w-[150px] truncate">{af.file.name}</span>
               <button
                 type="button"
@@ -206,7 +155,7 @@ export function ChatInput({
         </button>
 
         {/* Voice record button - hidden when recording */}
-        {showVoice && !voiceRecorder.isRecording && (
+        {!voiceRecorder.isRecording && (
           <button
             type="button"
             onClick={handleVoiceToggle}
@@ -244,9 +193,8 @@ export function ChatInput({
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
             onInput={handleInput}
-            placeholder={placeholder ?? t("sendMessage")}
+            placeholder={t("sendMessage")}
             disabled={disabled}
             rows={1}
             className="flex-1 resize-none bg-transparent py-3 px-0 text-base md:text-sm placeholder:text-muted-foreground focus:outline-none disabled:opacity-50"
@@ -276,17 +224,6 @@ export function ChatInput({
             </>
           ) : isBusy ? (
             <>
-              {showExport ? (
-                <button
-                  type="button"
-                  onClick={onExport}
-                  disabled={!canExport}
-                  title="Export chat history"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-              ) : null}
               <button
                 type="button"
                 onClick={handleSend}
@@ -296,40 +233,25 @@ export function ChatInput({
               >
                 <Send className="h-4 w-4" />
               </button>
-              {showAbort && onAbort ? (
-                <button
-                  type="button"
-                  onClick={onAbort}
-                  title={t("stopGeneration")}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
-                >
-                  <Square className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-            </>
-          ) : (
-            <>
-              {showExport ? (
-                <button
-                  type="button"
-                  onClick={onExport}
-                  disabled={!canExport}
-                  title="Export chat history"
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                >
-                  <Download className="h-4 w-4" />
-                </button>
-              ) : null}
               <button
                 type="button"
-                onClick={handleSend}
-                disabled={!hasContent || disabled}
-                title={t("sendMessageTitle")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                onClick={onAbort}
+                title={t("stopGeneration")}
+                className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
               >
-                <Send className="h-4 w-4" />
+                <Square className="h-3.5 w-3.5" />
               </button>
             </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={!hasContent || disabled}
+              title={t("sendMessageTitle")}
+              className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              <Send className="h-4 w-4" />
+            </button>
           )}
         </div>
       </div>

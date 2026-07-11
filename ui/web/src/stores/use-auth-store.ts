@@ -21,7 +21,6 @@ interface AuthState {
   isMasterScope: boolean; // server-derived: owner OR on master tenant — advisory UI hint only
   edition: Edition; // server edition — UI feature gating
   availableTenants: TenantMembership[];
-  tenantsLoaded: boolean;
   tenantSelected: boolean; // true after user picks a tenant (or auto-selected)
 
   setCredentials: (token: string, userId: string) => void;
@@ -31,7 +30,6 @@ interface AuthState {
   setTenant: (id: string, name: string, slug: string, isOwner: boolean) => void;
   setConnectInfo: (info: { isMasterScope: boolean; edition: Edition }) => void;
   setAvailableTenants: (tenants: TenantMembership[]) => void;
-  setTenantsLoaded: (loaded: boolean) => void;
   setTenantSelected: (selected: boolean) => void;
   logout: () => void;
 }
@@ -52,7 +50,6 @@ export const useAuthStore = create<AuthState>()(
       isMasterScope: false,
       edition: "standard" as Edition,
       availableTenants: [],
-      tenantsLoaded: false,
       tenantSelected: !!localStorage.getItem(LOCAL_STORAGE_KEYS.TENANT_ID),
 
       setCredentials: (token, userId) => {
@@ -83,10 +80,6 @@ export const useAuthStore = create<AuthState>()(
         set({ availableTenants: tenants });
       },
 
-      setTenantsLoaded: (loaded) => {
-        set({ tenantsLoaded: loaded });
-      },
-
       setTenantSelected: (selected) => {
         set({ tenantSelected: selected });
       },
@@ -100,7 +93,7 @@ export const useAuthStore = create<AuthState>()(
           token: "", userId: "", senderID: "", connected: false, role: "", serverInfo: null,
           tenantId: "", tenantName: "", tenantSlug: "", isOwner: false,
           isMasterScope: false, edition: "standard",
-          availableTenants: [], tenantsLoaded: false, tenantSelected: false,
+          availableTenants: [], tenantSelected: false,
         });
       },
     }),

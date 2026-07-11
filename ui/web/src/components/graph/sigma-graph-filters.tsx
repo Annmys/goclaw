@@ -33,8 +33,7 @@ export function SigmaGraphFilters({
     if (graph.order === 0) return [];
     const counts = new Map<string, number>();
     graph.forEachNode((_node, attrs) => {
-      const raw = attrs.docType || attrs.entityType;
-      const t = typeof raw === "string" && raw.trim() ? raw : "other";
+      const t = (attrs.docType || attrs.entityType || "other") as string;
       counts.set(t, (counts.get(t) ?? 0) + 1);
     });
     const result: TypeCount[] = [];

@@ -28,7 +28,7 @@ export const useUiStore = create<UiState>()(
       theme: "dark" as Theme,
       language: (i18n.language as Language) ?? "en",
       timezone: "auto",
-      sidebarCollapsed: true,
+      sidebarCollapsed: false,
       mobileSidebarOpen: false,
       pageSize: 20,
 

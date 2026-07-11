@@ -28,7 +28,7 @@ export interface SigmaGraphContainerProps {
   hiddenTypes?: Set<string>;
 }
 
-/** Theme-aware colors: derived from store value, not DOM class.
+/** Theme-aware colors — derived from store value, not DOM class.
  *  DOM class lags behind store update, causing stale reads on theme toggle. */
 function useThemeColors() {
   const theme = useUiStore((s) => s.theme);
@@ -41,191 +41,6 @@ function useThemeColors() {
     edgeColor: isDark ? "#71717a" : "#d4d4d8",
     highlightEdgeColor: isDark ? "#d4d4d8" : "#3f3f46",
   };
-}
-
-function finiteNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
-}
-
-function safeString(value: unknown, fallback: string): string {
-  return typeof value === "string" && value.trim() ? value : fallback;
-}
-
-function graphNodeType(attrs: Record<string, unknown>) {
-  return safeString(attrs.docType, safeString(attrs.entityType, "other"));
-}
-
-function sanitizeGraphForSigma(graph: Graph) {
-  const edgesToDrop: string[] = [];
-  const seenPairs = new Set<string>();
-
-  graph.forEachEdge((edge, attrs, source, target) => {
-    if (!graph.hasNode(source) || !graph.hasNode(target) || source === target) {
-      edgesToDrop.push(edge);
-      return;
-    }
-
-    const pairKey = `${source}\u0000${target}`;
-    if (seenPairs.has(pairKey)) {
-      edgesToDrop.push(edge);
-      return;
-    }
-    seenPairs.add(pairKey);
-
-    graph.mergeEdgeAttributes(edge, {
-      label: safeString(attrs.label, "related"),
-      type: safeString(attrs.type, "arrow") === "curvedArrow" ? "curvedArrow" : "arrow",
-      color: safeString(attrs.color, "#a1a1aa"),
-      size: Math.max(finiteNumber(attrs.size, 0.4), 0.1),
-    });
-  });
-
-  for (const edge of edgesToDrop) {
-    if (graph.hasEdge(edge)) graph.dropEdge(edge);
-  }
-
-  const count = Math.max(graph.order, 1);
-  let index = 0;
-  graph.forEachNode((node, attrs) => {
-    const angle = (index / count) * Math.PI * 2;
-    const radius = Math.max(10, Math.sqrt(count) * 8);
-    const docType = safeString(attrs.docType, "");
-    const entityType = safeString(attrs.entityType, "");
-    index++;
-
-    graph.mergeNodeAttributes(node, {
-      label: safeString(attrs.label, String(node)),
-      x: finiteNumber(attrs.x, Math.cos(angle) * radius),
-      y: finiteNumber(attrs.y, Math.sin(angle) * radius),
-      size: Math.max(finiteNumber(attrs.size, 3), 0.5),
-      color: safeString(attrs.color, "#9ca3af"),
-      ...(docType ? { docType } : {}),
-      ...(entityType ? { entityType } : {}),
-    });
-  });
-}
-
-interface SvgFallbackGraphProps {
-  graph: Graph;
-  selectedNodeId?: string | null;
-  onNodeSelect?: (nodeId: string | null) => void;
-  onNodeDoubleClick?: (nodeId: string) => void;
-  hiddenTypes?: Set<string>;
-  isDark: boolean;
-}
-
-function SvgFallbackGraph({
-  graph,
-  selectedNodeId,
-  onNodeSelect,
-  onNodeDoubleClick,
-  hiddenTypes,
-  isDark,
-}: SvgFallbackGraphProps) {
-  const nodes = graph.nodes()
-    .map((id) => ({ id, attrs: graph.getNodeAttributes(id) as Record<string, unknown> }))
-    .filter(({ attrs }) => !hiddenTypes?.has(graphNodeType(attrs)));
-  const nodeIds = new Set(nodes.map((n) => n.id));
-
-  if (nodes.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        No visible graph data
-      </div>
-    );
-  }
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  for (const { attrs } of nodes) {
-    const x = finiteNumber(attrs.x, 0);
-    const y = finiteNumber(attrs.y, 0);
-    minX = Math.min(minX, x);
-    maxX = Math.max(maxX, x);
-    minY = Math.min(minY, y);
-    maxY = Math.max(maxY, y);
-  }
-  const pad = 40;
-  const width = Math.max(maxX - minX + pad * 2, 240);
-  const height = Math.max(maxY - minY + pad * 2, 180);
-  const ox = -minX + pad;
-  const oy = -minY + pad;
-
-  const edges: Array<{ key: string; source: string; target: string; label: string }> = [];
-  graph.forEachEdge((edge, attrs, source, target) => {
-    if (!nodeIds.has(source) || !nodeIds.has(target)) return;
-    edges.push({ key: edge, source, target, label: safeString(attrs.label, "") });
-  });
-
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-background">
-      <svg className="h-full w-full" viewBox={`0 0 ${width} ${height}`} role="img">
-        <g>
-          {edges.map((edge) => {
-            const source = graph.getNodeAttributes(edge.source) as Record<string, unknown>;
-            const target = graph.getNodeAttributes(edge.target) as Record<string, unknown>;
-            const x1 = finiteNumber(source.x, 0) + ox;
-            const y1 = finiteNumber(source.y, 0) + oy;
-            const x2 = finiteNumber(target.x, 0) + ox;
-            const y2 = finiteNumber(target.y, 0) + oy;
-            return (
-              <line
-                key={edge.key}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke={isDark ? "#52525b" : "#d4d4d8"}
-                strokeWidth="0.8"
-                opacity="0.65"
-              />
-            );
-          })}
-        </g>
-        <g>
-          {nodes.map(({ id, attrs }) => {
-            const type = graphNodeType(attrs);
-            const selected = selectedNodeId === id;
-            const x = finiteNumber(attrs.x, 0) + ox;
-            const y = finiteNumber(attrs.y, 0) + oy;
-            const size = Math.max(finiteNumber(attrs.size, 4), 3);
-            const color = getVaultNodeColor(type, isDark);
-            const label = safeString(attrs.label, id);
-            return (
-              <g
-                key={id}
-                role="button"
-                tabIndex={0}
-                className="cursor-pointer"
-                onClick={() => onNodeSelect?.(selected ? null : id)}
-                onDoubleClick={() => onNodeDoubleClick?.(id)}
-              >
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={selected ? size + 2 : size}
-                  fill={color}
-                  stroke={selected ? (isDark ? "#f8fafc" : "#0f172a") : "transparent"}
-                  strokeWidth="2"
-                />
-                {selected && (
-                  <text
-                    x={x + size + 4}
-                    y={y + 4}
-                    className="fill-foreground text-[10px]"
-                    paintOrder="stroke"
-                    stroke={isDark ? "#020617" : "#ffffff"}
-                    strokeWidth="3"
-                  >
-                    {label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
-    </div>
-  );
 }
 
 /** Reposition orphan nodes (degree=0) into a compact ring around the connected cluster.
@@ -284,7 +99,7 @@ export function SigmaGraphContainer({
   const containerRef = useRef<HTMLDivElement>(null);
   const internalSigmaRef = useRef<Sigma | null>(null);
   const layoutRef = useRef<FA2Layout | null>(null);
-  // Incremented when sigma instance changes; used to trigger event handler registration.
+  // Incremented when sigma instance changes — used to trigger event handler registration.
   const [sigmaVersion, setSigmaVersion] = useState(0);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   // Pulse phase for animated highlighted edges (0..1, cycles)
@@ -293,7 +108,6 @@ export function SigmaGraphContainer({
   const [cameraRatio, setCameraRatio] = useState(1);
   // Layout running state
   const [layoutRunning, setLayoutRunning] = useState(false);
-  const [renderError, setRenderError] = useState<string | null>(null);
   const { isDark, labelColor, edgeColor, highlightEdgeColor } = useThemeColors();
 
   const setSigmaRef = useCallback(
@@ -310,7 +124,7 @@ export function SigmaGraphContainer({
     onLayoutStateChange?.(layoutRunning);
   }, [layoutRunning, onLayoutStateChange]);
 
-  /** Stop running layout worker; no post-processing to avoid visible flash.
+  /** Stop running layout worker — no post-processing to avoid visible flash.
    *  Noverlap + compactOrphans already ran after the sync pass (phase 1).
    *  The worker only does subtle refinement, so positions are already good. */
   const stopLayout = useCallback((_sigma: Sigma, _orphanRatio: number) => {
@@ -323,19 +137,8 @@ export function SigmaGraphContainer({
   // --- Initialize Sigma + FA2 worker layout (non-blocking) ---
   useEffect(() => {
     if (!containerRef.current || graph.order === 0) return;
-    setRenderError(null);
-    try {
-      sanitizeGraphForSigma(graph);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Invalid graph data";
-      console.error("[SigmaGraphContainer] invalid graph data", err);
-      setRenderError(message);
-      onSigmaReady?.(null);
-      return;
-    }
 
-
-    // Random disc init: scale spread with canvas diagonal for responsive layout.
+    // Random disc init — scale spread with canvas diagonal for responsive layout
     if (graph.order > 1) {
       const rect = containerRef.current.getBoundingClientRect();
       const canvasDiag = Math.sqrt(rect.width ** 2 + rect.height ** 2);
@@ -354,10 +157,8 @@ export function SigmaGraphContainer({
       curvedArrow: EdgeCurvedArrowProgram as unknown as typeof EdgeArrowProgram,
     };
 
-    // Create Sigma and show nodes at random positions immediately.
-    let sigma: Sigma;
-    try {
-      sigma = new Sigma(graph, containerRef.current, {
+    // Create Sigma — shows nodes at random positions immediately
+    const sigma = new Sigma(graph, containerRef.current, {
       allowInvalidContainer: true,
       renderLabels: true,
       labelRenderedSizeThreshold: compact ? 14 : SIGMA_SETTINGS.labelRenderedSizeThreshold,
@@ -374,19 +175,12 @@ export function SigmaGraphContainer({
       zoomingRatio: 1.3,
       zIndex: true,
       defaultDrawNodeHover: () => undefined,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown graph render error";
-      console.error("[SigmaGraphContainer] failed to initialize", err);
-      setRenderError(message);
-      onSigmaReady?.(null);
-      return;
-    }
+    });
 
     setSigmaRef(sigma);
 
     // FA2 layout: sync rough pass first, then optional worker refinement.
-    // This gives a reasonable layout immediately without random-scatter animation.
+    // This gives a reasonable layout immediately — no random-scatter animation.
     let timer: ReturnType<typeof setTimeout> | undefined;
     if (graph.order > 1) {
       let orphanCount = 0;
@@ -397,45 +191,31 @@ export function SigmaGraphContainer({
       const orphanRatio = orphanCount / graph.order;
       const { settings } = getFA2WorkerSettings(graph.order, orphanRatio);
 
-      // Phase 1: quick sync pass. Rough but instant layout.
+      // Phase 1: quick sync pass — rough but instant layout
       const syncIters = graph.order < 200 ? 300 : graph.order < 1000 ? 100 : 50;
-      try {
-        forceAtlas2.assign(graph, { iterations: syncIters, settings });
-        compactOrphans(graph);
-      } catch (err) {
-        console.warn("[SigmaGraphContainer] sync layout failed; falling back to initial positions", err);
-      }
+      forceAtlas2.assign(graph, { iterations: syncIters, settings });
+      compactOrphans(graph);
 
       const prefersReducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
       if (compact || prefersReducedMotion) {
         // Compact/reduced-motion: sync-only, no worker
         if (orphanRatio < 0.3) {
-          try {
-            noverlap.assign(graph, {
-              maxIterations: 30,
-              settings: { margin: 2, ratio: 1.02, speed: 3, gridSize: 20 },
-            });
-          } catch (err) {
-            console.warn("[SigmaGraphContainer] noverlap layout failed", err);
-          }
+          noverlap.assign(graph, {
+            maxIterations: 30,
+            settings: { margin: 2, ratio: 1.02, speed: 3, gridSize: 20 },
+          });
         }
       } else {
-        // Phase 2: worker refinement. Subtle position tweaks, short duration.
+        // Phase 2: worker refinement — subtle position tweaks, short duration
         const refineDuration = graph.order < 500 ? 1500 : graph.order < 2000 ? 2500 : 4000;
-        try {
-          const layout = new FA2Layout(graph, { settings });
-          layoutRef.current = layout;
-          setLayoutRunning(true);
-          layout.start();
+        const layout = new FA2Layout(graph, { settings });
+        layoutRef.current = layout;
+        setLayoutRunning(true);
+        layout.start();
 
-          timer = setTimeout(() => {
-            stopLayout(sigma, orphanRatio);
-          }, refineDuration);
-        } catch (err) {
-          console.warn("[SigmaGraphContainer] worker layout failed", err);
-          layoutRef.current = null;
-          setLayoutRunning(false);
-        }
+        timer = setTimeout(() => {
+          stopLayout(sigma, orphanRatio);
+        }, refineDuration);
       }
     }
 
@@ -496,8 +276,11 @@ export function SigmaGraphContainer({
     const sigma = internalSigmaRef.current;
     if (!sigma) return;
 
+    const getNodeType = (attrs: Record<string, unknown>) =>
+      (attrs.docType || attrs.entityType || "other") as string;
+
     sigma.setSetting("nodeReducer", (node, data) => {
-      const docType = graphNodeType(data);
+      const docType = getNodeType(data);
       const themedColor = getVaultNodeColor(docType, isDark);
       const themedData = { ...data, color: themedColor };
 
@@ -538,7 +321,7 @@ export function SigmaGraphContainer({
       if (hiddenTypes?.size) {
         const srcAttrs = graph.getNodeAttributes(graph.source(edge));
         const tgtAttrs = graph.getNodeAttributes(graph.target(edge));
-        if (hiddenTypes.has(graphNodeType(srcAttrs)) || hiddenTypes.has(graphNodeType(tgtAttrs))) {
+        if (hiddenTypes.has(getNodeType(srcAttrs)) || hiddenTypes.has(getNodeType(tgtAttrs))) {
           return { ...data, hidden: true };
         }
       }
@@ -563,7 +346,7 @@ export function SigmaGraphContainer({
       const tgtDegree = graph.degree(graph.target(edge));
 
       if (cameraRatio > ZOOM_TIERS.FAR) {
-        // Far zoom: hide all edges.
+        // zoom ≤~170%: hide all edges
         return { ...data, hidden: true };
       }
       if (cameraRatio > ZOOM_TIERS.MID) {
@@ -589,7 +372,7 @@ export function SigmaGraphContainer({
   }, [selectedNodeId, hoveredNode, graph, highlightEdgeColor, edgeColor, hiddenTypes, cameraRatio, sigmaVersion, isDark]);
 
   // --- Pulse animation for highlighted edges (only runs when a node is active) ---
-  // Respects prefers-reduced-motion and skips animation entirely for accessibility.
+  // Respects prefers-reduced-motion — skips animation entirely for accessibility
   useEffect(() => {
     const active = selectedNodeId || hoveredNode;
     if (!active) return;
@@ -663,7 +446,7 @@ export function SigmaGraphContainer({
         rafId = requestAnimationFrame(() => {
           rafId = 0;
           setCameraRatio(pendingRatio);
-          // Adaptive label density per zoom tier: fewer labels when zoomed out.
+          // Adaptive label density per zoom tier — fewer labels when zoomed out
           if (pendingRatio > ZOOM_TIERS.FAR) {
             // Default view: only biggest hubs get labels
             sigma.setSetting("labelRenderedSizeThreshold", 18);
@@ -724,19 +507,6 @@ export function SigmaGraphContainer({
     );
   }
 
-  if (renderError) {
-    return (
-      <SvgFallbackGraph
-        graph={graph}
-        selectedNodeId={selectedNodeId}
-        onNodeSelect={onNodeSelect}
-        onNodeDoubleClick={onNodeDoubleClick}
-        hiddenTypes={hiddenTypes}
-        isDark={isDark}
-      />
-    );
-  }
-
   return (
     <div className="relative h-full w-full" style={{ minHeight: compact ? 200 : 300 }}>
       <div ref={containerRef} className="h-full w-full" />
@@ -744,7 +514,7 @@ export function SigmaGraphContainer({
         <div className="absolute top-2 left-2 z-10 flex items-center gap-2">
           <div className="flex items-center gap-1.5 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground backdrop-blur-sm">
             <span className="h-2 w-2 animate-pulse rounded-full bg-blue-500" />
-            Laying out...
+            Laying out…
           </div>
           <button
             onClick={handleStopLayout}

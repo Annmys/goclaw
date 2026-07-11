@@ -1180,10 +1180,7 @@ export function WorkflowPage() {
           onFilesChange={setFiles}
           onSend={handleSend}
           onAbort={() => undefined}
-          showAbort={false}
-          showExport={false}
-          showVoice={false}
-          placeholder="发送文件和任务要求，例如：根据这份清单生成预估箱单"
+
         />
       </main>
 
