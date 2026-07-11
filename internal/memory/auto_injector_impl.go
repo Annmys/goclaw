@@ -15,12 +15,19 @@ import (
 // pgAutoInjector implements AutoInjector backed by EpisodicStore + FTS search.
 type pgAutoInjector struct {
 	episodicStore store.EpisodicStore
+	kgStore       store.KnowledgeGraphStore  // nil = KG retrieval disabled
 	metricsStore  store.EvolutionMetricsStore // nil = metrics disabled
 }
 
 // NewAutoInjector creates an AutoInjector backed by episodic store search.
-func NewAutoInjector(es store.EpisodicStore, ms store.EvolutionMetricsStore) AutoInjector {
-	return &pgAutoInjector{episodicStore: es, metricsStore: ms}
+// If a KnowledgeGraphStore is provided, also retrieves relevant KG entities
+// (rules, corrections, facts) for cross-session behavioral recall.
+func NewAutoInjector(es store.EpisodicStore, ms store.EvolutionMetricsStore, kgs ...store.KnowledgeGraphStore) AutoInjector {
+	var kg store.KnowledgeGraphStore
+	if len(kgs) > 0 && kgs[0] != nil {
+		kg = kgs[0]
+	}
+	return &pgAutoInjector{episodicStore: es, metricsStore: ms, kgStore: kg}
 }
 
 // Inject searches episodic memory for relevant L0 abstracts and formats a prompt section.
@@ -87,6 +94,30 @@ func (a *pgAutoInjector) Inject(ctx context.Context, params InjectParams) (*Inje
 
 	if injected == 0 {
 		return &InjectResult{MatchCount: len(results)}, nil
+	}
+
+	// KG retrieval: search knowledge graph for relevant rules/facts.
+	// These persist across sessions and carry behavioral corrections the user taught.
+	if a.kgStore != nil && params.AgentID != "" {
+		kgEntities, kgErr := a.kgStore.SearchEntities(ctx, params.AgentID, params.UserID, searchQuery, 3)
+		if kgErr == nil && len(kgEntities) > 0 {
+			sb.WriteString("\n## Knowledge Rules\n\nRelevant rules and facts from knowledge graph:\n")
+			for _, e := range kgEntities {
+				desc := e.Description
+				if desc == "" {
+					desc = e.Name
+				}
+				sb.WriteString("- ")
+				if e.EntityType != "" {
+					sb.WriteString("[")
+					sb.WriteString(e.EntityType)
+					sb.WriteString("] ")
+				}
+				sb.WriteString(desc)
+				sb.WriteString("\n")
+				injected++
+			}
+		}
 	}
 
 	result := &InjectResult{
